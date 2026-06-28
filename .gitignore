@@ -1,0 +1,17 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.DS_Store
+Thumbs.db
+
+# Keep generated/private inputs out of Git by default.
+data/resumes/*
+!data/resumes/.gitkeep
