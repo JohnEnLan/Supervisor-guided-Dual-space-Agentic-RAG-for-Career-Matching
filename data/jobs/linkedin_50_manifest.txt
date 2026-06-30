@@ -1,0 +1,5 @@
+Source: Kaggle dataset arshkon/linkedin-job-postings
+Full dataset location: C:/Users/WIN11/Desktop/????_birmingham/dataset
+Sample rule: first 50 postings sorted by job_id with non-empty title and description
+Main file: linkedin_postings_50.csv
+Related files: linkedin_job_skills_50.csv, linkedin_job_industries_50.csv, linkedin_salaries_50.csv, linkedin_benefits_50.csv

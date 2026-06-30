@@ -1,0 +1,39 @@
+﻿job_id,inferred,type
+112576855,1,Medical insurance
+112576855,1,Dental insurance
+112576855,1,Disability insurance
+231010577,1,401(k)
+117675818,1,Medical insurance
+95428182,1,Medical insurance
+95428182,1,Dental insurance
+95428182,1,Disability insurance
+56482768,1,401(k)
+56482768,1,Dental insurance
+56482768,1,Disability insurance
+23221523,1,401(k)
+227832999,1,401(k)
+368586246,1,Vision insurance
+368586246,1,401(k)
+111513530,0,Medical insurance
+111513530,0,Paid maternity leave
+111513530,0,Pension plan
+111513530,0,Paid paternity leave
+111513530,0,Dental insurance
+111513530,0,Vision insurance
+263583866,0,Medical insurance
+263583866,0,Vision insurance
+263583866,0,Dental insurance
+263583866,0,401(k)
+263583866,0,Tuition assistance
+136743465,0,Medical insurance
+658723396,1,Medical insurance
+658723396,1,Dental insurance
+658723396,1,Vision insurance
+658723396,1,401(k)
+69333422,0,Medical insurance
+69333422,0,Vision insurance
+69333422,0,Dental insurance
+69333422,0,401(k)
+229924287,0,Medical insurance
+229924287,0,Dental insurance
+229924287,0,Vision insurance
