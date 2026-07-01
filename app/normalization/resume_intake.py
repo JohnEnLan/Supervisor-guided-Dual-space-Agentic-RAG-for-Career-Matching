@@ -302,7 +302,6 @@ async def intake_resume(
     state = SharedState(session_id=session_id, user_id=user_id, resume_state=resume_state)
     if save_to_db:
         await save_state(state, status="resume_normalized")
-        await close_pool()
     return ResumeIntakeResult(state=state, raw_text=raw_text, extracted_pages=page_count)
 
 
@@ -321,6 +320,18 @@ def _write_json(path: Path, result: ResumeIntakeResult) -> None:
     )
 
 
+async def _run_cli(args: argparse.Namespace) -> ResumeIntakeResult:
+    try:
+        return await intake_resume(
+            args.resume_path,
+            session_id=args.session_id,
+            user_id=args.user_id,
+            save_to_db=args.save_state,
+        )
+    finally:
+        await close_pool()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Normalize a resume into SharedState.resume_state.")
     parser.add_argument("resume_path", type=Path)
@@ -330,14 +341,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    result = asyncio.run(
-        intake_resume(
-            args.resume_path,
-            session_id=args.session_id,
-            user_id=args.user_id,
-            save_to_db=args.save_state,
-        )
-    )
+    result = asyncio.run(_run_cli(args))
 
     output = args.output
     if output is not None:
