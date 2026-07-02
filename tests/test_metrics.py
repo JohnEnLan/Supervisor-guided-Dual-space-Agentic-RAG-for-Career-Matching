@@ -1,0 +1,150 @@
+from app.evaluation.metrics import (
+    compare_latent_space_runs,
+    compare_retrieval_runs,
+    evaluate_explanation_faithfulness,
+    evaluate_hard_filter_accuracy,
+    evaluate_rankings,
+)
+
+
+def test_evaluate_rankings_computes_top_k_metrics():
+    labels = [
+        {"case_id": "eval-1", "relevant_job_ids": ["a", "b"]},
+        {"case_id": "eval-2", "relevant_job_ids": ["d"]},
+    ]
+    rankings = {
+        "eval-1": ["x", "a", "b"],
+        "eval-2": ["d", "z"],
+    }
+
+    metrics = evaluate_rankings(labels, rankings, k=2)
+
+    assert metrics["cases"] == 2
+    assert metrics["precision@2"] == 0.5
+    assert metrics["recall@2"] == 0.75
+    assert metrics["mrr@2"] == 0.75
+    assert 0.0 < metrics["ndcg@2"] <= 1.0
+
+
+def test_compare_retrieval_runs_reports_no_raptor_vs_with_raptor_delta():
+    labels = [
+        {"case_id": "eval-1", "relevant_job_ids": ["a"]},
+        {"case_id": "eval-2", "relevant_job_ids": ["d"]},
+    ]
+    no_raptor = {
+        "eval-1": ["x", "a"],
+        "eval-2": ["z", "y"],
+    }
+    with_raptor = {
+        "eval-1": ["a", "x"],
+        "eval-2": ["d", "z"],
+    }
+
+    comparison = compare_retrieval_runs(labels, no_raptor, with_raptor, k=2)
+
+    assert comparison["k"] == 2
+    assert comparison["with_raptor"]["recall@2"] > comparison["no_raptor"]["recall@2"]
+    assert comparison["delta"]["mrr@2"] > 0
+
+
+def test_evaluate_hard_filter_accuracy_checks_candidate_metadata():
+    cases = [
+        {
+            "case_id": "eval-1",
+            "hard_constraints": {"locations": ["London"], "max_years_exp": 2},
+        },
+        {
+            "case_id": "eval-2",
+            "hard_constraints": {"need_visa_sponsor": True},
+        },
+    ]
+    candidates = {
+        "eval-1": [
+            {"job_id": "a", "location": "London", "min_years_exp": 1},
+            {"job_id": "b", "location": "Paris", "min_years_exp": 1},
+        ],
+        "eval-2": [
+            {"job_id": "c", "visa_sponsor": True},
+            {"job_id": "d", "visa_sponsor": False},
+        ],
+    }
+
+    metrics = evaluate_hard_filter_accuracy(cases, candidates)
+
+    assert metrics == {
+        "checked_candidates": 4,
+        "hard_filter_passed": 2,
+        "hard_filter_accuracy": 0.5,
+    }
+
+
+def test_evaluate_explanation_faithfulness_requires_known_evidence_ids():
+    rows = [
+        {
+            "case_id": "eval-1",
+            "available_evidence_span_ids": ["job-1:skills:1", "job-1:resp:2"],
+            "recommended_roles": [
+                {
+                    "job_id": "job-1",
+                    "match_explanation": "Python skills match.",
+                    "evidence_span_ids": ["job-1:skills:1"],
+                }
+            ],
+        },
+        {
+            "case_id": "eval-2",
+            "available_evidence_span_ids": ["job-2:skills:1"],
+            "recommended_roles": [
+                {
+                    "job_id": "job-2",
+                    "match_explanation": "Unsupported claim.",
+                    "evidence_span_ids": ["missing"],
+                }
+            ],
+        },
+    ]
+
+    metrics = evaluate_explanation_faithfulness(rows)
+
+    assert metrics == {
+        "checked_explanations": 2,
+        "faithful_explanations": 1,
+        "explanation_faithfulness": 0.5,
+    }
+
+
+def test_compare_latent_space_runs_reports_metric_delta_and_qualitative_counts():
+    labels = [
+        {"case_id": "eval-1", "relevant_job_ids": ["a"]},
+        {"case_id": "eval-2", "relevant_job_ids": ["d"]},
+        {"case_id": "eval-3", "relevant_job_ids": ["g"]},
+    ]
+    no_latent = {
+        "eval-1": ["x", "a"],
+        "eval-2": ["d", "z"],
+        "eval-3": ["g", "h"],
+    }
+    with_latent = {
+        "eval-1": ["a", "x"],
+        "eval-2": ["z", "d"],
+        "eval-3": ["g", "h"],
+    }
+
+    comparison = compare_latent_space_runs(
+        labels,
+        no_latent,
+        with_latent,
+        k=2,
+        case_notes={
+            "eval-1": "Latent memory promoted analyst trajectory.",
+            "eval-2": "Latent preference over-weighted adjacent role.",
+        },
+    )
+
+    assert comparison["k"] == 2
+    assert comparison["qualitative_counts"] == {
+        "improved": 1,
+        "regressed": 1,
+        "unchanged": 1,
+    }
+    assert comparison["case_notes"]["eval-1"].startswith("Latent memory")

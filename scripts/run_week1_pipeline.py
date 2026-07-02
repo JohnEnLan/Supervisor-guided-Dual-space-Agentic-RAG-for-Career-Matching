@@ -16,6 +16,7 @@ from app.db.pool import close_pool
 from app.db.state_store import save_state as save_shared_state
 from app.normalization.resume_intake import ResumeIntakeResult, intake_resume
 from app.retrieval.hybrid_search import JobCandidate, hybrid_search
+from app.retrieval.query_builder import build_resume_retrieval_query
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,13 @@ def _write_retrieval_state(result: ResumeIntakeResult, candidates: list[JobCandi
             {
                 "job_id": candidate.job_id,
                 "score": candidate.score,
+                "rrf_score": candidate.rrf_score,
+                "bm25_score": candidate.bm25_score,
+                "dense_score": candidate.dense_score,
+                "raptor_score": candidate.raptor_score,
+                "field_bonus": candidate.field_bonus,
+                "sources": list(candidate.sources),
+                "evidence_span_ids": list(candidate.evidence_span_ids),
             }
         )
         for evidence_id in candidate.evidence_span_ids:
@@ -74,7 +82,7 @@ async def run_pipeline(
             user_id=user_id,
             save_to_db=save_state,
         )
-        query = resume_result.state.resume_state.normalized_base_resume.strip()
+        query = build_resume_retrieval_query(resume_result.state.resume_state).text.strip()
         if not query:
             raise ValueError("Resume normalization returned an empty normalized_base_resume")
 
@@ -111,13 +119,21 @@ def format_result(result: Week1PipelineResult) -> str:
         resume_state.normalized_base_resume[:700],
         "",
         "Top-K matches",
-        "rank\tjob_id\tscore\ttitle\tcompany\tlocation\tevidence",
+        (
+            "rank\tjob_id\tscore\trrf\tbm25\tdense\traptor\tfield_bonus\tsources\t"
+            "title\tcompany\tlocation\tevidence"
+        ),
     ]
 
     for rank, candidate in enumerate(result.candidates, start=1):
         evidence = ",".join(candidate.evidence_span_ids)
+        sources = ",".join(candidate.sources)
         lines.append(
             f"{rank}\t{candidate.job_id}\t{candidate.score:.6f}\t"
+            f"{candidate.rrf_score:.6f}\t{candidate.bm25_score:.6f}\t"
+            f"{candidate.dense_score:.6f}\t{candidate.raptor_score:.6f}\t"
+            f"{candidate.field_bonus:.6f}\t"
+            f"{sources}\t"
             f"{candidate.title or ''}\t{candidate.company or ''}\t"
             f"{candidate.location or ''}\t{evidence}"
         )

@@ -9,7 +9,7 @@ os.environ.setdefault("QWEN_API_KEY", "sk-test")
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_normalizes_resume_then_searches_with_base_resume(monkeypatch):
+async def test_run_pipeline_normalizes_resume_then_searches_with_structured_query(monkeypatch):
     from app.retrieval.hybrid_search import JobCandidate
     from app.state.schema import ResumeState, SharedState
     from app.normalization.resume_intake import ResumeIntakeResult
@@ -29,6 +29,13 @@ async def test_run_pipeline_normalizes_resume_then_searches_with_base_resume(mon
             user_id=user_id,
             resume_state=ResumeState(
                 normalized_base_resume="python data analyst internship query",
+                skills=["Python", "SQL"],
+                experience=[
+                    {
+                        "title": "Data Analyst Intern",
+                        "responsibilities": ["Built SQL dashboards"],
+                    }
+                ],
                 original_evidence_spans=[{"span_id": "R001", "text": "Python"}],
             ),
         )
@@ -49,6 +56,11 @@ async def test_run_pipeline_normalizes_resume_then_searches_with_base_resume(mon
                 company="Example Co",
                 location="Birmingham",
                 evidence_span_ids=["job-1:skills:1"],
+                rrf_score=0.031,
+                bm25_score=0.42,
+                dense_score=0.88,
+                field_bonus=0.06,
+                sources=["bm25", "dense"],
             )
         ]
 
@@ -81,17 +93,27 @@ async def test_run_pipeline_normalizes_resume_then_searches_with_base_resume(mon
 
     assert calls["intake"]["path"] == Path("resume.pdf")
     assert calls["intake"]["save_to_db"] is True
-    assert calls["search"] == {
-        "query": "python data analyst internship query",
-        "hard_constraints": {"location": "Birmingham"},
-        "soft_prefs": {"title_keywords": ["analyst"]},
-        "top_k": 3,
-    }
+    assert calls["search"]["hard_constraints"] == {"location": "Birmingham"}
+    assert calls["search"]["soft_prefs"] == {"title_keywords": ["analyst"]}
+    assert calls["search"]["top_k"] == 3
+    assert "Summary: python data analyst internship query" in calls["search"]["query"]
+    assert "Skills: Python; SQL" in calls["search"]["query"]
+    assert "Experience: Data Analyst Intern" in calls["search"]["query"]
     assert calls["closed"] is True
     assert result.candidates[0].job_id == "job-1"
     assert result.resume_result.state.retrieval_state.candidate_job_ids == ["job-1"]
     assert result.resume_result.state.retrieval_state.ranking_scores == [
-        {"job_id": "job-1", "score": 0.91}
+        {
+            "job_id": "job-1",
+            "score": 0.91,
+            "rrf_score": 0.031,
+            "bm25_score": 0.42,
+            "dense_score": 0.88,
+            "raptor_score": 0.0,
+            "field_bonus": 0.06,
+            "sources": ["bm25", "dense"],
+            "evidence_span_ids": ["job-1:skills:1"],
+        }
     ]
     assert result.resume_result.state.retrieval_state.evidence_span_ids == [
         "job-1:skills:1"
@@ -100,7 +122,19 @@ async def test_run_pipeline_normalizes_resume_then_searches_with_base_resume(mon
         "session_id": "s1",
         "status": "retrieval_done",
         "candidate_job_ids": ["job-1"],
-        "ranking_scores": [{"job_id": "job-1", "score": 0.91}],
+        "ranking_scores": [
+            {
+                "job_id": "job-1",
+                "score": 0.91,
+                "rrf_score": 0.031,
+                "bm25_score": 0.42,
+                "dense_score": 0.88,
+                "raptor_score": 0.0,
+                "field_bonus": 0.06,
+                "sources": ["bm25", "dense"],
+                "evidence_span_ids": ["job-1:skills:1"],
+            }
+        ],
         "evidence_span_ids": ["job-1:skills:1"],
     }
 

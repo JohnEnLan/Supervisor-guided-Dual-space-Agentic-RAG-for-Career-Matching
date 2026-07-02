@@ -2,6 +2,8 @@
 服务进程不记任何东西，所有"记忆"都在 Postgres 里按 session 隔离。
 """
 import json
+from typing import Any
+
 from app.db.pool import get_pool
 from app.state.schema import SharedState
 
@@ -33,6 +35,18 @@ async def load_state(session_id: str) -> SharedState | None:
     return SharedState.model_validate(json.loads(row["state"]))
 
 
+async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT state, status FROM session_state WHERE session_id = $1",
+            session_id,
+        )
+    if row is None:
+        return None
+    return SharedState.model_validate(json.loads(row["state"])), row["status"]
+
+
 async def get_status(session_id: str) -> str | None:
     """前端轮询用。"""
     pool = await get_pool()
@@ -41,3 +55,45 @@ async def get_status(session_id: str) -> str | None:
             "SELECT status FROM session_state WHERE session_id = $1", session_id
         )
     return row["status"] if row else None
+
+
+async def add_feedback(
+    *,
+    session_id: str,
+    job_id: str,
+    outcome: str,
+    reason: str | None = None,
+    user_rating: int | None = None,
+) -> int:
+    state_with_status = await load_state_with_status(session_id)
+    if state_with_status is None:
+        raise KeyError(session_id)
+
+    state, status = state_with_status
+    payload: dict[str, Any] = {
+        "job_id": job_id,
+        "outcome": outcome,
+        "reason": reason,
+        "user_rating": user_rating,
+    }
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO feedback_memory (user_id, job_id, outcome, reason, user_rating)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING feedback_id
+            """,
+            state.user_id,
+            job_id,
+            outcome,
+            reason,
+            user_rating,
+        )
+
+    feedback_id = int(row["feedback_id"])
+    payload["feedback_id"] = feedback_id
+    state.feedback_state.user_feedback.append(payload)
+    await save_state(state, status=status or "feedback_recorded")
+    return feedback_id

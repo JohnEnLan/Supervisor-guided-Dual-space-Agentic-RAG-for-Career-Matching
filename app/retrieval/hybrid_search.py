@@ -4,13 +4,15 @@ import argparse
 import asyncio
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from typing import Any
 
 from app.config import settings
 from app.db.pool import close_pool, get_pool
 from app.db.state_store import load_state
 from app.llm.qwen_embed import embed_one
+from app.retrieval.query_builder import build_resume_retrieval_query
+from app.retrieval.raptor import search_raptor_nodes
 from app.retrieval.rrf import rrf_fuse
 
 
@@ -75,12 +77,21 @@ BM25_STOPWORDS = {
     "zhang",
 }
 
+FIELD_AWARE_BONUS = {
+    "required_skills": 0.06,
+    "responsibilities": 0.04,
+    "nice_to_have": 0.025,
+    "metadata": 0.02,
+}
+MAX_FIELD_BONUS = 0.08
+
 
 @dataclass(frozen=True)
 class ChunkHit:
     job_id: str
     chunk_id: str
     score: float
+    field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +99,7 @@ class JobRank:
     job_id: str
     score: float
     evidence_span_ids: list[str]
+    evidence_fields: list[str]
 
 
 @dataclass(frozen=True)
@@ -98,6 +110,12 @@ class JobCandidate:
     title: str | None = None
     company: str | None = None
     location: str | None = None
+    rrf_score: float = 0.0
+    bm25_score: float = 0.0
+    dense_score: float = 0.0
+    raptor_score: float = 0.0
+    field_bonus: float = 0.0
+    sources: list[str] = dataclass_field(default_factory=list)
 
 
 def _build_hard_filter_query(hard_constraints: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -165,6 +183,7 @@ async def _bm25(pool, query: str, allow_ids: list[str], k: int) -> list[ChunkHit
             )
             SELECT chunk_id,
                    job_id,
+                   field,
                    ts_rank_cd(tsv, bm25_query.tsq) AS score
             FROM job_chunks, bm25_query
             WHERE job_id = ANY($2::text[])
@@ -181,6 +200,7 @@ async def _bm25(pool, query: str, allow_ids: list[str], k: int) -> list[ChunkHit
             job_id=str(row["job_id"]),
             chunk_id=str(row["chunk_id"]),
             score=float(row["score"] or 0.0),
+            field=row["field"],
         )
         for row in rows
     ]
@@ -223,6 +243,7 @@ async def _dense(pool, query: str, allow_ids: list[str], k: int) -> list[ChunkHi
             """
             SELECT chunk_id,
                    job_id,
+                   field,
                    1 - (embedding <=> $1::vector) AS score
             FROM job_chunks
             WHERE job_id = ANY($2::text[])
@@ -239,6 +260,7 @@ async def _dense(pool, query: str, allow_ids: list[str], k: int) -> list[ChunkHi
             job_id=str(row["job_id"]),
             chunk_id=str(row["chunk_id"]),
             score=float(row["score"] or 0.0),
+            field=row["field"],
         )
         for row in rows
     ]
@@ -255,11 +277,15 @@ def _collapse_chunk_hits(
     for job_id, job_hits in grouped.items():
         ordered_hits = sorted(job_hits, key=lambda item: item.score, reverse=True)
         evidence_ids = [hit.chunk_id for hit in ordered_hits[:max_evidence_per_job]]
+        evidence_fields = [
+            hit.field for hit in ordered_hits[:max_evidence_per_job] if hit.field
+        ]
         ranks.append(
             JobRank(
                 job_id=job_id,
                 score=ordered_hits[0].score,
                 evidence_span_ids=evidence_ids,
+                evidence_fields=evidence_fields,
             )
         )
     return sorted(ranks, key=lambda item: item.score, reverse=True)
@@ -308,20 +334,31 @@ def _rerank_candidates(
     metadata_by_job: dict[str, dict[str, Any]],
     soft_prefs: dict[str, Any],
     top_k: int,
+    field_bonus_by_job: dict[str, float] | None = None,
+    raptor_by_job: dict[str, float] | None = None,
 ) -> list[JobCandidate]:
     rrf_by_job = dict(fused)
     normalised_rrf = _normalise_scores(rrf_by_job)
     normalised_bm25 = _normalise_scores(bm25_by_job)
     normalised_dense = _normalise_scores(dense_by_job)
+    raptor_by_job = raptor_by_job or {}
+    normalised_raptor = _normalise_scores(raptor_by_job)
+    field_bonus_by_job = field_bonus_by_job or {}
 
     candidates: list[JobCandidate] = []
     for job_id, _rrf_score in fused:
         metadata = metadata_by_job.get(job_id, {})
+        field_bonus = field_bonus_by_job.get(job_id, 0.0)
+        semantic_score = max(
+            normalised_dense.get(job_id, 0.0),
+            normalised_raptor.get(job_id, 0.0),
+        )
         score = (
             0.30 * normalised_rrf.get(job_id, 0.0)
             + 0.10 * normalised_bm25.get(job_id, 0.0)
-            + 0.60 * normalised_dense.get(job_id, 0.0)
+            + 0.60 * semantic_score
             + _soft_preference_bonus(metadata, soft_prefs)
+            + field_bonus
         )
         candidates.append(
             JobCandidate(
@@ -331,10 +368,35 @@ def _rerank_candidates(
                 title=metadata.get("title"),
                 company=metadata.get("company"),
                 location=metadata.get("location"),
+                rrf_score=round(rrf_by_job.get(job_id, 0.0), 6),
+                bm25_score=round(bm25_by_job.get(job_id, 0.0), 6),
+                dense_score=round(dense_by_job.get(job_id, 0.0), 6),
+                raptor_score=round(raptor_by_job.get(job_id, 0.0), 6),
+                field_bonus=round(field_bonus, 6),
+                sources=_sources_for_job(
+                    job_id, bm25_by_job, dense_by_job, raptor_by_job
+                ),
             )
         )
 
     return sorted(candidates, key=lambda item: item.score, reverse=True)[:top_k]
+
+
+def _sources_for_job(
+    job_id: str,
+    bm25_by_job: dict[str, float],
+    dense_by_job: dict[str, float],
+    raptor_by_job: dict[str, float] | None = None,
+) -> list[str]:
+    raptor_by_job = raptor_by_job or {}
+    sources = []
+    if bm25_by_job.get(job_id, 0.0) > 0:
+        sources.append("bm25")
+    if dense_by_job.get(job_id, 0.0) > 0:
+        sources.append("dense")
+    if raptor_by_job.get(job_id, 0.0) > 0:
+        sources.append("raptor")
+    return sources
 
 
 def _rank_list(ranks: list[JobRank]) -> list[tuple[str, float]]:
@@ -349,6 +411,7 @@ def _merge_evidence(
     job_ids: list[str],
     dense_ranks: list[JobRank],
     bm25_ranks: list[JobRank],
+    raptor_ranks: list[JobRank] | None = None,
     max_evidence_per_job: int = 4,
 ) -> dict[str, list[str]]:
     evidence_by_job: dict[str, list[str]] = {job_id: [] for job_id in job_ids}
@@ -356,6 +419,10 @@ def _merge_evidence(
         {rank.job_id: rank.evidence_span_ids for rank in dense_ranks},
         {rank.job_id: rank.evidence_span_ids for rank in bm25_ranks},
     ]
+    if raptor_ranks:
+        ranks_by_source.append(
+            {rank.job_id: rank.evidence_span_ids for rank in raptor_ranks}
+        )
 
     for job_id in job_ids:
         seen: set[str] = set()
@@ -369,6 +436,44 @@ def _merge_evidence(
             if len(evidence_by_job[job_id]) >= max_evidence_per_job:
                 break
     return evidence_by_job
+
+
+def _merge_evidence_fields(
+    job_ids: list[str],
+    dense_ranks: list[JobRank],
+    bm25_ranks: list[JobRank],
+    raptor_ranks: list[JobRank] | None = None,
+    max_fields_per_job: int = 4,
+) -> dict[str, list[str]]:
+    fields_by_job: dict[str, list[str]] = {job_id: [] for job_id in job_ids}
+    ranks_by_source = [
+        {rank.job_id: rank.evidence_fields for rank in dense_ranks},
+        {rank.job_id: rank.evidence_fields for rank in bm25_ranks},
+    ]
+    if raptor_ranks:
+        ranks_by_source.append(
+            {rank.job_id: rank.evidence_fields for rank in raptor_ranks}
+        )
+
+    for job_id in job_ids:
+        seen: set[str] = set()
+        for source in ranks_by_source:
+            for field_name in source.get(job_id, []):
+                if field_name not in seen:
+                    fields_by_job[job_id].append(field_name)
+                    seen.add(field_name)
+                if len(fields_by_job[job_id]) >= max_fields_per_job:
+                    break
+            if len(fields_by_job[job_id]) >= max_fields_per_job:
+                break
+    return fields_by_job
+
+
+def _field_bonus_from_evidence_fields(fields: list[str]) -> float:
+    bonus = 0.0
+    for field_name in set(fields):
+        bonus += FIELD_AWARE_BONUS.get(field_name, 0.0)
+    return min(round(bonus, 6), MAX_FIELD_BONUS)
 
 
 async def _fetch_job_metadata(
@@ -394,6 +499,7 @@ async def hybrid_search(
     hard_constraints: dict[str, Any] | None = None,
     soft_prefs: dict[str, Any] | None = None,
     top_k: int = 20,
+    include_raptor: bool = False,
 ) -> list[JobCandidate]:
     if not query.strip():
         return []
@@ -407,20 +513,55 @@ async def hybrid_search(
     if not allow_ids:
         return []
 
-    bm25_hits, dense_hits = await asyncio.gather(
-        _bm25(pool, query, allow_ids, recall_k),
-        _dense(pool, query, allow_ids, recall_k),
-    )
+    raptor_hits: list[ChunkHit] = []
+    if include_raptor:
+        bm25_hits, dense_hits, raptor_node_hits = await asyncio.gather(
+            _bm25(pool, query, allow_ids, recall_k),
+            _dense(pool, query, allow_ids, recall_k),
+            search_raptor_nodes(
+                pool,
+                query=query,
+                allow_ids=allow_ids,
+                top_k=recall_k,
+            ),
+        )
+        raptor_hits = [
+            ChunkHit(
+                job_id=hit.job_id,
+                chunk_id=hit.node_id,
+                score=hit.score,
+                field=hit.node_type,
+            )
+            for hit in raptor_node_hits
+        ]
+    else:
+        bm25_hits, dense_hits = await asyncio.gather(
+            _bm25(pool, query, allow_ids, recall_k),
+            _dense(pool, query, allow_ids, recall_k),
+        )
 
     bm25_ranks = _collapse_chunk_hits(bm25_hits)
     dense_ranks = _collapse_chunk_hits(dense_hits)
-    fused = rrf_fuse([_rank_list(bm25_ranks), _rank_list(dense_ranks)])
+    raptor_ranks = _collapse_chunk_hits(raptor_hits)
+    rank_lists = [_rank_list(bm25_ranks), _rank_list(dense_ranks)]
+    if raptor_ranks:
+        rank_lists.append(_rank_list(raptor_ranks))
+    fused = rrf_fuse(rank_lists)
     if not fused:
         return []
 
     candidate_ids = [job_id for job_id, _score in fused[: max(top_k * 3, top_k)]]
     metadata_by_job = await _fetch_job_metadata(pool, candidate_ids)
-    evidence_by_job = _merge_evidence(candidate_ids, dense_ranks, bm25_ranks)
+    evidence_by_job = _merge_evidence(
+        candidate_ids, dense_ranks, bm25_ranks, raptor_ranks
+    )
+    evidence_fields_by_job = _merge_evidence_fields(
+        candidate_ids, dense_ranks, bm25_ranks, raptor_ranks
+    )
+    field_bonus_by_job = {
+        job_id: _field_bonus_from_evidence_fields(fields)
+        for job_id, fields in evidence_fields_by_job.items()
+    }
 
     return _rerank_candidates(
         fused=fused,
@@ -430,6 +571,8 @@ async def hybrid_search(
         metadata_by_job=metadata_by_job,
         soft_prefs=soft_prefs,
         top_k=top_k,
+        field_bonus_by_job=field_bonus_by_job,
+        raptor_by_job=_score_by_job(raptor_ranks),
     )
 
 
@@ -438,7 +581,7 @@ async def _query_from_session(session_id: str) -> str:
     if state is None:
         raise ValueError(f"No session_state row found for session_id={session_id!r}")
 
-    query = state.resume_state.normalized_base_resume.strip()
+    query = build_resume_retrieval_query(state.resume_state).text.strip()
     if not query:
         raise ValueError(
             f"session_id={session_id!r} has no normalized_base_resume"
@@ -456,11 +599,19 @@ def _parse_json_arg(raw: str | None) -> dict[str, Any]:
 
 
 def _print_candidates(candidates: list[JobCandidate]) -> None:
-    print("rank\tjob_id\tscore\ttitle\tcompany\tlocation\tevidence")
+    print(
+        "rank\tjob_id\tscore\trrf\tbm25\tdense\traptor\tfield_bonus\tsources\t"
+        "title\tcompany\tlocation\tevidence"
+    )
     for rank, candidate in enumerate(candidates, start=1):
         evidence = ",".join(candidate.evidence_span_ids)
+        sources = ",".join(candidate.sources)
         print(
             f"{rank}\t{candidate.job_id}\t{candidate.score:.6f}\t"
+            f"{candidate.rrf_score:.6f}\t{candidate.bm25_score:.6f}\t"
+            f"{candidate.dense_score:.6f}\t{candidate.raptor_score:.6f}\t"
+            f"{candidate.field_bonus:.6f}\t"
+            f"{sources}\t"
             f"{candidate.title or ''}\t{candidate.company or ''}\t"
             f"{candidate.location or ''}\t{evidence}"
         )
@@ -479,6 +630,7 @@ async def _main_async(args: argparse.Namespace) -> None:
             hard_constraints=_parse_json_arg(args.hard_constraints),
             soft_prefs=_parse_json_arg(args.soft_prefs),
             top_k=args.top_k,
+            include_raptor=args.include_raptor,
         )
         _print_candidates(candidates)
     finally:
@@ -495,6 +647,11 @@ def main() -> None:
         help="Load resume_state.normalized_base_resume from session_state.",
     )
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument(
+        "--include-raptor",
+        action="store_true",
+        help="Add RAPTOR-lite summary-node recall as a third retrieval source.",
+    )
     parser.add_argument("--hard-constraints", help="JSON object for SQL hard filters.")
     parser.add_argument("--soft-prefs", help="JSON object for ranking preferences.")
     args = parser.parse_args()

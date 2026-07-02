@@ -29,9 +29,24 @@ def test_build_hard_filter_query_uses_parameterized_sql():
 
 def test_collapse_chunk_hits_keeps_best_job_score_and_evidence_order():
     hits = [
-        hs.ChunkHit(job_id="job-1", chunk_id="job-1:weak", score=0.2),
-        hs.ChunkHit(job_id="job-2", chunk_id="job-2:only", score=0.5),
-        hs.ChunkHit(job_id="job-1", chunk_id="job-1:strong", score=0.9),
+        hs.ChunkHit(
+            job_id="job-1",
+            chunk_id="job-1:weak",
+            score=0.2,
+            field="responsibilities",
+        ),
+        hs.ChunkHit(
+            job_id="job-2",
+            chunk_id="job-2:only",
+            score=0.5,
+            field="summary",
+        ),
+        hs.ChunkHit(
+            job_id="job-1",
+            chunk_id="job-1:strong",
+            score=0.9,
+            field="required_skills",
+        ),
     ]
 
     collapsed = hs._collapse_chunk_hits(hits, max_evidence_per_job=2)
@@ -39,7 +54,9 @@ def test_collapse_chunk_hits_keeps_best_job_score_and_evidence_order():
     assert [item.job_id for item in collapsed] == ["job-1", "job-2"]
     assert collapsed[0].score == 0.9
     assert collapsed[0].evidence_span_ids == ["job-1:strong", "job-1:weak"]
+    assert collapsed[0].evidence_fields == ["required_skills", "responsibilities"]
     assert collapsed[1].evidence_span_ids == ["job-2:only"]
+    assert collapsed[1].evidence_fields == ["summary"]
 
 
 def test_prepare_bm25_tsquery_uses_or_keywords_for_long_resume_query():
@@ -80,3 +97,73 @@ def test_rerank_candidates_promotes_dense_bi_encoder_match():
     assert [candidate.job_id for candidate in candidates] == ["job-2", "job-1"]
     assert candidates[0].score > candidates[1].score
     assert candidates[0].evidence_span_ids == ["job-2:responsibilities"]
+    assert candidates[0].rrf_score == 0.033
+    assert candidates[0].bm25_score == 0.1
+    assert candidates[0].dense_score == 0.9
+    assert candidates[0].raptor_score == 0.0
+    assert candidates[0].sources == ["bm25", "dense"]
+
+
+def test_rerank_candidates_applies_field_aware_bonus():
+    candidates = hs._rerank_candidates(
+        fused=[("job-skills", 0.03), ("job-summary", 0.03)],
+        bm25_by_job={"job-skills": 0.5, "job-summary": 0.5},
+        dense_by_job={"job-skills": 0.5, "job-summary": 0.5},
+        evidence_by_job={
+            "job-skills": ["job-skills:required_skills:1"],
+            "job-summary": ["job-summary:summary:1"],
+        },
+        metadata_by_job={
+            "job-skills": {
+                "title": "Software Engineer",
+                "company": "A",
+                "location": "London",
+            },
+            "job-summary": {
+                "title": "General Assistant",
+                "company": "B",
+                "location": "London",
+            },
+        },
+        soft_prefs={},
+        top_k=2,
+        field_bonus_by_job={"job-skills": 0.06, "job-summary": 0.0},
+    )
+
+    assert [candidate.job_id for candidate in candidates] == [
+        "job-skills",
+        "job-summary",
+    ]
+    assert candidates[0].field_bonus == 0.06
+    assert candidates[0].score > candidates[1].score
+
+
+def test_rerank_candidates_tracks_raptor_recall_source():
+    candidates = hs._rerank_candidates(
+        fused=[("job-raptor", 0.04), ("job-dense", 0.03)],
+        bm25_by_job={},
+        dense_by_job={"job-dense": 0.8},
+        raptor_by_job={"job-raptor": 0.9},
+        evidence_by_job={
+            "job-raptor": ["role:software_engineering"],
+            "job-dense": ["job-dense:responsibilities:1"],
+        },
+        metadata_by_job={
+            "job-raptor": {
+                "title": "Backend Engineer",
+                "company": "A",
+                "location": "London",
+            },
+            "job-dense": {
+                "title": "Support Engineer",
+                "company": "B",
+                "location": "London",
+            },
+        },
+        soft_prefs={},
+        top_k=2,
+    )
+
+    assert candidates[0].job_id == "job-raptor"
+    assert candidates[0].raptor_score == 0.9
+    assert candidates[0].sources == ["raptor"]

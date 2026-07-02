@@ -39,6 +39,30 @@ CREATE INDEX IF NOT EXISTS idx_job_chunks_hnsw
 CREATE INDEX IF NOT EXISTS idx_job_chunks_tsv
     ON job_chunks USING gin (tsv);
 
+-- ========== RAPTOR-lite summary nodes (optional P2 / ablation layer) ==========
+CREATE TABLE IF NOT EXISTS raptor_nodes (
+    node_id        TEXT PRIMARY KEY,
+    node_type      TEXT NOT NULL CHECK (node_type IN ('job_summary', 'role_summary')),
+    parent_id      TEXT,
+    role_cluster   TEXT,
+    job_id         TEXT REFERENCES jobs(job_id),
+    title          TEXT,
+    content        TEXT NOT NULL,
+    source_job_ids TEXT[] NOT NULL DEFAULT '{}',
+    embedding      vector(1024),
+    tsv            tsvector,
+    updated_at     TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_nodes_hnsw
+    ON raptor_nodes USING hnsw (embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_nodes_tsv
+    ON raptor_nodes USING gin (tsv);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_nodes_type_cluster
+    ON raptor_nodes (node_type, role_cluster);
+
 -- 硬过滤常用字段建普通索引，加速 metadata filter
 CREATE INDEX IF NOT EXISTS idx_jobs_filter
     ON jobs (location, visa_sponsor, role_cluster, is_open);

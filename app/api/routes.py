@@ -1,9 +1,203 @@
-"""路由：上传简历 / 提交匹配(返回 session_id) / 查进度(轮询) / 提交反馈。
+from __future__ import annotations
 
-多人并发要点：每个请求带/生成 session_id；匹配是耗时任务，
-提交后立即返回 session_id，后台跑流水线并更新 session_state.status，
-前端轮询 /status/{session_id}。所有状态进 Postgres，进程无状态。
-"""
-from fastapi import APIRouter
+import re
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+
+from app.agents.orchestrator import run_agentic_match_from_state
+from app.db.state_store import (
+    add_feedback,
+    get_status,
+    load_state,
+    load_state_with_status,
+    save_state,
+)
+from app.normalization.resume_intake import intake_resume
+from app.state.schema import SharedState
+
+
 router = APIRouter()
-# TODO(P0): POST /resume  POST /match  GET /status/{sid}  POST /feedback
+UPLOAD_DIR = Path("data/resumes/uploads")
+ALLOWED_RESUME_SUFFIXES = {".pdf", ".docx", ".txt"}
+
+
+class MatchRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    user_goal_text: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=50)
+    include_raptor: bool = False
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    job_id: str = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+    reason: str | None = None
+    user_rating: int | None = Field(default=None, ge=1, le=5)
+
+
+@router.post("/resume", status_code=202)
+async def upload_resume(
+    background_tasks: BackgroundTasks,
+    session_id: str = Form(...),
+    user_id: str = Form(...),
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    resume_path = await _persist_upload(session_id, file)
+    await save_state(
+        SharedState(session_id=session_id, user_id=user_id),
+        status="resume_queued",
+    )
+    background_tasks.add_task(
+        _run_resume_task,
+        session_id=session_id,
+        user_id=user_id,
+        resume_path=resume_path,
+    )
+    return {"session_id": session_id, "status": "resume_queued"}
+
+
+@router.post("/match", status_code=202)
+async def submit_match(
+    request: MatchRequest, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    state = await load_state(request.session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+
+    await save_state(state, status="match_queued")
+    background_tasks.add_task(
+        _run_match_task,
+        session_id=request.session_id,
+        user_goal_text=request.user_goal_text,
+        top_k=request.top_k,
+        include_raptor=request.include_raptor,
+    )
+    return {"session_id": request.session_id, "status": "match_queued"}
+
+
+@router.get("/status/{session_id}")
+async def read_status(session_id: str) -> dict[str, str]:
+    status = await get_status(session_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    return {"session_id": session_id, "status": status}
+
+
+@router.get("/result/{session_id}")
+async def read_result(session_id: str) -> dict:
+    state_with_status = await load_state_with_status(session_id)
+    if state_with_status is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+
+    state, status = state_with_status
+    return {
+        "session_id": session_id,
+        "status": status,
+        "state": state.model_dump(mode="json"),
+    }
+
+
+@router.post("/feedback", status_code=202)
+async def submit_feedback(request: FeedbackRequest) -> dict[str, str | int]:
+    try:
+        feedback_id = await add_feedback(
+            session_id=request.session_id,
+            job_id=request.job_id,
+            outcome=request.outcome,
+            reason=request.reason,
+            user_rating=request.user_rating,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session_id not found") from None
+
+    return {
+        "session_id": request.session_id,
+        "feedback_id": feedback_id,
+        "status": "feedback_recorded",
+    }
+
+
+async def _run_resume_task(*, session_id: str, user_id: str, resume_path: Path) -> None:
+    await save_state(
+        SharedState(session_id=session_id, user_id=user_id),
+        status="resume_running",
+    )
+    try:
+        result = await intake_resume(
+            resume_path,
+            session_id=session_id,
+            user_id=user_id,
+            save_to_db=True,
+        )
+        await save_state(result.state, status="resume_ready")
+    except Exception as exc:  # pragma: no cover - defensive background safety
+        await _record_background_error(
+            session_id=session_id,
+            user_id=user_id,
+            status="resume_error",
+            error=exc,
+        )
+
+
+async def _run_match_task(
+    *, session_id: str, user_goal_text: str, top_k: int, include_raptor: bool
+) -> None:
+    state = await load_state(session_id)
+    if state is None:
+        return
+
+    await save_state(state, status="match_running")
+    try:
+        await run_agentic_match_from_state(
+            state,
+            user_goal_text=user_goal_text,
+            top_k=top_k,
+            include_raptor=include_raptor,
+            persist_state=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive background safety
+        await _record_background_error(
+            session_id=session_id,
+            user_id=state.user_id,
+            status="match_error",
+            error=exc,
+        )
+
+
+async def _record_background_error(
+    *, session_id: str, user_id: str, status: str, error: Exception
+) -> None:
+    state = await load_state(session_id) or SharedState(
+        session_id=session_id,
+        user_id=user_id,
+    )
+    state.supervisor_log.append(
+        {
+            "stage": "api_background_task",
+            "status": status,
+            "error_type": type(error).__name__,
+            "error": str(error)[:500],
+        }
+    )
+    await save_state(state, status=status)
+
+
+async def _persist_upload(session_id: str, file: UploadFile) -> Path:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_RESUME_SUFFIXES:
+        suffix = ".txt"
+
+    path = UPLOAD_DIR / f"{_safe_id(session_id)}{suffix}"
+    content = await file.read()
+    path.write_bytes(content)
+    await file.close()
+    return path
+
+
+def _safe_id(raw: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
+    return safe[:120] or "session"
