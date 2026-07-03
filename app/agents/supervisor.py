@@ -117,10 +117,10 @@ async def final_verification(state: SharedState) -> dict[str, Any]:
     else:
         result["repair_loop_used"] = 0
 
-    if result["needs_reretrieval"] and settings.max_reretrieval_loops > 0:
-        result["reretrieval_loop_used"] = 1
-    else:
-        result["reretrieval_loop_used"] = 0
+    result["reretrieval_loop_requested"] = bool(
+        result["needs_reretrieval"] and settings.max_reretrieval_loops > 0
+    )
+    result["reretrieval_loop_used"] = 0
 
     state.supervisor_log.append({"stage": "final_verification", **result})
     return result

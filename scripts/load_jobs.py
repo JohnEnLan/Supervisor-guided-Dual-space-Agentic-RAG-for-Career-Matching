@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import settings
+from app.db.pool import get_pool
 from app.llm.deepseek import chat
 from app.llm.qwen_embed import embed_texts
 
@@ -242,8 +243,8 @@ def _to_parsed_job(row: dict[str, str], extracted: dict[str, Any]) -> ParsedJob:
 
 
 async def _upsert_jobs(jobs: list[ParsedJob]) -> None:
-    conn = await asyncpg.connect(settings.database_url)
-    try:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         await conn.executemany(
             """
             INSERT INTO jobs (
@@ -291,8 +292,6 @@ async def _upsert_jobs(jobs: list[ParsedJob]) -> None:
                 for job in jobs
             ],
         )
-    finally:
-        await conn.close()
 
 
 def _read_rows(path: Path, limit: int) -> list[dict[str, str]]:
@@ -384,8 +383,8 @@ def _build_chunk_specs(row: asyncpg.Record) -> list[tuple[str, str]]:
 
 
 async def _fetch_jobs_for_chunking(limit: int) -> list[asyncpg.Record]:
-    conn = await asyncpg.connect(settings.database_url)
-    try:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         return await conn.fetch(
             """
             SELECT
@@ -397,8 +396,6 @@ async def _fetch_jobs_for_chunking(limit: int) -> list[asyncpg.Record]:
             """,
             limit,
         )
-    finally:
-        await conn.close()
 
 
 async def _embed_specs(specs: list[tuple[str, str]], batch_size: int) -> list[list[float]]:
@@ -446,8 +443,8 @@ async def build_job_chunks(limit: int, batch_size: int) -> int:
         for (chunk_id, job_id, field, content), embedding in zip(chunk_inputs, embeddings, strict=True)
     ]
 
-    conn = await asyncpg.connect(settings.database_url)
-    try:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(
                 "DELETE FROM job_chunks WHERE job_id = ANY($1::text[])",
@@ -465,8 +462,6 @@ async def build_job_chunks(limit: int, batch_size: int) -> int:
                 """,
                 records,
             )
-    finally:
-        await conn.close()
 
     return len(records)
 

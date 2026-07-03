@@ -43,6 +43,22 @@ async def run_agentic_match_from_state(
     )
     state = await run_strategy_agent(state)
     verification = await final_verification(state)
+    if verification.get("reretrieval_loop_requested"):
+        state.supervisor_log.append(
+            {
+                "stage": "reretrieval_loop",
+                "trigger": "final_verification",
+                "max_loops": 1,
+            }
+        )
+        state = await run_matching_agent(
+            state,
+            retrieval_plan=retrieval_plan,
+            search_fn=search_fn or _default_search_fn,
+        )
+        state = await run_strategy_agent(state)
+        verification = await final_verification(state)
+        verification["reretrieval_loop_used"] = 1
 
     if persist_state:
         await save_state(state, status="agentic_done")

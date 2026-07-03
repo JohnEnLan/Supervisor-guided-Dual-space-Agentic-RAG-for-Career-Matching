@@ -107,6 +107,7 @@ class JobCandidate:
     job_id: str
     score: float
     evidence_span_ids: list[str]
+    evidence_spans: list[dict[str, Any]] = dataclass_field(default_factory=list)
     title: str | None = None
     company: str | None = None
     location: str | None = None
@@ -336,6 +337,7 @@ def _rerank_candidates(
     top_k: int,
     field_bonus_by_job: dict[str, float] | None = None,
     raptor_by_job: dict[str, float] | None = None,
+    evidence_payloads_by_job: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[JobCandidate]:
     rrf_by_job = dict(fused)
     normalised_rrf = _normalise_scores(rrf_by_job)
@@ -344,6 +346,7 @@ def _rerank_candidates(
     raptor_by_job = raptor_by_job or {}
     normalised_raptor = _normalise_scores(raptor_by_job)
     field_bonus_by_job = field_bonus_by_job or {}
+    evidence_payloads_by_job = evidence_payloads_by_job or {}
 
     candidates: list[JobCandidate] = []
     for job_id, _rrf_score in fused:
@@ -365,6 +368,7 @@ def _rerank_candidates(
                 job_id=job_id,
                 score=round(score, 6),
                 evidence_span_ids=evidence_by_job.get(job_id, []),
+                evidence_spans=evidence_payloads_by_job.get(job_id, []),
                 title=metadata.get("title"),
                 company=metadata.get("company"),
                 location=metadata.get("location"),
@@ -494,6 +498,72 @@ async def _fetch_job_metadata(
     return {str(row["job_id"]): dict(row) for row in rows}
 
 
+async def _fetch_evidence_payloads(
+    pool, evidence_by_job: dict[str, list[str]]
+) -> dict[str, list[dict[str, Any]]]:
+    evidence_ids = [
+        evidence_id
+        for ids in evidence_by_job.values()
+        for evidence_id in ids
+        if evidence_id
+    ]
+    if not evidence_ids:
+        return {job_id: [] for job_id in evidence_by_job}
+
+    unique_ids = list(dict.fromkeys(evidence_ids))
+    async with pool.acquire() as conn:
+        chunk_rows = await conn.fetch(
+            """
+            SELECT chunk_id AS evidence_span_id, job_id, field, content
+            FROM job_chunks
+            WHERE chunk_id = ANY($1::text[])
+            """,
+            unique_ids,
+        )
+        raptor_rows = await conn.fetch(
+            """
+            SELECT node_id AS evidence_span_id,
+                   job_id,
+                   node_type AS field,
+                   content,
+                   source_job_ids
+            FROM raptor_nodes
+            WHERE node_id = ANY($1::text[])
+            """,
+            unique_ids,
+        )
+
+    payload_by_id: dict[str, dict[str, Any]] = {}
+    for row in chunk_rows:
+        payload_by_id[str(row["evidence_span_id"])] = {
+            "evidence_span_id": str(row["evidence_span_id"]),
+            "job_id": str(row["job_id"]),
+            "field": row["field"],
+            "content": row["content"],
+            "source": "job_chunk",
+        }
+
+    for row in raptor_rows:
+        evidence_id = str(row["evidence_span_id"])
+        payload_by_id[evidence_id] = {
+            "evidence_span_id": evidence_id,
+            "job_id": str(row["job_id"]) if row["job_id"] else None,
+            "field": row["field"],
+            "content": row["content"],
+            "source": "raptor_node",
+            "source_job_ids": list(row["source_job_ids"] or []),
+        }
+
+    return {
+        job_id: [
+            payload_by_id[evidence_id]
+            for evidence_id in evidence_ids_for_job
+            if evidence_id in payload_by_id
+        ]
+        for job_id, evidence_ids_for_job in evidence_by_job.items()
+    }
+
+
 async def hybrid_search(
     query: str,
     hard_constraints: dict[str, Any] | None = None,
@@ -555,6 +625,7 @@ async def hybrid_search(
     evidence_by_job = _merge_evidence(
         candidate_ids, dense_ranks, bm25_ranks, raptor_ranks
     )
+    evidence_payloads_by_job = await _fetch_evidence_payloads(pool, evidence_by_job)
     evidence_fields_by_job = _merge_evidence_fields(
         candidate_ids, dense_ranks, bm25_ranks, raptor_ranks
     )
@@ -573,6 +644,7 @@ async def hybrid_search(
         top_k=top_k,
         field_bonus_by_job=field_bonus_by_job,
         raptor_by_job=_score_by_job(raptor_ranks),
+        evidence_payloads_by_job=evidence_payloads_by_job,
     )
 
 

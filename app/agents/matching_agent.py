@@ -19,7 +19,7 @@ PHASE_C_MATCHING_AGENT
 You are the Retrieval & Matching Agent in a lightweight Agentic RAG system.
 Given normalized resume context and retrieved job candidates, classify each useful
 candidate into one of: now_fit, stretch_fit, bridge_role.
-Use only provided candidate evidence ids for match explanations.
+Use only provided candidate evidence ids and evidence text for match explanations.
 
 Return strict JSON:
 {
@@ -101,6 +101,7 @@ def _write_retrieval_state(state: SharedState, candidates: list[JobCandidate]) -
                 "field_bonus": candidate.field_bonus,
                 "sources": list(candidate.sources),
                 "evidence_span_ids": list(candidate.evidence_span_ids),
+                "evidence_spans": list(candidate.evidence_spans),
             }
         )
         for evidence_id in candidate.evidence_span_ids:
@@ -120,10 +121,7 @@ def _recommended_role_from_candidate(
     candidate: JobCandidate, llm_role: dict[str, Any] | None
 ) -> dict[str, Any]:
     llm_role = llm_role or {}
-    evidence_span_ids = [
-        str(item)
-        for item in (llm_role.get("evidence_span_ids") or candidate.evidence_span_ids)
-    ]
+    evidence_span_ids = _supported_evidence_ids(candidate, llm_role)
     return {
         "job_id": candidate.job_id,
         "tier": _valid_tier(llm_role.get("tier")),
@@ -133,6 +131,7 @@ def _recommended_role_from_candidate(
         "match_score": candidate.score,
         "match_explanation": llm_role.get("match_explanation") or "",
         "evidence_span_ids": evidence_span_ids,
+        "evidence_spans": _evidence_spans_for_ids(candidate, evidence_span_ids),
         "source_scores": {
             "rrf": candidate.rrf_score,
             "bm25": candidate.bm25_score,
@@ -142,6 +141,29 @@ def _recommended_role_from_candidate(
             "sources": list(candidate.sources),
         },
     }
+
+
+def _supported_evidence_ids(
+    candidate: JobCandidate, llm_role: dict[str, Any]
+) -> list[str]:
+    allowed = set(candidate.evidence_span_ids)
+    requested = [
+        str(item)
+        for item in (llm_role.get("evidence_span_ids") or [])
+        if str(item) in allowed
+    ]
+    return requested or list(candidate.evidence_span_ids)
+
+
+def _evidence_spans_for_ids(
+    candidate: JobCandidate, evidence_span_ids: list[str]
+) -> list[dict[str, Any]]:
+    wanted = set(evidence_span_ids)
+    return [
+        span
+        for span in candidate.evidence_spans
+        if str(span.get("evidence_span_id")) in wanted
+    ]
 
 
 def _valid_tier(value: Any) -> str:
@@ -158,5 +180,6 @@ def _candidate_payload(candidate: JobCandidate) -> dict[str, Any]:
         "location": candidate.location,
         "score": candidate.score,
         "evidence_span_ids": candidate.evidence_span_ids,
+        "evidence_spans": candidate.evidence_spans,
         "sources": candidate.sources,
     }

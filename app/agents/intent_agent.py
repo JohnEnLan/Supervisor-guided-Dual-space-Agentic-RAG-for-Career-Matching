@@ -57,11 +57,15 @@ Do not invent constraints that the user did not state.
 
     def apply(self, state: SharedState, parsed: dict) -> SharedState:
         state.career_state.current_goal = _as_list(parsed.get("current_goal"))
-        state.career_state.long_term_goal = _as_list(parsed.get("long_term_goal"))
+        state.career_state.long_term_goal = _filter_long_term_goal(
+            self.user_goal_text, _as_list(parsed.get("long_term_goal"))
+        )
         state.career_state.hard_constraints = _filter_hard_constraints(
             _as_dict(parsed.get("hard_constraints"))
         )
-        state.career_state.soft_preferences = _as_dict(parsed.get("soft_preferences"))
+        state.career_state.soft_preferences = _filter_soft_preferences(
+            _as_dict(parsed.get("soft_preferences"))
+        )
         state.career_state.avoid_roles = _as_list(parsed.get("avoid_roles"))
         return state
 
@@ -88,6 +92,43 @@ def _filter_hard_constraints(raw: dict[str, Any]) -> dict[str, Any]:
     if "max_years_exp" in cleaned and cleaned["max_years_exp"] is not None:
         cleaned["max_years_exp"] = int(cleaned["max_years_exp"])
     return {key: value for key, value in cleaned.items() if value not in (None, [], "")}
+
+
+def _filter_soft_preferences(raw: dict[str, Any]) -> dict[str, Any]:
+    allowed_list_fields = {
+        "preferred_locations",
+        "preferred_role_clusters",
+        "title_keywords",
+    }
+    cleaned = {
+        key: _as_list(value)
+        for key, value in raw.items()
+        if key in allowed_list_fields
+    }
+    return {key: value for key, value in cleaned.items() if value}
+
+
+def _filter_long_term_goal(user_goal_text: str, values: list[Any]) -> list[Any]:
+    if not _has_explicit_long_term_signal(user_goal_text):
+        return []
+    return values
+
+
+def _has_explicit_long_term_signal(text: str) -> bool:
+    normalized = text.casefold()
+    markers = (
+        "long-term",
+        "long term",
+        "longterm",
+        "future goal",
+        "career goal",
+        "eventually",
+        "in the future",
+        "长期",
+        "长远",
+        "未来",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def _as_list(value: Any) -> list[Any]:
