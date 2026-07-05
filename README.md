@@ -57,7 +57,7 @@ app/
   state/           shared structured state schema
 scripts/           data loading and sample case scripts
 data/              local job, resume, and case data placeholders
-tests/             test suite placeholder
+tests/             regression tests for retrieval, agents, API, memory, evaluation
 ```
 
 ## Setup
@@ -85,5 +85,27 @@ Real credentials must stay in `.env`; `.env` is ignored by Git.
 
 ## Current Status
 
-This is an early scaffold. The priority is to implement one module at a time
-and keep the P0 path runnable before adding optional research extensions.
+The P0 path now has tested modules for resume intake, hybrid retrieval, the
+three-agent workflow, Supervisor verification, persisted orchestration, and
+FastAPI polling routes. State is stored by `session_id` in PostgreSQL.
+
+Start the API locally:
+
+```bash
+uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+```
+
+Minimal API flow:
+
+```bash
+curl -X POST http://127.0.0.1:8000/resume \
+  -F "session_id=s1" \
+  -F "user_id=u1" \
+  -F "file=@data/resumes/sample.txt"
+
+curl -X POST http://127.0.0.1:8000/match \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"s1","user_goal_text":"Find data analyst jobs in Birmingham","top_k":5}'
+
+curl http://127.0.0.1:8000/status/s1
+```

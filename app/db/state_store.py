@@ -47,16 +47,6 @@ async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | N
     return SharedState.model_validate(json.loads(row["state"])), row["status"]
 
 
-async def get_status(session_id: str) -> str | None:
-    """前端轮询用。"""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT status FROM session_state WHERE session_id = $1", session_id
-        )
-    return row["status"] if row else None
-
-
 async def add_feedback(
     *,
     session_id: str,

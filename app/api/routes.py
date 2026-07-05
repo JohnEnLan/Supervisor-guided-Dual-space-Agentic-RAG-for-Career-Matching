@@ -6,15 +6,15 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from app.agents.orchestrator import run_agentic_match_from_state
+from app.agents.orchestrator import run_persisted_agentic_match_from_session
 from app.db.state_store import (
     add_feedback,
-    get_status,
     load_state,
     load_state_with_status,
     save_state,
 )
 from app.normalization.resume_intake import intake_resume
+from app.retrieval.query_builder import build_resume_retrieval_query
 from app.state.schema import SharedState
 
 
@@ -63,9 +63,16 @@ async def upload_resume(
 async def submit_match(
     request: MatchRequest, background_tasks: BackgroundTasks
 ) -> dict[str, str]:
-    state = await load_state(request.session_id)
-    if state is None:
+    state_with_status = await load_state_with_status(request.session_id)
+    if state_with_status is None:
         raise HTTPException(status_code=404, detail="session_id not found")
+
+    state, _status = state_with_status
+    if not _resume_ready_for_matching(state):
+        raise HTTPException(
+            status_code=409,
+            detail="resume is not ready for matching",
+        )
 
     await save_state(state, status="match_queued")
     background_tasks.add_task(
@@ -79,11 +86,20 @@ async def submit_match(
 
 
 @router.get("/status/{session_id}")
-async def read_status(session_id: str) -> dict[str, str]:
-    status = await get_status(session_id)
-    if status is None:
+async def read_status(session_id: str) -> dict:
+    state_with_status = await load_state_with_status(session_id)
+    if state_with_status is None:
         raise HTTPException(status_code=404, detail="session_id not found")
-    return {"session_id": session_id, "status": status}
+
+    state, status = state_with_status
+    response = {
+        "session_id": session_id,
+        "status": status,
+        "result_ready": status == "agentic_done",
+    }
+    if response["result_ready"]:
+        response["state"] = state.model_dump(mode="json")
+    return response
 
 
 @router.get("/result/{session_id}")
@@ -151,12 +167,11 @@ async def _run_match_task(
 
     await save_state(state, status="match_running")
     try:
-        await run_agentic_match_from_state(
-            state,
+        await run_persisted_agentic_match_from_session(
+            session_id=session_id,
             user_goal_text=user_goal_text,
             top_k=top_k,
             include_raptor=include_raptor,
-            persist_state=True,
         )
     except Exception as exc:  # pragma: no cover - defensive background safety
         await _record_background_error(
@@ -201,3 +216,7 @@ async def _persist_upload(session_id: str, file: UploadFile) -> Path:
 def _safe_id(raw: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
     return safe[:120] or "session"
+
+
+def _resume_ready_for_matching(state: SharedState) -> bool:
+    return bool(build_resume_retrieval_query(state.resume_state).text.strip())

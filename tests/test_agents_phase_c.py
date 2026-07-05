@@ -429,8 +429,14 @@ async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch)
         assert "PHASE_C_STRATEGY_AGENT" in system
         assert "R001" in user
         return json.dumps(
-            {
-                "skill_gap_analysis": [{"skill": "SQL", "priority": "high"}],
+                {
+                    "skill_gap_analysis": [
+                        {
+                            "skill": "SQL",
+                            "priority": "high",
+                            "evidence_span_ids": ["R001"],
+                        }
+                    ],
                 "resume_revision_plan": [
                     {
                         "section": "experience",
@@ -443,7 +449,13 @@ async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch)
                         "evidence_span_ids": ["MISSING"],
                     },
                 ],
-                "career_path": [{"horizon": "short", "action": "Apply to analyst roles"}],
+                    "career_path": [
+                        {
+                            "horizon": "short",
+                            "action": "Apply to analyst roles",
+                            "evidence_span_ids": ["R001"],
+                        }
+                    ],
             }
         )
 
@@ -471,7 +483,7 @@ async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch)
     updated = await run_strategy_agent(state)
 
     assert updated.strategy_state.skill_gap_analysis == [
-        {"skill": "SQL", "priority": "high"}
+        {"skill": "SQL", "priority": "high", "evidence_span_ids": ["R001"]}
     ]
     assert updated.strategy_state.resume_revision_plan == [
         {
@@ -482,6 +494,156 @@ async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch)
     ]
     assert updated.supervisor_log[-1]["stage"] == "strategy_agent"
     assert updated.supervisor_log[-1]["dropped_unsupported_advice"] == 1
+
+
+@pytest.mark.asyncio
+async def test_strategy_agent_outputs_complete_evidence_grounded_strategy(monkeypatch):
+    from app.agents import base
+    from app.agents.strategy_agent import run_strategy_agent
+    from app.state.schema import (
+        ResumeState,
+        RetrievalState,
+        SharedState,
+        StrategyState,
+    )
+
+    async def fake_chat(system, user, **kwargs):
+        assert "PHASE_C_STRATEGY_AGENT" in system
+        assert "R001" in user
+        assert "job-1:skills:1" in user
+        return json.dumps(
+            {
+                "skill_gap_analysis": [
+                    {
+                        "skill": "SQL",
+                        "gap": "Role requires SQL reporting beyond current project evidence.",
+                        "priority": "high",
+                        "evidence_span_ids": ["job-1:skills:1", "R001"],
+                    },
+                    {
+                        "skill": "Kubernetes",
+                        "gap": "Unsupported invented gap.",
+                        "priority": "high",
+                        "evidence_span_ids": ["MISSING"],
+                    },
+                ],
+                "resume_revision_plan": [
+                    {
+                        "section": "projects",
+                        "suggestion": "Emphasize the Python dashboard work.",
+                        "evidence_span_ids": ["R001"],
+                    },
+                    {
+                        "section": "experience",
+                        "suggestion": "Invent production Kubernetes ownership.",
+                        "evidence_span_ids": ["job-1:skills:1"],
+                    },
+                ],
+                "career_path": [
+                    {
+                        "horizon": "short",
+                        "action": "Apply to now-fit analyst roles.",
+                        "evidence_span_ids": ["job-1:skills:1"],
+                    },
+                    {
+                        "horizon": "medium",
+                        "action": "Build SQL reporting depth for stretch roles.",
+                        "evidence_span_ids": ["job-2:responsibilities:1"],
+                    },
+                    {
+                        "horizon": "long",
+                        "action": "Move toward product analytics after evidence-backed analyst work.",
+                        "evidence_span_ids": ["R001", "job-2:responsibilities:1"],
+                    },
+                    {
+                        "horizon": "someday",
+                        "action": "Unsupported path item.",
+                        "evidence_span_ids": ["job-1:skills:1"],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(base.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        resume_state=ResumeState(
+            normalized_base_resume="Built a Python dashboard for reporting.",
+            skills=["Python"],
+            original_evidence_spans=[
+                {"span_id": "R001", "text": "Built a Python dashboard."}
+            ],
+        ),
+        retrieval_state=RetrievalState(
+            evidence_span_ids=["job-1:skills:1", "job-2:responsibilities:1"],
+            ranking_scores=[
+                {
+                    "job_id": "job-1",
+                    "evidence_spans": [
+                        {
+                            "evidence_span_id": "job-1:skills:1",
+                            "content": "Required skills: SQL, dashboards.",
+                        }
+                    ],
+                },
+                {
+                    "job_id": "job-2",
+                    "evidence_spans": [
+                        {
+                            "evidence_span_id": "job-2:responsibilities:1",
+                            "content": "Build stakeholder reporting pipelines.",
+                        }
+                    ],
+                },
+            ],
+        ),
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    "job_id": "job-1",
+                    "tier": "now_fit",
+                    "match_explanation": "Python dashboard evidence matches.",
+                    "evidence_span_ids": ["job-1:skills:1"],
+                    "evidence_spans": [
+                        {
+                            "evidence_span_id": "job-1:skills:1",
+                            "content": "Required skills: SQL, dashboards.",
+                        }
+                    ],
+                }
+            ]
+        ),
+    )
+
+    updated = await run_strategy_agent(state)
+
+    assert updated.strategy_state.skill_gap_analysis == [
+        {
+            "skill": "SQL",
+            "gap": "Role requires SQL reporting beyond current project evidence.",
+            "priority": "high",
+            "evidence_span_ids": ["job-1:skills:1", "R001"],
+        }
+    ]
+    assert updated.strategy_state.resume_revision_plan == [
+        {
+            "section": "projects",
+            "suggestion": "Emphasize the Python dashboard work.",
+            "evidence_span_ids": ["R001"],
+        }
+    ]
+    assert [item["horizon"] for item in updated.strategy_state.career_path] == [
+        "short",
+        "medium",
+        "long",
+    ]
+    assert updated.supervisor_log[-1] == {
+        "stage": "strategy_agent",
+        "dropped_unsupported_advice": 1,
+        "dropped_unsupported_skill_gaps": 1,
+        "dropped_unsupported_path_items": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -509,7 +671,7 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
                     "retrieval_plan": {
                         "hard_constraints": {"locations": ["Birmingham"]},
                         "soft_preferences": {"title_keywords": ["analyst"]},
-                        "top_k": 2,
+                        "top_k": 1,
                         "include_raptor": False,
                     },
                 }
@@ -530,7 +692,13 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
         if "PHASE_C_STRATEGY_AGENT" in system:
             return json.dumps(
                 {
-                    "skill_gap_analysis": [{"skill": "SQL", "priority": "medium"}],
+                    "skill_gap_analysis": [
+                        {
+                            "skill": "SQL",
+                            "priority": "medium",
+                            "evidence_span_ids": ["R001", "job-1:skills:1"],
+                        }
+                    ],
                     "resume_revision_plan": [
                         {
                             "section": "projects",
@@ -539,7 +707,11 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
                         }
                     ],
                     "career_path": [
-                        {"horizon": "short", "action": "Apply to analyst roles"}
+                        {
+                            "horizon": "short",
+                            "action": "Apply to analyst roles",
+                            "evidence_span_ids": ["job-1:skills:1"],
+                        }
                     ],
                 }
             )
@@ -585,7 +757,7 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
     result = await run_agentic_match_from_state(
         state,
         user_goal_text="Find data analyst jobs in Birmingham",
-        top_k=2,
+        top_k=1,
         search_fn=fake_search,
     )
 
@@ -599,6 +771,162 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
         "strategy_agent",
         "final_verification",
     ]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_relaxes_soft_preferences_when_retrieval_results_are_too_few(
+    monkeypatch,
+):
+    from app.agents import base, supervisor
+    from app.agents.orchestrator import run_agentic_match_from_state
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import ResumeState, SharedState
+
+    async def fake_chat(system, user, **kwargs):
+        if "PHASE_C_INTENT_AGENT" in system:
+            return json.dumps(
+                {
+                    "current_goal": ["data analyst"],
+                    "long_term_goal": [],
+                    "hard_constraints": {"locations": ["Birmingham"]},
+                    "soft_preferences": {
+                        "title_keywords": ["fintech"],
+                        "preferred_role_clusters": ["analytics"],
+                    },
+                    "avoid_roles": [],
+                }
+            )
+        if "PHASE_C_SUPERVISOR_PLANNING" in system:
+            return json.dumps(
+                {
+                    "needs_clarification": False,
+                    "retrieval_plan": {
+                        "hard_constraints": {"locations": ["Birmingham"]},
+                        "soft_preferences": {
+                            "title_keywords": ["fintech"],
+                            "preferred_role_clusters": ["analytics"],
+                        },
+                        "top_k": 3,
+                        "include_raptor": False,
+                    },
+                }
+            )
+        if "PHASE_C_MATCHING_AGENT" in system:
+            roles = []
+            if "job-1" in user:
+                roles.append(
+                    {
+                        "job_id": "job-1",
+                        "tier": "now_fit",
+                        "match_explanation": "Python evidence matches.",
+                        "evidence_span_ids": ["job-1:skills:1"],
+                    }
+                )
+            if "job-2" in user:
+                roles.append(
+                    {
+                        "job_id": "job-2",
+                        "tier": "stretch_fit",
+                        "match_explanation": "SQL evidence makes this a stretch.",
+                        "evidence_span_ids": ["job-2:skills:1"],
+                    }
+                )
+            if "job-3" in user:
+                roles.append(
+                    {
+                        "job_id": "job-3",
+                        "tier": "bridge_role",
+                        "match_explanation": "Reporting evidence makes this a bridge.",
+                        "evidence_span_ids": ["job-3:skills:1"],
+                    }
+                )
+            return json.dumps({"recommended_roles": roles})
+        if "PHASE_C_STRATEGY_AGENT" in system:
+            return json.dumps(
+                {
+                    "skill_gap_analysis": [],
+                    "resume_revision_plan": [
+                        {
+                            "section": "projects",
+                            "suggestion": "Use the Python project evidence.",
+                            "evidence_span_ids": ["R001"],
+                        }
+                    ],
+                    "career_path": [],
+                }
+            )
+        if "PHASE_C_SUPERVISOR_FINAL" in system:
+            return json.dumps(
+                {
+                    "hard_filter_violations": [],
+                    "missing_evidence": [],
+                    "fabrication_risks": [],
+                    "needs_reretrieval": False,
+                    "needs_repair": False,
+                }
+            )
+        raise AssertionError(system)
+
+    search_calls = []
+
+    def candidate(job_id: str) -> JobCandidate:
+        return JobCandidate(
+            job_id=job_id,
+            score=0.9,
+            title="Data Analyst",
+            company="Example",
+            location="Birmingham",
+            evidence_span_ids=[f"{job_id}:skills:1"],
+        )
+
+    async def fake_search(**kwargs):
+        search_calls.append(kwargs)
+        if kwargs["soft_prefs"]:
+            return [candidate("job-1")]
+        return [candidate("job-1"), candidate("job-2"), candidate("job-3")]
+
+    monkeypatch.setattr(base.deepseek, "chat", fake_chat)
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        resume_state=ResumeState(
+            normalized_base_resume="Python dashboard analyst resume",
+            original_evidence_spans=[
+                {"span_id": "R001", "text": "Built a Python dashboard."}
+            ],
+        ),
+    )
+
+    result = await run_agentic_match_from_state(
+        state,
+        user_goal_text="Find data analyst jobs in Birmingham",
+        top_k=3,
+        search_fn=fake_search,
+    )
+
+    assert len(search_calls) == 2
+    assert search_calls[0]["soft_prefs"] == {
+        "title_keywords": ["fintech"],
+        "preferred_role_clusters": ["analytics"],
+    }
+    assert search_calls[1]["soft_prefs"] == {}
+    assert result.state.retrieval_state.candidate_job_ids == [
+        "job-1",
+        "job-2",
+        "job-3",
+    ]
+    assert result.final_verification["reretrieval_loop_used"] == 1
+    reretrieval_logs = [
+        entry
+        for entry in result.state.supervisor_log
+        if entry.get("stage") == "reretrieval_loop"
+    ]
+    assert reretrieval_logs[0]["reason"] == "too_few_results"
+    assert reretrieval_logs[0]["relaxed_soft_prefs"] == {
+        "title_keywords": ["fintech"],
+        "preferred_role_clusters": ["analytics"],
+    }
 
 
 @pytest.mark.asyncio
@@ -720,3 +1048,9 @@ async def test_orchestrator_executes_one_reretrieval_when_supervisor_requests_it
     assert "reretrieval_loop" in [
         entry.get("stage") for entry in result.state.supervisor_log
     ]
+    final_verification_logs = [
+        entry
+        for entry in result.state.supervisor_log
+        if entry.get("stage") == "final_verification"
+    ]
+    assert final_verification_logs[-1]["reretrieval_loop_used"] == 1

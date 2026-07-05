@@ -38,6 +38,7 @@ Return strict JSON:
   "hard_filter_violations": [object],
   "missing_evidence": [object],
   "fabrication_risks": [object],
+  "too_few_results": object optional,
   "needs_reretrieval": boolean,
   "needs_repair": boolean
 }
@@ -105,6 +106,7 @@ async def final_verification(state: SharedState) -> dict[str, Any]:
         "hard_filter_violations": _as_list(parsed.get("hard_filter_violations")),
         "missing_evidence": _as_list(parsed.get("missing_evidence")),
         "fabrication_risks": _as_list(parsed.get("fabrication_risks")),
+        "too_few_results": _as_dict(parsed.get("too_few_results")),
         "needs_reretrieval": bool(parsed.get("needs_reretrieval")),
         "needs_repair": bool(parsed.get("needs_repair")),
     }
@@ -166,10 +168,26 @@ def _add_deterministic_verification(
                 }
             )
 
+    too_few_results = _as_dict(result.get("too_few_results"))
+    planned_top_k = _latest_planned_top_k(state)
+    actual_count = len(state.retrieval_state.candidate_job_ids)
+    planned_soft_prefs = _latest_planned_soft_prefs(state)
+    if planned_top_k > 0 and actual_count < planned_top_k and planned_soft_prefs:
+        too_few_results = {
+            "expected_top_k": planned_top_k,
+            "actual_count": actual_count,
+            "candidate_job_ids": list(state.retrieval_state.candidate_job_ids),
+            "relaxation": "soft_prefs",
+        }
+
     result["hard_filter_violations"] = hard_violations
     result["missing_evidence"] = missing_evidence
     result["fabrication_risks"] = fabrication_risks
+    result["too_few_results"] = too_few_results
     result["needs_reretrieval"] = bool(result["needs_reretrieval"] or hard_violations)
+    result["needs_reretrieval"] = bool(
+        result["needs_reretrieval"] or too_few_results
+    )
     result["needs_repair"] = bool(
         result["needs_repair"] or missing_evidence or fabrication_risks
     )
@@ -230,6 +248,25 @@ def _resume_evidence_ids(state: SharedState) -> set[str]:
         if span_id:
             ids.add(str(span_id))
     return ids
+
+
+def _latest_planned_top_k(state: SharedState) -> int:
+    for entry in reversed(state.supervisor_log):
+        plan = entry.get("retrieval_plan")
+        if entry.get("stage") == "planning" and isinstance(plan, dict):
+            try:
+                return int(plan.get("top_k") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _latest_planned_soft_prefs(state: SharedState) -> dict[str, Any]:
+    for entry in reversed(state.supervisor_log):
+        plan = entry.get("retrieval_plan")
+        if entry.get("stage") == "planning" and isinstance(plan, dict):
+            return _as_dict(plan.get("soft_prefs"))
+    return {}
 
 
 def _loads_or_empty(raw: str) -> dict[str, Any]:
