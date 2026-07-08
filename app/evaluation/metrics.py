@@ -6,6 +6,7 @@ from typing import Mapping, Sequence
 
 MetricRow = Mapping[str, object]
 Rankings = Mapping[str, Sequence[str]]
+MetricTableRow = dict[str, float | int | str]
 
 
 def evaluate_rankings(
@@ -58,6 +59,45 @@ def compare_retrieval_runs(
         "with_raptor": with_raptor,
         "delta": delta,
     }
+
+
+def build_metric_table(
+    labels: Sequence[MetricRow],
+    rankings_by_run: Mapping[str, Rankings],
+    *,
+    k_values: Sequence[int],
+) -> list[MetricTableRow]:
+    table: list[MetricTableRow] = []
+    for run_name, rankings in rankings_by_run.items():
+        for k in k_values:
+            metrics = evaluate_rankings(labels, rankings, k=k)
+            table.append(
+                {
+                    "run": run_name,
+                    "k": k,
+                    "cases": int(metrics["cases"]),
+                    "precision": float(metrics[f"precision@{k}"]),
+                    "recall": float(metrics[f"recall@{k}"]),
+                    "mrr": float(metrics[f"mrr@{k}"]),
+                    "ndcg": float(metrics[f"ndcg@{k}"]),
+                }
+            )
+    return table
+
+
+def format_metric_table_markdown(rows: Sequence[MetricTableRow]) -> str:
+    headers = ["run", "k", "cases", "precision", "recall", "mrr", "ndcg"]
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _header in headers) + " |",
+    ]
+    for row in rows:
+        lines.append(
+            "| "
+            + " | ".join(_format_table_cell(row.get(header, "")) for header in headers)
+            + " |"
+        )
+    return "\n".join(lines)
 
 
 def compare_latent_space_runs(
@@ -179,6 +219,12 @@ def _mean(values: Sequence[float]) -> float:
     if not values:
         return 0.0
     return round(sum(values) / len(values), 6)
+
+
+def _format_table_cell(value: object) -> str:
+    if isinstance(value, float):
+        return f"{value:.6f}"
+    return str(value)
 
 
 def _candidate_satisfies_hard_constraints(

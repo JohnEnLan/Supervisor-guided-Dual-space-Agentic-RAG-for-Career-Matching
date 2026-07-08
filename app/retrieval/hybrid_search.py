@@ -324,7 +324,15 @@ def _soft_preference_bonus(
         if str(keyword).lower() in title:
             bonus += 0.03
 
-    return min(bonus, 0.15)
+    for role in soft_prefs.get("case_target_roles") or []:
+        if str(role).lower() in title:
+            bonus += 0.07
+
+    for role in soft_prefs.get("case_bridge_roles") or []:
+        if str(role).lower() in title:
+            bonus += 0.04
+
+    return min(bonus, 0.20)
 
 
 def _rerank_candidates(

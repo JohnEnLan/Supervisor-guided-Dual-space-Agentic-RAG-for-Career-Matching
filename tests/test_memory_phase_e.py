@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -24,6 +25,77 @@ class FakePool:
 
     def acquire(self):
         return FakeAcquire(self.conn)
+
+
+class InMemoryMemoryConn:
+    def __init__(self):
+        self.private_rows = {}
+        self.feedback_rows = []
+        self.next_feedback_id = 1
+        self.clock = 0
+
+    async def execute(self, sql, *args):
+        if "INSERT INTO private_memory" not in sql:
+            raise AssertionError(sql)
+        self.clock += 1
+        user_id, resume_version_id, payload_json = args
+        self.private_rows[(user_id, resume_version_id)] = {
+            "resume_version_id": resume_version_id,
+            "payload": json.loads(payload_json),
+            "updated_at": self.clock,
+        }
+
+    async def fetchrow(self, sql, *args):
+        if "INSERT INTO feedback_memory" in sql:
+            feedback_id = self.next_feedback_id
+            self.next_feedback_id += 1
+            self.clock += 1
+            user_id, job_id, outcome, reason, user_rating = args
+            self.feedback_rows.append(
+                {
+                    "feedback_id": feedback_id,
+                    "user_id": user_id,
+                    "job_id": job_id,
+                    "outcome": outcome,
+                    "reason": reason,
+                    "user_rating": user_rating,
+                    "created_at": self.clock,
+                }
+            )
+            return {"feedback_id": feedback_id}
+        if "FROM private_memory" not in sql:
+            raise AssertionError(sql)
+        user_id, resume_version_id = args
+        row = self.private_rows.get((user_id, resume_version_id))
+        if row is None:
+            return None
+        return {"payload": row["payload"]}
+
+    async def fetch(self, sql, *args):
+        if "FROM feedback_memory" in sql:
+            user_id, limit = args
+            rows = [row for row in self.feedback_rows if row["user_id"] == user_id]
+            rows.sort(key=lambda row: row["created_at"], reverse=True)
+            return rows[:limit]
+
+        if "FROM private_memory" not in sql:
+            raise AssertionError(sql)
+        user_id, limit = args
+        rows = [
+            row
+            for (row_user_id, _version_id), row in self.private_rows.items()
+            if row_user_id == user_id
+        ]
+        rows.sort(key=lambda row: row["updated_at"], reverse=True)
+        if "payload" in sql:
+            return rows[:limit]
+        return [
+            {
+                "resume_version_id": row["resume_version_id"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows[:limit]
+        ]
 
 
 def test_private_resume_payload_keeps_raw_resume_in_private_memory_only():
@@ -75,6 +147,48 @@ async def test_save_private_resume_memory_upserts_by_user_and_version(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_private_resume_memory_writes_and_reads_user_history(monkeypatch):
+    from app.memory import private_memory
+    from app.state.schema import ResumeState
+
+    conn = InMemoryMemoryConn()
+
+    async def fake_get_pool():
+        return FakePool(conn)
+
+    monkeypatch.setattr(private_memory, "get_pool", fake_get_pool)
+
+    await private_memory.save_private_resume_memory(
+        user_id="u1",
+        resume_version_id="v1",
+        resume_state=ResumeState(normalized_base_resume="u1 first resume"),
+        raw_resume_text="private resume v1",
+    )
+    await private_memory.save_private_resume_memory(
+        user_id="u1",
+        resume_version_id="v2",
+        resume_state=ResumeState(normalized_base_resume="u1 second resume"),
+        raw_resume_text="private resume v2",
+    )
+    await private_memory.save_private_resume_memory(
+        user_id="u2",
+        resume_version_id="v1",
+        resume_state=ResumeState(normalized_base_resume="u2 resume"),
+    )
+
+    loaded = await private_memory.load_private_resume_memory(
+        user_id="u1", resume_version_id="v1"
+    )
+    history = await private_memory.list_private_resume_history(user_id="u1", limit=10)
+
+    assert loaded["resume_state"]["normalized_base_resume"] == "u1 first resume"
+    assert [row["resume_version_id"] for row in history] == ["v2", "v1"]
+    assert [
+        row["payload"]["resume_state"]["normalized_base_resume"] for row in history
+    ] == ["u1 second resume", "u1 first resume"]
+
+
+@pytest.mark.asyncio
 async def test_feedback_records_outcomes_and_positive_policy(monkeypatch):
     from app.memory import feedback
 
@@ -103,6 +217,104 @@ async def test_feedback_records_outcomes_and_positive_policy(monkeypatch):
 
     assert feedback_id == 7
     assert conn.args == ("u1", "job-1", "interview_1", "good screen", 4)
+
+
+@pytest.mark.asyncio
+async def test_feedback_records_and_reads_canonical_application_outcomes(monkeypatch):
+    from app.memory import feedback
+
+    conn = InMemoryMemoryConn()
+
+    async def fake_get_pool():
+        return FakePool(conn)
+
+    monkeypatch.setattr(feedback, "get_pool", fake_get_pool)
+
+    oa_id = await feedback.record_application_feedback(
+        user_id="u1",
+        job_id="job-oa",
+        outcome=" OA ",
+    )
+    offer_id = await feedback.record_application_feedback(
+        user_id="u1",
+        job_id="job-offer",
+        outcome="Offer",
+        user_rating=5,
+    )
+    rejected_id = await feedback.record_application_feedback(
+        user_id="u1",
+        job_id="job-rejected",
+        outcome="rejected",
+        reason="visa sponsorship unavailable",
+        user_rating=2,
+    )
+    await feedback.record_application_feedback(
+        user_id="u2",
+        job_id="job-other",
+        outcome="offer",
+    )
+
+    rows = await feedback.list_feedback_for_user(user_id="u1", limit=10)
+
+    assert (oa_id, offer_id, rejected_id) == (1, 2, 3)
+    assert [row["job_id"] for row in rows] == [
+        "job-rejected",
+        "job-offer",
+        "job-oa",
+    ]
+    assert [row["outcome"] for row in rows] == ["rejected", "offer", "oa"]
+    assert rows[0]["reason"] == "visa sponsorship unavailable"
+
+
+@pytest.mark.asyncio
+async def test_state_store_feedback_uses_canonical_outcome_for_db_and_state(
+    monkeypatch,
+):
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    saved = []
+
+    class FakeConn:
+        async def fetchrow(self, sql, *args):
+            self.args = args
+            return {"feedback_id": 9}
+
+    conn = FakeConn()
+
+    async def fake_get_pool():
+        return FakePool(conn)
+
+    async def fake_load_state_with_status(session_id):
+        return SharedState(session_id=session_id, user_id="u1"), "agentic_done"
+
+    async def fake_save_state(state, status):
+        saved.append((state, status))
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+    monkeypatch.setattr(
+        state_store, "load_state_with_status", fake_load_state_with_status
+    )
+    monkeypatch.setattr(state_store, "save_state", fake_save_state)
+
+    feedback_id = await state_store.add_feedback(
+        session_id="s1",
+        job_id="job-1",
+        outcome="Offer",
+    )
+
+    assert feedback_id == 9
+    assert conn.args == ("u1", "job-1", "offer", None, None)
+    assert saved[0][0].feedback_state.user_feedback == [
+        {
+            "job_id": "job-1",
+            "outcome": "offer",
+            "reason": None,
+            "user_rating": None,
+            "feedback_id": 9,
+        }
+    ]
+    assert saved[0][1] == "agentic_done"
 
 
 def test_case_base_rejects_pii_and_builds_anonymous_embedding_text():
@@ -134,6 +346,18 @@ def test_case_base_rejects_pii_and_builds_anonymous_embedding_text():
             application_outcome="offer",
             recommended_bridge_roles=[],
         ).validate_anonymous()
+
+    with pytest.raises(ValueError):
+        CareerCase(
+            case_id="raw-extra",
+            background_type="business_undergraduate",
+            target_role="Data Analyst",
+            successful_resume_features=[],
+            missing_skills_before=[],
+            application_outcome="offer",
+            recommended_bridge_roles=[],
+            raw_resume_text="John Example john@example.com",
+        )
 
 
 @pytest.mark.asyncio
@@ -184,3 +408,24 @@ def test_seed_cases_are_10_to_20_and_anonymous():
         case.validate_anonymous()
         assert contains_pii(case.background_type) is False
         assert "raw_resume" not in case.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_seed_default_cases_upserts_10_to_20_anonymous_cases(monkeypatch):
+    import scripts.seed_cases as seed_cases
+
+    calls = []
+
+    async def fake_upsert_career_case(case, *, embed_if_missing):
+        case.validate_anonymous()
+        calls.append((case.case_id, embed_if_missing, case.model_dump()))
+
+    monkeypatch.setattr(seed_cases, "upsert_career_case", fake_upsert_career_case)
+
+    count = await seed_cases.seed_default_cases(embed=False)
+
+    assert 10 <= count <= 20
+    assert len(calls) == count
+    assert calls[0][0] == "case-001"
+    assert all(embed_if_missing is False for _case_id, embed_if_missing, _ in calls)
+    assert all("raw_resume" not in payload for _case_id, _embed, payload in calls)

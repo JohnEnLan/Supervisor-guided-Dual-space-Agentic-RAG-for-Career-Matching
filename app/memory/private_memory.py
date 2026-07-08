@@ -77,8 +77,33 @@ async def load_private_resume_memory(
         )
     if row is None:
         return None
-    payload = row["payload"]
-    return json.loads(payload) if isinstance(payload, str) else dict(payload)
+    return _decode_payload(row["payload"])
+
+
+async def list_private_resume_history(
+    *, user_id: str, limit: int = 20
+) -> list[dict[str, Any]]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT resume_version_id, payload, updated_at
+            FROM private_memory
+            WHERE user_id = $1
+            ORDER BY updated_at DESC
+            LIMIT $2
+            """,
+            user_id,
+            limit,
+        )
+    return [
+        {
+            "resume_version_id": row["resume_version_id"],
+            "payload": _decode_payload(row["payload"]),
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
 
 
 async def list_private_resume_versions(
@@ -98,3 +123,7 @@ async def list_private_resume_versions(
             limit,
         )
     return [dict(row) for row in rows]
+
+
+def _decode_payload(payload: Any) -> dict[str, Any]:
+    return json.loads(payload) if isinstance(payload, str) else dict(payload)

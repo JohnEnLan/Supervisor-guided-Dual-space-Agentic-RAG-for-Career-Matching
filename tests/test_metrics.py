@@ -1,9 +1,11 @@
 from app.evaluation.metrics import (
+    build_metric_table,
     compare_latent_space_runs,
     compare_retrieval_runs,
     evaluate_explanation_faithfulness,
     evaluate_hard_filter_accuracy,
     evaluate_rankings,
+    format_metric_table_markdown,
 )
 
 
@@ -148,3 +150,66 @@ def test_compare_latent_space_runs_reports_metric_delta_and_qualitative_counts()
         "unchanged": 1,
     }
     assert comparison["case_notes"]["eval-1"].startswith("Latent memory")
+
+
+def test_build_metric_table_reports_multiple_runs_and_k_values():
+    labels = [
+        {"case_id": "eval-1", "relevant_job_ids": ["a"]},
+        {"case_id": "eval-2", "relevant_job_ids": ["d"]},
+    ]
+    rankings_by_run = {
+        "baseline": {
+            "eval-1": ["x", "a"],
+            "eval-2": ["d", "z"],
+        },
+        "with_latent": {
+            "eval-1": ["a", "x"],
+            "eval-2": ["d", "z"],
+        },
+    }
+
+    table = build_metric_table(labels, rankings_by_run, k_values=[1, 2])
+
+    assert table == [
+        {
+            "run": "baseline",
+            "k": 1,
+            "cases": 2,
+            "precision": 0.5,
+            "recall": 0.5,
+            "mrr": 0.5,
+            "ndcg": 0.5,
+        },
+        {
+            "run": "baseline",
+            "k": 2,
+            "cases": 2,
+            "precision": 0.5,
+            "recall": 1.0,
+            "mrr": 0.75,
+            "ndcg": 0.815465,
+        },
+        {
+            "run": "with_latent",
+            "k": 1,
+            "cases": 2,
+            "precision": 1.0,
+            "recall": 1.0,
+            "mrr": 1.0,
+            "ndcg": 1.0,
+        },
+        {
+            "run": "with_latent",
+            "k": 2,
+            "cases": 2,
+            "precision": 0.5,
+            "recall": 1.0,
+            "mrr": 1.0,
+            "ndcg": 1.0,
+        },
+    ]
+
+    markdown = format_metric_table_markdown(table)
+
+    assert "| run | k | cases | precision | recall | mrr | ndcg |" in markdown
+    assert "| with_latent | 1 | 2 | 1.000000 | 1.000000 | 1.000000 | 1.000000 |" in markdown

@@ -1,0 +1,11 @@
+Source: Kaggle dataset arshkon/linkedin-job-postings
+Full dataset location: C:\Users\WIN11\Desktop\毕业论文_birmingham\dataset
+Sample rule: first 1000 postings sorted by numeric job_id with non-empty title and description
+Main file: linkedin_postings_1000.csv
+Related files: linkedin_job_skills_1000.csv, linkedin_job_industries_1000.csv, linkedin_salaries_1000.csv, linkedin_benefits_1000.csv
+Posting rows: 1000
+Related row counts:
+- linkedin_job_skills_1000.csv: 1538
+- linkedin_job_industries_1000.csv: 1035
+- linkedin_salaries_1000.csv: 380
+- linkedin_benefits_1000.csv: 671

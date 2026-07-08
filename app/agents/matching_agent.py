@@ -1,15 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Awaitable, Callable
 
 from app.agents.base import BaseAgent
+from app.llm import deepseek
 from app.retrieval.hybrid_search import JobCandidate, hybrid_search
 from app.retrieval.query_builder import build_resume_retrieval_query
 from app.state.schema import SharedState
 
 
 SearchFn = Callable[..., Awaitable[list[JobCandidate]]]
+ChatFn = Callable[..., Awaitable[str]]
+
+
+MATCH_EXPLANATION_PROMPT = """
+PHASE_C_MATCHING_AGENT
+You are producing a concise evidence-grounded match explanation for exactly one
+retrieved job candidate. Use only the supplied candidate evidence ids/text.
+
+Return strict JSON:
+{
+  "recommended_roles": [
+    {
+      "job_id": string,
+      "tier": "now_fit" | "stretch_fit" | "bridge_role",
+      "match_explanation": string,
+      "evidence_span_ids": [string]
+    }
+  ]
+}
+"""
 
 
 class MatchingAgent(BaseAgent):
@@ -81,7 +103,104 @@ async def run_matching_agent(
         include_raptor=bool(retrieval_plan.get("include_raptor", False)),
     )
     _write_retrieval_state(state, candidates)
-    return await MatchingAgent(candidates).run(state)
+    state = await MatchingAgent(candidates).run(state)
+    if retrieval_plan.get("parallel_explanations", True):
+        await enrich_top_match_explanations(
+            state,
+            candidates,
+            top_n=int(retrieval_plan.get("explanation_top_n") or 5),
+        )
+    return state
+
+
+async def enrich_top_match_explanations(
+    state: SharedState,
+    candidates: list[JobCandidate],
+    *,
+    top_n: int = 5,
+    chat_fn: ChatFn | None = None,
+) -> SharedState:
+    if top_n <= 0 or not candidates:
+        return state
+
+    roles_by_job = {
+        str(role.get("job_id")): role
+        for role in state.strategy_state.recommended_roles
+        if isinstance(role, dict) and role.get("job_id")
+    }
+    chat_fn = chat_fn or deepseek.chat
+    top_candidates = candidates[:top_n]
+    explanation_rows = await asyncio.gather(
+        *[
+            _explain_candidate_match(
+                state,
+                candidate,
+                roles_by_job.get(candidate.job_id, {}),
+                chat_fn=chat_fn,
+            )
+            for candidate in top_candidates
+        ]
+    )
+
+    for job_id, explanation in explanation_rows:
+        role = roles_by_job.get(job_id)
+        if not role or not explanation:
+            continue
+        role["tier"] = explanation["tier"]
+        role["match_explanation"] = explanation["match_explanation"]
+        role["evidence_span_ids"] = explanation["evidence_span_ids"]
+        role["evidence_spans"] = explanation["evidence_spans"]
+
+    state.supervisor_log.append(
+        {
+            "stage": "matching_explanations",
+            "mode": "parallel",
+            "requested": len(top_candidates),
+            "updated": sum(1 for _job_id, item in explanation_rows if item),
+        }
+    )
+    return state
+
+
+async def _explain_candidate_match(
+    state: SharedState,
+    candidate: JobCandidate,
+    current_role: dict[str, Any],
+    *,
+    chat_fn: ChatFn,
+) -> tuple[str, dict[str, Any]]:
+    payload = {
+        "resume": {
+            "normalized_base_resume": state.resume_state.normalized_base_resume,
+            "skills": state.resume_state.skills,
+        },
+        "career_state": state.career_state.model_dump(),
+        "candidate": _candidate_payload(candidate),
+        "current_role": current_role,
+    }
+    raw = await chat_fn(
+        MATCH_EXPLANATION_PROMPT,
+        json.dumps(payload, ensure_ascii=False),
+        pro=False,
+        json_mode=True,
+    )
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return candidate.job_id, {}
+
+    role = _role_for_candidate(parsed, candidate.job_id)
+    if not role:
+        return candidate.job_id, {}
+    evidence_span_ids = _supported_evidence_ids(candidate, role)
+    return candidate.job_id, {
+        "tier": _valid_tier(role.get("tier") or current_role.get("tier")),
+        "match_explanation": role.get("match_explanation")
+        or current_role.get("match_explanation")
+        or "",
+        "evidence_span_ids": evidence_span_ids,
+        "evidence_spans": _evidence_spans_for_ids(candidate, evidence_span_ids),
+    }
 
 
 def _write_retrieval_state(state: SharedState, candidates: list[JobCandidate]) -> None:
@@ -153,6 +272,13 @@ def _supported_evidence_ids(
         if str(item) in allowed
     ]
     return requested or list(candidate.evidence_span_ids)
+
+
+def _role_for_candidate(parsed: dict[str, Any], job_id: str) -> dict[str, Any]:
+    for role in parsed.get("recommended_roles") or []:
+        if isinstance(role, dict) and str(role.get("job_id")) == job_id:
+            return role
+    return {}
 
 
 def _evidence_spans_for_ids(

@@ -13,11 +13,13 @@ if str(ROOT) not in sys.path:
 
 from app.db.pool import close_pool
 from app.evaluation.metrics import (
+    build_metric_table,
     compare_latent_space_runs,
     compare_retrieval_runs,
     evaluate_explanation_faithfulness,
     evaluate_hard_filter_accuracy,
     evaluate_rankings,
+    format_metric_table_markdown,
 )
 from app.retrieval.hybrid_search import JobCandidate, hybrid_search
 
@@ -74,6 +76,19 @@ def build_offline_report(
         "hard_filter_accuracy": evaluate_hard_filter_accuracy(rows, {}),
         "explanation_faithfulness": evaluate_explanation_faithfulness([]),
     }
+
+
+def build_offline_metric_table(
+    rows: list[dict[str, Any]],
+    rankings: dict[str, dict[str, list[str]]],
+    *,
+    k_values: list[int],
+) -> list[dict[str, float | int | str]]:
+    return build_metric_table(_labels_from_rows(rows), rankings, k_values=k_values)
+
+
+def format_report_table(rows: list[dict[str, float | int | str]]) -> str:
+    return format_metric_table_markdown(rows)
 
 
 async def build_live_report(
@@ -216,6 +231,14 @@ async def _main_async(args: argparse.Namespace) -> None:
         )
         if args.rankings:
             rankings = json.loads(args.rankings.read_text(encoding="utf-8"))
+            if args.format == "table":
+                table = build_offline_metric_table(
+                    rows,
+                    rankings,
+                    k_values=args.table_k,
+                )
+                print(format_report_table(table))
+                return
             report = build_offline_report(rows, rankings, k=args.top_k)
         else:
             report = await build_live_report(
@@ -243,6 +266,13 @@ def main() -> None:
         default=Path("data/eval/relevance_labels.jsonl"),
     )
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument(
+        "--table-k",
+        type=int,
+        nargs="+",
+        default=[1, 3, 5],
+        help="K values to include when --format table is used.",
+    )
     parser.add_argument("--limit-cases", type=int)
     parser.add_argument(
         "--rankings",
@@ -253,6 +283,12 @@ def main() -> None:
         "--no-latent-hint",
         action="store_true",
         help="Do not append latent_profile text in the with_latent run.",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["json", "table"],
+        default="json",
+        help="Output full JSON report or a Markdown metric table.",
     )
     args = parser.parse_args()
     asyncio.run(_main_async(args))

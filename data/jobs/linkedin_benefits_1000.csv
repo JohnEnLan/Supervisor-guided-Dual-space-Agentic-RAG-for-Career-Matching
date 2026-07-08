@@ -1,0 +1,672 @@
+job_id,inferred,type
+3884431523,0,Medical insurance
+3884431523,0,Vision insurance
+3884431523,0,Dental insurance
+3884431523,0,401(k)
+3884427968,1,401(k)
+3884430505,1,401(k)
+3884427971,1,401(k)
+3884431497,1,401(k)
+3884427963,1,401(k)
+3884427965,1,401(k)
+3884431490,1,401(k)
+3800272386,1,Vision insurance
+3800272386,1,Medical insurance
+3800272386,1,Dental insurance
+3800272386,1,401(k)
+3800272386,1,Paid maternity leave
+3800272386,1,Paid paternity leave
+3800272386,1,Disability insurance
+3884429552,1,401(k)
+3884427957,1,401(k)
+3884431744,0,Medical insurance
+3884431744,0,Vision insurance
+3884431744,0,Dental insurance
+3884431744,0,401(k)
+3884431744,0,Paid paternity leave
+3884431744,0,Paid maternity leave
+3884426975,1,401(k)
+3884429777,0,Medical insurance
+3884429777,0,Vision insurance
+3884429777,0,Dental insurance
+3884429777,0,401(k)
+3884429777,0,Pension plan
+3884429777,0,Paid maternity leave
+3884429777,0,Paid paternity leave
+3884429777,0,Student loan assistance
+3884429777,0,Tuition assistance
+3884429777,0,Disability insurance
+3884431598,0,Medical insurance
+3884431598,0,Vision insurance
+3884431598,0,Dental insurance
+3884431598,0,401(k)
+3884431598,0,Tuition assistance
+3884429642,0,Medical insurance
+3884429642,0,Vision insurance
+3884429642,0,Dental insurance
+3884429642,0,401(k)
+3884429642,0,Paid paternity leave
+3884429642,0,Paid maternity leave
+3884429642,0,Tuition assistance
+3884429642,0,Disability insurance
+3884430512,1,401(k)
+3884429852,1,Dental insurance
+3884429852,1,Medical insurance
+3884429852,1,Vision insurance
+3884431771,1,401(k)
+3884430718,0,Medical insurance
+3884430718,1,Vision insurance
+3818306840,1,Medical insurance
+3818306840,1,Vision insurance
+3818306840,1,Dental insurance
+3884427966,1,401(k)
+3884429809,0,Medical insurance
+3884429809,0,Vision insurance
+3884429809,0,Dental insurance
+3884429809,0,401(k)
+3884429809,0,Pension plan
+3884429809,0,Paid maternity leave
+3884429809,0,Tuition assistance
+3884429809,0,Disability insurance
+3884430691,1,401(k)
+3884431629,1,Medical insurance
+3845924752,1,Medical insurance
+3884429620,0,Medical insurance
+3884429620,0,Vision insurance
+3884429620,0,Dental insurance
+3884429620,0,401(k)
+3884429620,0,Paid maternity leave
+3884429620,0,Child care support
+3884429620,0,Pension plan
+3884429620,0,Paid paternity leave
+3884429620,0,Tuition assistance
+3884429620,0,Disability insurance
+3884429620,0,Commuter benefits
+3884429620,0,Student loan assistance
+3857325080,0,Medical insurance
+3857325080,0,Vision insurance
+3857325080,0,Dental insurance
+3857325080,0,401(k)
+3857325080,0,Tuition assistance
+3884431572,0,Medical insurance
+3884431572,0,Pension plan
+3884431572,0,Dental insurance
+3884431572,0,Vision insurance
+3884431572,0,401(k)
+3884431572,0,Disability insurance
+3884429786,1,401(k)
+3884429724,1,401(k)
+3821047961,1,401(k)
+3821047961,1,Medical insurance
+3845877107,0,Medical insurance
+3845877107,0,Vision insurance
+3845877107,0,Dental insurance
+3845877107,0,401(k)
+3845877107,0,Commuter benefits
+112576855,1,Medical insurance
+112576855,1,Dental insurance
+112576855,1,Disability insurance
+3555161614,1,Medical insurance
+231010577,1,401(k)
+3875041552,0,Medical insurance
+3875041552,0,Vision insurance
+3875041552,0,Dental insurance
+3875041552,0,401(k)
+2747409392,1,Medical insurance
+2747409392,1,Dental insurance
+2747409392,1,Vision insurance
+2914254129,1,Medical insurance
+3876572082,0,Medical insurance
+3876572082,0,Vision insurance
+3876572082,0,Dental insurance
+3876572082,0,401(k)
+3848960304,1,401(k)
+3848960304,1,Medical insurance
+117675818,1,Medical insurance
+3835806869,0,401(k)
+3835806869,0,Dental insurance
+3835806869,0,Medical insurance
+3835806869,0,Vision insurance
+95428182,1,Medical insurance
+95428182,1,Dental insurance
+95428182,1,Disability insurance
+3877345234,1,401(k)
+3877345234,1,Dental insurance
+3877345234,1,Medical insurance
+3877345234,1,Vision insurance
+3867568566,1,401(k)
+3426467577,1,Medical insurance
+3426467577,1,401(k)
+3383214611,0,Medical insurance
+3383214611,0,Vision insurance
+3383214611,0,Dental insurance
+3383214611,0,401(k)
+3383214611,0,Paid maternity leave
+3383214611,0,Paid paternity leave
+3383214611,0,Commuter benefits
+3383214611,0,Disability insurance
+3876469865,1,401(k)
+3769036399,1,401(k)
+3867234681,1,Medical insurance
+3836759104,1,401(k)
+3855465728,1,Commuter benefits
+3855465728,1,401(k)
+3838150253,1,Medical insurance
+3838150253,1,Vision insurance
+3838150253,1,Dental insurance
+3838150253,1,Tuition assistance
+3838150253,1,Disability insurance
+3838150253,1,401(k)
+3838150253,1,Paid paternity leave
+3838150253,1,Paid maternity leave
+3838150253,1,Pension plan
+56482768,1,401(k)
+56482768,1,Dental insurance
+56482768,1,Disability insurance
+3844654703,1,Medical insurance
+3844654703,1,Dental insurance
+3844654703,1,Vision insurance
+3844654703,1,401(k)
+3277232283,1,401(k)
+23221523,1,401(k)
+2147609766,1,401(k)
+2147609754,1,401(k)
+2147609754,1,Medical insurance
+2147609929,1,401(k)
+2147609858,1,401(k)
+3817203807,1,401(k)
+3817203807,1,Dental insurance
+3817203807,1,Medical insurance
+3817203807,1,Vision insurance
+3684991720,1,Dental insurance
+3684991720,1,Medical insurance
+3684991720,1,Vision insurance
+3862673730,1,Disability insurance
+3876925520,1,401(k)
+3726764279,0,Medical insurance
+3726764279,0,Vision insurance
+3726764279,0,Dental insurance
+3726764279,0,401(k)
+3726764279,0,Paid maternity leave
+3726764279,0,Disability insurance
+1129235875,1,401(k)
+1129235875,1,Dental insurance
+1129235875,1,Medical insurance
+1129235875,1,Vision insurance
+3855860744,1,401(k)
+3860372966,1,401(k)
+3860372966,1,Medical insurance
+3797460723,1,401(k)
+3797460723,1,Medical insurance
+3854137450,1,401(k)
+3854137450,1,Medical insurance
+3866844290,1,Commuter benefits
+3866844290,1,Paid paternity leave
+3770151266,1,Dental insurance
+3770151266,1,Medical insurance
+3770151266,1,Vision insurance
+3770151266,1,401(k)
+3819767400,1,401(k)
+3857348297,1,401(k)
+3883417521,1,Vision insurance
+3883417521,1,401(k)
+3531344675,1,401(k)
+3531344675,1,Vision insurance
+3531344675,1,Dental insurance
+3531344675,1,Disability insurance
+3531344675,1,Medical insurance
+3739446309,1,401(k)
+3739446309,1,Medical insurance
+3739446309,1,Vision insurance
+1826257634,1,401(k)
+1826257634,1,Dental insurance
+1826257634,1,Medical insurance
+1826257634,1,Vision insurance
+3822435165,0,Medical insurance
+3822435165,0,401(k)
+3814723048,1,401(k)
+3438939828,1,Dental insurance
+3438939828,1,Medical insurance
+3438939828,1,Vision insurance
+3875677847,1,Vision insurance
+3260455681,0,Medical insurance
+3260455681,0,Vision insurance
+3260455681,0,Dental insurance
+3260455681,0,401(k)
+3260455681,0,Paid paternity leave
+3260455681,0,Paid maternity leave
+3260455681,0,Tuition assistance
+3260455681,0,Disability insurance
+227832999,1,401(k)
+3826177405,1,Tuition assistance
+3873178671,1,Medical insurance
+3873178671,1,Vision insurance
+3873178671,1,401(k)
+3779260325,1,401(k)
+3872015321,1,Medical insurance
+3872015321,1,Vision insurance
+3872015321,1,Dental insurance
+3872015321,1,401(k)
+3831190800,1,Vision insurance
+3788295344,0,401(k)
+3788295344,0,Student loan assistance
+3883546874,1,401(k)
+3883546874,1,Dental insurance
+3883546874,1,Disability insurance
+3883546874,1,Medical insurance
+3883546874,1,Vision insurance
+3880108413,1,Medical insurance
+3880108413,1,401(k)
+3606634863,1,Vision insurance
+3606634863,1,Disability insurance
+3838533579,1,401(k)
+3862132028,0,Medical insurance
+3862132028,0,Vision insurance
+3862132028,0,Dental insurance
+3862132028,0,401(k)
+3747072157,1,401(k)
+3787839455,1,401(k)
+3787839455,1,Dental insurance
+3787839455,1,Medical insurance
+3787839455,1,Vision insurance
+3845186343,1,401(k)
+3845186343,1,Medical insurance
+3870701883,0,401(k)
+3870701883,0,Medical insurance
+3870701883,0,Vision insurance
+3870701883,0,Dental insurance
+3875735534,1,Disability insurance
+3875735534,1,401(k)
+3819416106,1,Paid paternity leave
+3773070651,1,401(k)
+3773070651,1,Vision insurance
+3773070651,1,Medical insurance
+3838774352,1,Disability insurance
+3838774352,1,Tuition assistance
+3838774352,1,401(k)
+3790001722,1,Pension plan
+3790001722,1,Disability insurance
+2011147642,1,Medical insurance
+2011147642,1,Dental insurance
+3832947295,1,Medical insurance
+3832947295,1,Dental insurance
+3832947295,1,Disability insurance
+3832947295,1,401(k)
+3832947295,1,Vision insurance
+3720358336,0,Medical insurance
+3720358336,0,Vision insurance
+3720358336,0,Dental insurance
+3720358336,0,401(k)
+1183148438,1,Medical insurance
+3878329666,1,Medical insurance
+368586246,1,Vision insurance
+368586246,1,401(k)
+3844838697,0,Medical insurance
+3844838697,0,Vision insurance
+3844838697,0,Dental insurance
+3844838697,0,401(k)
+3844838697,0,Disability insurance
+3867763161,0,Medical insurance
+3867763161,0,Vision insurance
+3867763161,0,Dental insurance
+3867763161,0,401(k)
+3867763161,0,Tuition assistance
+3832103385,1,Dental insurance
+3832103385,1,Medical insurance
+3837546918,1,401(k)
+3871636939,0,Medical insurance
+3871636939,0,Vision insurance
+3871636939,0,Dental insurance
+3871636939,0,401(k)
+3868010733,1,Medical insurance
+3868010733,1,Dental insurance
+3868010733,1,Vision insurance
+3868010733,1,401(k)
+3863631572,0,Medical insurance
+3863631572,0,Vision insurance
+3863631572,0,Dental insurance
+3863631572,0,401(k)
+3863631572,0,Paid maternity leave
+3758935273,0,Vision insurance
+3758935273,0,Medical insurance
+3758935273,0,Dental insurance
+111513530,0,Medical insurance
+111513530,0,Paid maternity leave
+111513530,0,Pension plan
+111513530,0,Paid paternity leave
+111513530,0,Dental insurance
+111513530,0,Vision insurance
+3127577086,0,Medical insurance
+3127577086,0,Vision insurance
+3127577086,0,Dental insurance
+3127577086,0,401(k)
+3765212611,0,Medical insurance
+3765212611,0,Vision insurance
+3765212611,0,Dental insurance
+3765212611,0,401(k)
+3765212611,0,Paid maternity leave
+3865179969,1,Vision insurance
+3865179969,1,Pension plan
+3865179969,1,Disability insurance
+3880380418,1,Dental insurance
+3880380418,1,Medical insurance
+3880380418,1,401(k)
+3862682461,0,Medical insurance
+3862682461,0,Vision insurance
+3862682461,0,Dental insurance
+3862682461,0,401(k)
+3861743053,1,401(k)
+3861743053,1,Medical insurance
+3816831972,1,401(k)
+3211657373,0,Medical insurance
+3211657373,0,Vision insurance
+3211657373,0,Dental insurance
+3211657373,0,401(k)
+3211657373,0,Paid maternity leave
+3211657373,0,Commuter benefits
+3789379757,0,Medical insurance
+3789379757,0,Vision insurance
+3789379757,0,Dental insurance
+3789379757,0,401(k)
+3788980998,0,Medical insurance
+3788980998,0,Vision insurance
+3788980998,0,Dental insurance
+3788980998,0,401(k)
+3788980998,0,Tuition assistance
+3788980998,0,Disability insurance
+3681437990,1,401(k)
+3681437990,1,Medical insurance
+3681437990,1,Vision insurance
+3681437990,1,Dental insurance
+3681437990,1,Disability insurance
+3177010992,1,Medical insurance
+3789402808,0,Medical insurance
+3789402808,0,Vision insurance
+3789402808,0,Dental insurance
+3847143087,0,Medical insurance
+3847143087,0,Vision insurance
+3847143087,0,Dental insurance
+3847143087,0,401(k)
+263583866,0,Medical insurance
+263583866,0,Vision insurance
+263583866,0,Dental insurance
+263583866,0,401(k)
+263583866,0,Tuition assistance
+3830297838,0,Medical insurance
+3830297838,0,Vision insurance
+3830297838,0,Dental insurance
+3830297838,0,Paid maternity leave
+3830297838,0,Disability insurance
+3830297838,0,Commuter benefits
+3830297838,0,Paid paternity leave
+3431736996,0,Medical insurance
+3431736996,0,Vision insurance
+3431736996,0,Dental insurance
+3431736996,0,401(k)
+3838161045,1,401(k)
+3838161045,1,Medical insurance
+136743465,0,Medical insurance
+3825550267,0,401(k)
+3825550267,0,Medical insurance
+3825550267,0,Vision insurance
+3784435614,0,Medical insurance
+3784435614,0,Vision insurance
+3784435614,0,Dental insurance
+3784435614,0,401(k)
+3784435614,0,Paid maternity leave
+3784435614,0,Paid paternity leave
+3784435614,0,Tuition assistance
+3852117411,0,Medical insurance
+3852117411,0,Vision insurance
+3852117411,0,Child care support
+3852117411,0,Paid paternity leave
+3852117411,0,Disability insurance
+3852117411,1,Dental insurance
+3322949022,0,Medical insurance
+3322949022,0,Vision insurance
+3322949022,0,Dental insurance
+3322949022,0,401(k)
+1014822088,1,401(k)
+3835671506,1,Dental insurance
+3835671506,1,Disability insurance
+3835671506,1,401(k)
+3835671506,1,Paid paternity leave
+2748500131,0,Medical insurance
+2748500131,0,Dental insurance
+2748500131,0,Vision insurance
+2748500131,0,Pension plan
+2748500131,0,Tuition assistance
+2748500131,0,Disability insurance
+3861166245,1,Dental insurance
+3861166245,1,401(k)
+3708944827,0,Medical insurance
+3708944827,0,Vision insurance
+3708944827,0,Dental insurance
+3708944827,0,401(k)
+3864172721,0,Vision insurance
+3864172721,0,Medical insurance
+3864172721,0,Dental insurance
+3864172721,0,401(k)
+2974397965,1,401(k)
+2974397965,1,Medical insurance
+3728884217,0,Medical insurance
+3728884217,0,Vision insurance
+3728884217,0,Dental insurance
+3728884217,0,401(k)
+3846960909,0,Medical insurance
+3846960909,0,Vision insurance
+3846960909,0,Dental insurance
+3846960909,0,401(k)
+3846960909,0,Commuter benefits
+3864160493,0,Medical insurance
+3864160493,0,Vision insurance
+3864160493,0,Dental insurance
+3864160493,0,401(k)
+3798453023,0,Medical insurance
+3798453023,0,Vision insurance
+3798453023,0,Dental insurance
+3798453023,0,401(k)
+3815284050,0,Medical insurance
+3815284050,0,Vision insurance
+3815284050,0,Dental insurance
+3815284050,0,401(k)
+3863616352,1,Vision insurance
+3731003001,1,401(k)
+3869757186,0,Medical insurance
+3861222472,1,401(k)
+3273249702,0,Medical insurance
+3273249702,0,401(k)
+3273249702,0,Dental insurance
+3273249702,0,Disability insurance
+3273249702,0,Vision insurance
+2838336689,0,Medical insurance
+2838336689,0,Vision insurance
+2838336689,0,Dental insurance
+2838336689,0,401(k)
+3881986862,1,401(k)
+3881986862,1,Medical insurance
+3614817348,0,Dental insurance
+3614817348,0,401(k)
+3614817348,0,Vision insurance
+3614817348,0,Medical insurance
+3614817348,0,Tuition assistance
+3792245483,0,Medical insurance
+3792245483,0,Vision insurance
+3792245483,0,Dental insurance
+3792245483,0,401(k)
+3792245483,0,Disability insurance
+658723396,1,Medical insurance
+658723396,1,Dental insurance
+658723396,1,Vision insurance
+658723396,1,401(k)
+3830313052,0,Medical insurance
+3830313052,0,Vision insurance
+3830313052,0,Dental insurance
+3830313052,0,401(k)
+3830313052,0,Pension plan
+3844070064,0,Medical insurance
+3844070064,0,Vision insurance
+3844070064,0,Dental insurance
+3844070064,0,Pension plan
+3784367296,0,Medical insurance
+3784367296,0,Vision insurance
+3784367296,0,Dental insurance
+3784367296,0,401(k)
+3784367296,0,Paid maternity leave
+3784367296,0,Paid paternity leave
+3651735073,0,Medical insurance
+3651735073,0,Vision insurance
+3651735073,0,Dental insurance
+3651735073,0,401(k)
+3651735073,0,Disability insurance
+3651735073,1,Pension plan
+3511440340,0,Medical insurance
+3511440340,0,Vision insurance
+3511440340,0,Dental insurance
+3511440340,0,Child care support
+3815847830,1,Medical insurance
+3815847830,1,Disability insurance
+3861757344,1,401(k)
+3748229910,0,Child care support
+3748229910,0,401(k)
+3748229910,1,Dental insurance
+3748229910,1,Medical insurance
+3748229910,1,Vision insurance
+3583960568,0,Medical insurance
+3583960568,0,401(k)
+3866244801,1,401(k)
+3844017709,0,Medical insurance
+3844017709,0,Vision insurance
+3844017709,0,Dental insurance
+3844017709,0,401(k)
+3844017709,0,Tuition assistance
+3651779099,0,Medical insurance
+3651779099,0,Vision insurance
+3651779099,0,Dental insurance
+3651779099,0,401(k)
+3854654152,1,Medical insurance
+3626110567,0,Medical insurance
+3626110567,0,Vision insurance
+3626110567,0,Dental insurance
+3626110567,0,401(k)
+3626110567,0,Tuition assistance
+3880180438,0,Commuter benefits
+69333422,0,Medical insurance
+69333422,0,Vision insurance
+69333422,0,Dental insurance
+69333422,0,401(k)
+3855856223,1,Medical insurance
+3855856223,1,401(k)
+3475933396,0,Medical insurance
+3475933396,0,Vision insurance
+3475933396,0,Dental insurance
+3829280858,0,Medical insurance
+3829280858,0,Vision insurance
+3829280858,0,Dental insurance
+3829280858,0,401(k)
+3829280858,0,Disability insurance
+3880374275,1,401(k)
+3880374275,1,Vision insurance
+3831148511,1,401(k)
+3831148511,1,Dental insurance
+3831148511,1,Medical insurance
+3761818635,1,Dental insurance
+3761818635,1,401(k)
+3862107843,1,401(k)
+3864519762,1,401(k)
+3864519762,1,Dental insurance
+3864519762,1,Medical insurance
+3864519762,1,Vision insurance
+3841003722,0,Medical insurance
+3841003722,0,Vision insurance
+3841003722,0,Child care support
+3841003722,0,Paid paternity leave
+3841003722,0,Disability insurance
+229924287,0,Medical insurance
+229924287,0,Dental insurance
+229924287,0,Vision insurance
+3855897428,0,Medical insurance
+3855897428,0,Vision insurance
+3855897428,0,Dental insurance
+3855897428,0,401(k)
+3713898217,0,Medical insurance
+3713898217,0,Vision insurance
+3713898217,0,Dental insurance
+3713898217,0,401(k)
+3713898217,0,Disability insurance
+3189117072,1,Medical insurance
+3189117072,1,Dental insurance
+3189117072,1,401(k)
+3797449314,0,Medical insurance
+3797449314,0,Vision insurance
+3797449314,0,Dental insurance
+3797449314,0,401(k)
+3797449314,0,Pension plan
+3797449314,0,Tuition assistance
+3797449314,0,Disability insurance
+3802602037,0,Medical insurance
+3802602037,0,Vision insurance
+3802602037,0,Dental insurance
+3802602037,0,401(k)
+3802602037,0,Pension plan
+3802602037,0,Tuition assistance
+3802602037,0,Disability insurance
+2790549389,1,401(k)
+2790549389,1,Medical insurance
+3627141928,0,Medical insurance
+3627141928,0,Dental insurance
+3627141928,0,401(k)
+3870707329,1,Medical insurance
+3878803731,0,Medical insurance
+3878803731,0,Vision insurance
+3878803731,0,Dental insurance
+3694149664,1,401(k)
+3694149664,1,Disability insurance
+3694149664,1,Medical insurance
+3694149664,1,Dental insurance
+3829184899,0,Dental insurance
+3829184899,1,Medical insurance
+3860378018,1,Vision insurance
+3860378018,1,401(k)
+3835918209,0,Medical insurance
+3835918209,0,Vision insurance
+3835918209,0,Dental insurance
+3835918209,0,401(k)
+3835918209,0,Paid maternity leave
+3835918209,0,Paid paternity leave
+3835918209,0,Student loan assistance
+3835918209,0,Disability insurance
+3835918209,0,Tuition assistance
+3864169730,0,Medical insurance
+3864169730,0,Vision insurance
+3864169730,0,Dental insurance
+3744106614,0,Medical insurance
+3744106614,0,Vision insurance
+3744106614,0,Dental insurance
+3744106614,0,401(k)
+3744106614,0,Disability insurance
+3823861441,0,Medical insurance
+3823861441,0,Vision insurance
+3823861441,0,Dental insurance
+3823861441,0,401(k)
+3826266913,1,Medical insurance
+3826266913,1,401(k)
+3868004859,0,Medical insurance
+3868004859,0,Vision insurance
+3868004859,0,Dental insurance
+3868004859,0,401(k)
+3868004859,0,Disability insurance
+3868004859,0,Tuition assistance
+3862982513,1,401(k)
+3700064749,0,Medical insurance
+3700064749,0,Vision insurance
+3700064749,0,Dental insurance
+3700064749,0,401(k)
+3700064749,0,Pension plan
+3700064749,0,Disability insurance
+3700064749,0,Student loan assistance
+3700064749,0,Commuter benefits
+3875765946,0,Medical insurance
+3875765946,0,Dental insurance
+3875765946,0,Pension plan
+3844096324,0,401(k)

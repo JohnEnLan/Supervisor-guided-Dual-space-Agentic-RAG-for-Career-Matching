@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+import time
 
 import pytest
 
@@ -420,6 +422,81 @@ async def test_matching_agent_outputs_three_tiers_with_supported_evidence(monkey
 
 
 @pytest.mark.asyncio
+async def test_top_five_match_explanations_run_in_parallel():
+    from app.agents.matching_agent import enrich_top_match_explanations
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import ResumeState, SharedState, StrategyState
+
+    active = 0
+    max_active = 0
+
+    async def fake_chat(system, user, **kwargs):
+        nonlocal active, max_active
+        assert "PHASE_C_MATCHING_AGENT" in system
+        payload = json.loads(user)
+        candidate = payload["candidate"]
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            active -= 1
+        return json.dumps(
+            {
+                "recommended_roles": [
+                    {
+                        "job_id": candidate["job_id"],
+                        "tier": "now_fit",
+                        "match_explanation": f"parallel explanation for {candidate['job_id']}",
+                        "evidence_span_ids": candidate["evidence_span_ids"],
+                    }
+                ]
+            }
+        )
+
+    candidates = [
+        JobCandidate(
+            job_id=f"job-{index}",
+            score=1.0 - index * 0.01,
+            title="Data Analyst",
+            evidence_span_ids=[f"job-{index}:skills:1"],
+        )
+        for index in range(5)
+    ]
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        resume_state=ResumeState(normalized_base_resume="Python SQL analyst resume"),
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    "job_id": candidate.job_id,
+                    "tier": "stretch_fit",
+                    "match_explanation": "",
+                    "evidence_span_ids": list(candidate.evidence_span_ids),
+                }
+                for candidate in candidates
+            ]
+        ),
+    )
+
+    started = time.perf_counter()
+    await enrich_top_match_explanations(
+        state,
+        candidates,
+        top_n=5,
+        chat_fn=fake_chat,
+    )
+    elapsed = time.perf_counter() - started
+
+    assert max_active == 5
+    assert elapsed < 0.15
+    assert state.strategy_state.recommended_roles[0]["match_explanation"] == (
+        "parallel explanation for job-0"
+    )
+
+
+@pytest.mark.asyncio
 async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch):
     from app.agents import base
     from app.agents.strategy_agent import run_strategy_agent
@@ -768,6 +845,7 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
     assert result.final_verification["needs_repair"] is False
     assert [entry["stage"] for entry in result.state.supervisor_log] == [
         "planning",
+        "matching_explanations",
         "strategy_agent",
         "final_verification",
     ]

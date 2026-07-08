@@ -167,3 +167,34 @@ def test_rerank_candidates_tracks_raptor_recall_source():
     assert candidates[0].job_id == "job-raptor"
     assert candidates[0].raptor_score == 0.9
     assert candidates[0].sources == ["raptor"]
+
+
+def test_rerank_candidates_applies_case_derived_role_weight():
+    candidates = hs._rerank_candidates(
+        fused=[("job-generic", 0.03), ("job-case", 0.03)],
+        bm25_by_job={"job-generic": 0.5, "job-case": 0.5},
+        dense_by_job={"job-generic": 0.5, "job-case": 0.5},
+        evidence_by_job={
+            "job-generic": ["job-generic:skills:1"],
+            "job-case": ["job-case:skills:1"],
+        },
+        metadata_by_job={
+            "job-generic": {
+                "title": "General Business Intern",
+                "company": "A",
+                "location": "Birmingham",
+            },
+            "job-case": {
+                "title": "Data Analyst Intern",
+                "company": "B",
+                "location": "Birmingham",
+            },
+        },
+        soft_prefs={"case_target_roles": ["Data Analyst"]},
+        top_k=2,
+    )
+
+    assert [candidate.job_id for candidate in candidates] == [
+        "job-case",
+        "job-generic",
+    ]

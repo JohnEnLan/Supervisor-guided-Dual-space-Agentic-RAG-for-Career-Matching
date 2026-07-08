@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.db.pool import get_pool
@@ -19,6 +19,8 @@ PII_PATTERNS = [
 
 
 class CareerCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     case_id: str
     background_type: str
     target_role: str

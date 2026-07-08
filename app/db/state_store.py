@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from app.db.pool import get_pool
+from app.memory.feedback import normalize_application_outcome
 from app.state.schema import SharedState
 
 
@@ -60,9 +61,10 @@ async def add_feedback(
         raise KeyError(session_id)
 
     state, status = state_with_status
+    canonical_outcome = normalize_application_outcome(outcome)
     payload: dict[str, Any] = {
         "job_id": job_id,
-        "outcome": outcome,
+        "outcome": canonical_outcome,
         "reason": reason,
         "user_rating": user_rating,
     }
@@ -77,7 +79,7 @@ async def add_feedback(
             """,
             state.user_id,
             job_id,
-            outcome,
+            canonical_outcome,
             reason,
             user_rating,
         )
