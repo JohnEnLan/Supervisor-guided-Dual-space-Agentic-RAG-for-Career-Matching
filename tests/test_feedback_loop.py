@@ -199,35 +199,39 @@ async def test_feedback_loop_skips_rejected_feedback(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_process_feedback_closure_for_session_preserves_workflow_status(
+async def test_process_feedback_closure_for_session_uses_atomic_state_mutation(
     monkeypatch,
 ):
     from app.memory import feedback_loop
     from app.state.schema import SharedState
 
     state = SharedState(session_id="s1", user_id="u1")
-    saved = []
+    mutated = []
 
-    async def fake_load_state_with_status(session_id):
+    async def fake_load_state(session_id):
         assert session_id == "s1"
-        return state, "agentic_done"
+        return state
 
     async def fake_run_feedback_closure(loaded_state, *, feedback):
         assert loaded_state is state
         assert feedback == {"feedback_id": 42, "job_id": "job-1"}
         return {
+            "decision": {"is_valuable": True},
             "case_written": True,
+            "case": {"case_id": "case-1"},
             "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
         }
 
-    async def fake_save_state(saved_state, *, status):
-        saved.append((saved_state, status))
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        assert session_id == "s1"
+        mutator(state)
+        mutated.append(state)
 
-    monkeypatch.setattr(
-        feedback_loop, "load_state_with_status", fake_load_state_with_status
-    )
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
     monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
-    monkeypatch.setattr(feedback_loop, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        feedback_loop, "mutate_state_atomically", fake_mutate_state_atomically
+    )
 
     result = await feedback_loop.process_feedback_closure_for_session(
         session_id="s1",
@@ -235,7 +239,71 @@ async def test_process_feedback_closure_for_session_preserves_workflow_status(
     )
 
     assert result == {
+        "decision": {"is_valuable": True},
         "case_written": True,
+        "case": {"case_id": "case-1"},
         "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
     }
-    assert saved == [(state, "agentic_done")]
+    assert mutated == [state]
+
+
+@pytest.mark.asyncio
+async def test_process_feedback_closure_merges_into_latest_state_atomically(
+    monkeypatch,
+):
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    stale_state = SharedState(session_id="s1", user_id="u1")
+    latest_state = SharedState(session_id="s1", user_id="u1")
+    latest_state.career_state.current_goal = ["newer unrelated goal"]
+    latest_row = {"state": latest_state, "status": "agentic_done"}
+
+    async def fake_load_state(session_id):
+        assert session_id == "s1"
+        return stale_state
+
+    async def fake_run_feedback_closure(loaded_state, *, feedback):
+        assert loaded_state is stale_state
+        return {
+            "decision": {"is_valuable": True},
+            "case_written": True,
+            "case": {"case_id": "case-1"},
+            "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
+        }
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        assert session_id == "s1"
+        assert latest_row["status"] == "agentic_done"
+        mutator(latest_row["state"])
+        assert latest_row["status"] == "agentic_done"
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state, raising=False)
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+        raising=False,
+    )
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 42, "job_id": "job-1"},
+    )
+
+    assert result["case_written"] is True
+    assert latest_row["state"].career_state.current_goal == ["newer unrelated goal"]
+    assert latest_row["state"].feedback_state.case_soft_preferences == {
+        "case_target_roles": ["Data Analyst"]
+    }
+    assert latest_row["state"].supervisor_log[-1] == {
+        "stage": "feedback_closure",
+        "feedback_id": 42,
+        "job_id": "job-1",
+        "decision": {"is_valuable": True},
+        "case_written": True,
+        "case_id": "case-1",
+        "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
+    }
+    assert latest_row["status"] == "agentic_done"

@@ -2,6 +2,7 @@
 服务进程不记任何东西，所有"记忆"都在 Postgres 里按 session 隔离。
 """
 import json
+from collections.abc import Callable
 from typing import Any
 
 from app.db.pool import get_pool
@@ -46,6 +47,33 @@ async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | N
     if row is None:
         return None
     return SharedState.model_validate(json.loads(row["state"])), row["status"]
+
+
+async def mutate_state_atomically(
+    *, session_id: str, mutator: Callable[[SharedState], None]
+) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT state FROM session_state WHERE session_id = $1 FOR UPDATE",
+                session_id,
+            )
+            if row is None:
+                raise KeyError(session_id)
+
+            state = SharedState.model_validate(json.loads(row["state"]))
+            mutator(state)
+            await conn.execute(
+                """
+                UPDATE session_state
+                SET state = $1::jsonb,
+                    updated_at = now()
+                WHERE session_id = $2
+                """,
+                state.model_dump_json(),
+                session_id,
+            )
 
 
 async def add_feedback(

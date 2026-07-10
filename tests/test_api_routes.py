@@ -374,7 +374,7 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
     from app.state.schema import SharedState
 
     state = SharedState(session_id="s1", user_id="u1")
-    saved = []
+    atomic_mutations = []
 
     async def fake_add_feedback(**kwargs):
         return 44
@@ -382,11 +382,10 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
     async def fake_process_feedback_closure_for_session(*, session_id, feedback):
         raise RuntimeError("case storage unavailable")
 
-    async def fake_load_state_with_status(session_id):
-        return state, "agentic_done"
-
-    async def fake_save_state(saved_state, *, status):
-        saved.append((saved_state, status))
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        assert session_id == "s1"
+        atomic_mutations.append(mutator)
+        mutator(state)
 
     monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
     monkeypatch.setattr(
@@ -395,8 +394,12 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
         fake_process_feedback_closure_for_session,
         raising=False,
     )
-    monkeypatch.setattr(routes, "load_state_with_status", fake_load_state_with_status)
-    monkeypatch.setattr(routes, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+        raising=False,
+    )
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -414,5 +417,5 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
         "case_written": False,
         "soft_preference_updates": {},
     }
-    assert saved == [(state, "agentic_done")]
+    assert len(atomic_mutations) == 1
     assert state.supervisor_log[-1]["stage"] == "feedback_closure_error"

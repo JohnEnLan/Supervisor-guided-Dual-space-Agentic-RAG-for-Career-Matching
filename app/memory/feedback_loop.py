@@ -12,7 +12,7 @@ from app.memory.case_base import (
     search_similar_cases,
     upsert_career_case,
 )
-from app.db.state_store import load_state_with_status, save_state
+from app.db.state_store import load_state, mutate_state_atomically
 from app.state.schema import SharedState
 
 
@@ -44,15 +44,13 @@ async def run_feedback_closure(
         state.feedback_state.case_soft_preferences,
         soft_preference_updates,
     )
-    log_entry = {
-        "stage": "feedback_closure",
-        "feedback_id": feedback.get("feedback_id"),
-        "job_id": feedback.get("job_id"),
-        "decision": decision,
-        "case_written": case_written,
-        "case_id": case_payload.get("case_id") if case_payload else None,
-        "soft_preference_updates": soft_preference_updates,
-    }
+    log_entry = build_feedback_closure_log_entry(
+        feedback=feedback,
+        decision=decision,
+        case_written=case_written,
+        case_payload=case_payload,
+        soft_preference_updates=soft_preference_updates,
+    )
     state.supervisor_log.append(log_entry)
 
     return {
@@ -67,14 +65,51 @@ async def run_feedback_closure(
 async def process_feedback_closure_for_session(
     *, session_id: str, feedback: dict[str, Any]
 ) -> dict[str, Any]:
-    state_with_status = await load_state_with_status(session_id)
-    if state_with_status is None:
+    state = await load_state(session_id)
+    if state is None:
         raise KeyError(session_id)
 
-    state, status = state_with_status
     result = await run_feedback_closure(state, feedback=feedback)
-    await save_state(state, status=status)
+    soft_preference_updates = result["soft_preference_updates"]
+    log_entry = build_feedback_closure_log_entry(
+        feedback=feedback,
+        decision=result["decision"],
+        case_written=result["case_written"],
+        case_payload=result["case"],
+        soft_preference_updates=soft_preference_updates,
+    )
+
+    def merge_closure_result(latest_state: SharedState) -> None:
+        latest_state.feedback_state.case_soft_preferences = merge_case_soft_preferences(
+            latest_state.feedback_state.case_soft_preferences,
+            soft_preference_updates,
+        )
+        latest_state.supervisor_log.append(log_entry)
+
+    await mutate_state_atomically(
+        session_id=session_id,
+        mutator=merge_closure_result,
+    )
     return result
+
+
+def build_feedback_closure_log_entry(
+    *,
+    feedback: dict[str, Any],
+    decision: dict[str, Any],
+    case_written: bool,
+    case_payload: dict[str, Any] | None,
+    soft_preference_updates: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "stage": "feedback_closure",
+        "feedback_id": feedback.get("feedback_id"),
+        "job_id": feedback.get("job_id"),
+        "decision": decision,
+        "case_written": case_written,
+        "case_id": case_payload.get("case_id") if case_payload else None,
+        "soft_preference_updates": soft_preference_updates,
+    }
 
 
 def build_case_soft_preferences(

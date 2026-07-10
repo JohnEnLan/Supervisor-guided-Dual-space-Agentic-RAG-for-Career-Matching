@@ -11,6 +11,7 @@ from app.db.state_store import (
     add_feedback,
     load_state,
     load_state_with_status,
+    mutate_state_atomically,
     save_state,
 )
 from app.memory.feedback_loop import process_feedback_closure_for_session
@@ -236,20 +237,20 @@ async def _record_feedback_closure_error(
     *, session_id: str, feedback_id: int, error: Exception
 ) -> None:
     try:
-        state_with_status = await load_state_with_status(session_id)
-        if state_with_status is None:
-            return
+        def append_error_log(state: SharedState) -> None:
+            state.supervisor_log.append(
+                {
+                    "stage": "feedback_closure_error",
+                    "feedback_id": feedback_id,
+                    "error_type": type(error).__name__,
+                    "error": str(error)[:500],
+                }
+            )
 
-        state, status = state_with_status
-        state.supervisor_log.append(
-            {
-                "stage": "feedback_closure_error",
-                "feedback_id": feedback_id,
-                "error_type": type(error).__name__,
-                "error": str(error)[:500],
-            }
+        await mutate_state_atomically(
+            session_id=session_id,
+            mutator=append_error_log,
         )
-        await save_state(state, status=status)
     except Exception:
         return
 

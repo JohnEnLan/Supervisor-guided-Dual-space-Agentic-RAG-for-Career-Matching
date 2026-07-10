@@ -317,6 +317,64 @@ async def test_state_store_feedback_uses_canonical_outcome_for_db_and_state(
     assert saved[0][1] == "agentic_done"
 
 
+@pytest.mark.asyncio
+async def test_mutate_state_atomically_locks_and_updates_state_without_status(
+    monkeypatch,
+):
+    from app.db import state_store
+
+    calls = []
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def fetchrow(self, sql, *args):
+            calls.append(("fetchrow", sql, args))
+            return {
+                "state": json.dumps(
+                    {
+                        "session_id": "s1",
+                        "user_id": "u1",
+                        "career_state": {"current_goal": ["existing goal"]},
+                    }
+                )
+            }
+
+        async def execute(self, sql, *args):
+            calls.append(("execute", sql, args))
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    def add_goal(state):
+        state.career_state.current_goal.append("atomic goal")
+
+    await state_store.mutate_state_atomically(session_id="s1", mutator=add_goal)
+
+    assert calls[0] == "transaction_enter"
+    select_sql = calls[1][1]
+    update_sql, update_args = calls[2][1:]
+    assert "FOR UPDATE" in select_sql
+    assert "UPDATE session_state" in update_sql
+    assert "status" not in update_sql.lower()
+    assert json.loads(update_args[0])["career_state"]["current_goal"] == [
+        "existing goal",
+        "atomic goal",
+    ]
+    assert calls[3] == "transaction_exit"
+
+
 def test_case_base_rejects_pii_and_builds_anonymous_embedding_text():
     from app.memory.case_base import CareerCase, build_case_embedding_text
 
