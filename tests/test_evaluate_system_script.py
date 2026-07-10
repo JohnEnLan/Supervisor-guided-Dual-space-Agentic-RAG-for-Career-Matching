@@ -97,3 +97,19 @@ def test_build_offline_metric_table_can_be_rendered_as_markdown():
     assert table[-1]["run"] == "with_latent"
     assert "| run | k | cases | precision | recall | mrr | ndcg |" in markdown
     assert "| with_latent | 1 | 2 | 1.000000 | 1.000000 | 1.000000 | 1.000000 |" in markdown
+
+
+def test_load_offline_rankings_accepts_wrapped_and_plain_formats(tmp_path):
+    from scripts.evaluate_system import load_offline_rankings
+
+    rankings = {"offline_lexical_baseline": {"eval-1": ["job-1"]}}
+    wrapped_path = tmp_path / "wrapped.json"
+    plain_path = tmp_path / "plain.json"
+    wrapped_path.write_text(
+        json.dumps({"metadata": {"method": "lexical"}, "rankings": rankings}),
+        encoding="utf-8",
+    )
+    plain_path.write_text(json.dumps(rankings), encoding="utf-8")
+
+    assert load_offline_rankings(wrapped_path) == rankings
+    assert load_offline_rankings(plain_path) == rankings

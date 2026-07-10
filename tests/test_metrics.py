@@ -167,6 +167,27 @@ def test_compare_latent_space_runs_reports_metric_delta_and_qualitative_counts()
     assert comparison["case_notes"]["eval-1"].startswith("Latent memory")
 
 
+def test_latent_qualitative_rank_comparison_ignores_duplicate_ids():
+    labels = [{"case_id": "eval-1", "relevant_job_ids": ["a"]}]
+    no_latent = {"eval-1": ["x", "x", "a"]}
+    with_latent = {"eval-1": ["x", "a"]}
+
+    comparison = compare_latent_space_runs(
+        labels,
+        no_latent,
+        with_latent,
+        k=3,
+    )
+
+    assert comparison["no_latent"]["mrr@3"] == 0.5
+    assert comparison["with_latent"]["mrr@3"] == 0.5
+    assert comparison["qualitative_counts"] == {
+        "improved": 0,
+        "regressed": 0,
+        "unchanged": 1,
+    }
+
+
 def test_build_metric_table_reports_multiple_runs_and_k_values():
     labels = [
         {"case_id": "eval-1", "relevant_job_ids": ["a"]},

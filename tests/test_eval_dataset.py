@@ -47,6 +47,9 @@ def test_relevance_labels_are_bound_to_the_full_linkedin_corpus():
         "query_cases": 15,
         "labels_file": "data/eval/relevance_labels.jsonl",
         "queries_file": "data/eval/resume_queries.jsonl",
+        "ranking_fixture": "data/eval/offline_lexical_rankings_1000.json",
+        "ranking_method": "deterministic_weighted_token_overlap_v1",
+        "ranking_scope": "offline lexical baseline; not live hybrid performance",
         "annotation_method": "case-specific title and description relevance review",
         "annotation_scope": "linkedin_1000_title_description_review",
     }

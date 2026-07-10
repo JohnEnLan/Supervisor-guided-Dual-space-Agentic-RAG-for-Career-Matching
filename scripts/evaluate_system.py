@@ -91,6 +91,18 @@ def format_report_table(rows: list[dict[str, float | int | str]]) -> str:
     return format_metric_table_markdown(rows)
 
 
+def load_offline_rankings(path: Path) -> dict[str, dict[str, list[str]]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("offline rankings must be a JSON object")
+    if "metadata" in payload or "rankings" in payload:
+        rankings = payload.get("rankings")
+        if not isinstance(rankings, dict):
+            raise ValueError("wrapped ranking artifact requires a rankings object")
+        return rankings
+    return payload
+
+
 async def build_live_report(
     rows: list[dict[str, Any]],
     *,
@@ -230,7 +242,7 @@ async def _main_async(args: argparse.Namespace) -> None:
             limit=args.limit_cases,
         )
         if args.rankings:
-            rankings = json.loads(args.rankings.read_text(encoding="utf-8"))
+            rankings = load_offline_rankings(args.rankings)
             if args.format == "table":
                 table = build_offline_metric_table(
                     rows,

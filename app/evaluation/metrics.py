@@ -264,7 +264,7 @@ def _candidate_satisfies_hard_constraints(
 
 
 def _first_relevant_rank(predicted: Sequence[str], relevant: set[str]) -> int:
-    for index, job_id in enumerate(predicted, start=1):
+    for index, job_id in enumerate(_unique_ranked_ids(predicted), start=1):
         if str(job_id) in relevant:
             return index
     return 1_000_000
