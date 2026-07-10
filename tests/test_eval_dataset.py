@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -42,13 +43,17 @@ def test_relevance_labels_are_bound_to_the_full_linkedin_corpus():
     assert manifest == {
         "source": "Kaggle arshkon/linkedin-job-postings",
         "corpus_file": "data/jobs/linkedin_postings_1000.csv",
+        "corpus_sha256": hashlib.sha256(jobs_path.read_bytes()).hexdigest(),
         "corpus_rows": 1000,
         "unique_job_ids": 1000,
         "query_cases": 15,
         "labels_file": "data/eval/relevance_labels.jsonl",
         "queries_file": "data/eval/resume_queries.jsonl",
         "ranking_fixture": "data/eval/offline_lexical_rankings_1000.json",
+        "ranking_artifact_kind": "offline_lexical_baseline",
         "ranking_method": "deterministic_weighted_token_overlap_v1",
+        "ranking_run": "offline_lexical_baseline",
+        "ranking_top_k": 20,
         "ranking_scope": "offline lexical baseline; not live hybrid performance",
         "annotation_method": "case-specific title and description relevance review",
         "annotation_scope": "linkedin_1000_title_description_review",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -52,7 +54,7 @@ def build_offline_report(
     k: int,
 ) -> dict[str, object]:
     labels = _labels_from_rows(rows)
-    baseline = rankings.get("baseline", {})
+    baseline = _select_baseline_rankings(rankings)
     with_raptor = rankings.get("with_raptor", baseline)
     with_latent = rankings.get("with_latent", baseline)
     case_notes = {
@@ -91,16 +93,151 @@ def format_report_table(rows: list[dict[str, float | int | str]]) -> str:
     return format_metric_table_markdown(rows)
 
 
-def load_offline_rankings(path: Path) -> dict[str, dict[str, list[str]]]:
+def load_offline_rankings(
+    path: Path, *, manifest_path: Path | None = None
+) -> dict[str, dict[str, list[str]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("offline rankings must be a JSON object")
     if "metadata" in payload or "rankings" in payload:
+        metadata = payload.get("metadata")
         rankings = payload.get("rankings")
+        if not isinstance(metadata, dict):
+            raise ValueError("wrapped ranking artifact requires a metadata object")
         if not isinstance(rankings, dict):
             raise ValueError("wrapped ranking artifact requires a rankings object")
+        if manifest_path is not None:
+            _validate_ranking_artifact(
+                artifact_path=path,
+                metadata=metadata,
+                rankings=rankings,
+                manifest_path=manifest_path,
+            )
         return rankings
     return payload
+
+
+def _select_baseline_rankings(
+    rankings: dict[str, dict[str, list[str]]],
+) -> dict[str, list[str]]:
+    for run_name in ("baseline", "offline_lexical_baseline"):
+        if run_name in rankings:
+            return rankings[run_name]
+    if len(rankings) == 1:
+        return next(iter(rankings.values()))
+    raise ValueError("offline rankings require a baseline run")
+
+
+def _validate_ranking_artifact(
+    *,
+    artifact_path: Path,
+    metadata: dict[str, Any],
+    rankings: dict[str, Any],
+    manifest_path: Path,
+) -> None:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("evaluation manifest must be a JSON object")
+
+    required_manifest_fields = {
+        "corpus_file",
+        "corpus_sha256",
+        "corpus_rows",
+        "unique_job_ids",
+        "query_cases",
+        "queries_file",
+        "ranking_fixture",
+        "ranking_artifact_kind",
+        "ranking_method",
+        "ranking_run",
+        "ranking_top_k",
+    }
+    missing = sorted(required_manifest_fields - set(manifest))
+    if missing:
+        raise ValueError(f"evaluation manifest missing fields: {missing}")
+
+    corpus_path = _project_path(manifest["corpus_file"])
+    queries_path = _project_path(manifest["queries_file"])
+    expected_artifact_path = _project_path(manifest["ranking_fixture"])
+    if artifact_path.resolve() != expected_artifact_path.resolve():
+        raise ValueError("ranking_fixture does not match the loaded artifact")
+
+    with corpus_path.open(newline="", encoding="utf-8") as handle:
+        corpus_rows = list(csv.DictReader(handle))
+    corpus_job_ids = [str(row.get("job_id") or "").strip() for row in corpus_rows]
+    current_corpus_sha256 = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
+    query_rows = _load_jsonl(queries_path)
+    query_ids = [str(row.get("case_id") or "").strip() for row in query_rows]
+
+    _require_equal(
+        "corpus_sha256", current_corpus_sha256, manifest["corpus_sha256"]
+    )
+    _require_equal("corpus_rows", len(corpus_rows), manifest["corpus_rows"])
+    _require_equal(
+        "unique_job_ids", len(set(corpus_job_ids)), manifest["unique_job_ids"]
+    )
+    _require_equal("query_cases", len(query_rows), manifest["query_cases"])
+
+    metadata_expectations = {
+        "artifact_kind": manifest["ranking_artifact_kind"],
+        "corpus_sha256": manifest["corpus_sha256"],
+        "corpus_row_count": manifest["corpus_rows"],
+        "query_count": manifest["query_cases"],
+        "method": manifest["ranking_method"],
+        "top_k": manifest["ranking_top_k"],
+    }
+    for field, expected in metadata_expectations.items():
+        _require_equal(field, metadata.get(field), expected)
+
+    if _project_path(metadata.get("corpus_path", "")) != corpus_path.resolve():
+        raise ValueError("corpus_path does not match the evaluation manifest")
+    if _project_path(metadata.get("query_path", "")) != queries_path.resolve():
+        raise ValueError("query_path does not match the evaluation manifest")
+
+    run_name = str(manifest["ranking_run"])
+    if run_name not in rankings:
+        raise ValueError(f"ranking_run {run_name!r} is missing from the artifact")
+    if not all(corpus_job_ids) or len(corpus_job_ids) != len(set(corpus_job_ids)):
+        raise ValueError("current corpus job_id values must be non-empty and unique")
+    if not all(query_ids) or len(query_ids) != len(set(query_ids)):
+        raise ValueError("current query case_id values must be non-empty and unique")
+
+    expected_case_ids = set(query_ids)
+    corpus_id_set = set(corpus_job_ids)
+    expected_ranking_length = min(int(manifest["ranking_top_k"]), len(corpus_rows))
+    for artifact_run, case_rankings in rankings.items():
+        if not isinstance(case_rankings, dict):
+            raise ValueError(f"ranking run {artifact_run!r} must be an object")
+        if set(case_rankings) != expected_case_ids:
+            raise ValueError(
+                f"ranking run {artifact_run!r} case IDs do not match current queries"
+            )
+        for case_id, job_ids in case_rankings.items():
+            if not isinstance(job_ids, list):
+                raise ValueError(f"ranking {case_id!r} must be a list")
+            if len(job_ids) != expected_ranking_length:
+                raise ValueError(
+                    f"ranking {case_id!r} length does not match ranking_top_k"
+                )
+            normalized_ids = [str(job_id) for job_id in job_ids]
+            if len(normalized_ids) != len(set(normalized_ids)):
+                raise ValueError(f"ranking {case_id!r} contains duplicate job IDs")
+            if not set(normalized_ids) <= corpus_id_set:
+                raise ValueError(f"ranking {case_id!r} contains jobs outside the corpus")
+
+
+def _project_path(value: object) -> Path:
+    path = Path(str(value))
+    if not path.is_absolute():
+        path = ROOT / path
+    return path.resolve()
+
+
+def _require_equal(field: str, actual: object, expected: object) -> None:
+    if actual != expected:
+        raise ValueError(
+            f"{field} mismatch: artifact/current={actual!r}, manifest={expected!r}"
+        )
 
 
 async def build_live_report(
@@ -242,7 +379,10 @@ async def _main_async(args: argparse.Namespace) -> None:
             limit=args.limit_cases,
         )
         if args.rankings:
-            rankings = load_offline_rankings(args.rankings)
+            rankings = load_offline_rankings(
+                args.rankings,
+                manifest_path=args.manifest,
+            )
             if args.format == "table":
                 table = build_offline_metric_table(
                     rows,
@@ -290,6 +430,12 @@ def main() -> None:
         "--rankings",
         type=Path,
         help="Optional offline JSON with baseline/with_raptor/with_latent rankings.",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("data/eval/evaluation_manifest.json"),
+        help="Manifest used to validate wrapped offline ranking artifacts.",
     )
     parser.add_argument(
         "--no-latent-hint",

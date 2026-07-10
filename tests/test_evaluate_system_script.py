@@ -1,5 +1,9 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 
 def test_load_eval_inputs_joins_queries_and_labels(tmp_path):
@@ -113,3 +117,91 @@ def test_load_offline_rankings_accepts_wrapped_and_plain_formats(tmp_path):
 
     assert load_offline_rankings(wrapped_path) == rankings
     assert load_offline_rankings(plain_path) == rankings
+
+
+def test_committed_offline_artifact_json_report_uses_its_single_run():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/evaluate_system.py",
+            "--rankings",
+            "data/eval/offline_lexical_rankings_1000.json",
+            "--top-k",
+            "5",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    report = json.loads(result.stdout)
+
+    assert report["retrieval"]["precision@5"] == pytest.approx(0.4)
+    assert report["retrieval"]["recall@5"] == pytest.approx(0.250001, abs=1e-6)
+    assert report["retrieval"]["mrr@5"] == pytest.approx(0.7)
+    assert report["retrieval"]["ndcg@5"] == pytest.approx(0.447162, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("metadata_field", "invalid_value"),
+    [
+        ("corpus_sha256", "0" * 64),
+        ("corpus_row_count", 999),
+        ("query_count", 14),
+        ("method", "different_method"),
+    ],
+)
+def test_load_offline_rankings_rejects_manifest_binding_mismatch(
+    tmp_path, metadata_field, invalid_value
+):
+    from scripts.evaluate_system import load_offline_rankings
+    from scripts.generate_lexical_rankings import (
+        METHOD,
+        RUN_NAME,
+        generate_lexical_ranking_artifact,
+    )
+
+    corpus_path = tmp_path / "jobs.csv"
+    queries_path = tmp_path / "queries.jsonl"
+    rankings_path = tmp_path / "rankings.json"
+    manifest_path = tmp_path / "manifest.json"
+    corpus_path.write_text(
+        "job_id,title,skills_desc,description\njob-1,Data Analyst,SQL,data analysis\n",
+        encoding="utf-8",
+    )
+    queries_path.write_text(
+        json.dumps({"case_id": "eval-1", "query": "data analyst"}) + "\n",
+        encoding="utf-8",
+    )
+    artifact = generate_lexical_ranking_artifact(
+        corpus_path=corpus_path,
+        queries_path=queries_path,
+        top_k=1,
+    )
+    artifact["metadata"][metadata_field] = invalid_value
+    rankings_path.write_text(json.dumps(artifact), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "corpus_file": str(corpus_path),
+                "corpus_sha256": generate_lexical_ranking_artifact(
+                    corpus_path=corpus_path,
+                    queries_path=queries_path,
+                    top_k=1,
+                )["metadata"]["corpus_sha256"],
+                "corpus_rows": 1,
+                "unique_job_ids": 1,
+                "query_cases": 1,
+                "queries_file": str(queries_path),
+                "ranking_fixture": str(rankings_path),
+                "ranking_artifact_kind": "offline_lexical_baseline",
+                "ranking_method": METHOD,
+                "ranking_run": RUN_NAME,
+                "ranking_top_k": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=metadata_field):
+        load_offline_rankings(rankings_path, manifest_path=manifest_path)
