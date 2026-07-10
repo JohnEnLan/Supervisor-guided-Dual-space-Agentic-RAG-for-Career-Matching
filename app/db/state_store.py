@@ -18,26 +18,21 @@ async def save_state(state: SharedState, status: str = "running") -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            latest = await _load_locked_state_or_none(conn, state.session_id)
-            if latest is None:
-                await conn.execute(
-                    """
-                    INSERT INTO session_state (
-                        session_id, user_id, state, status, updated_at
-                    )
-                    VALUES ($1, $2, $3::jsonb, $4, now())
-                    ON CONFLICT (session_id)
-                    DO UPDATE SET state = EXCLUDED.state,
-                                  status = EXCLUDED.status,
-                                  updated_at = now()
-                    """,
-                    state.session_id,
-                    state.user_id,
-                    state.model_dump_json(),
-                    status,
+            await conn.execute(
+                """
+                INSERT INTO session_state (
+                    session_id, user_id, state, status, updated_at
                 )
-                return
+                VALUES ($1, $2, $3::jsonb, $4, now())
+                ON CONFLICT (session_id) DO NOTHING
+                """,
+                state.session_id,
+                state.user_id,
+                state.model_dump_json(),
+                status,
+            )
 
+            latest = await _load_locked_state(conn, state.session_id)
             merged = _merge_feedback_owned_state(latest, state)
             await conn.execute(
                 """

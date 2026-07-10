@@ -512,8 +512,9 @@ async def test_stale_stage_save_preserves_concurrently_committed_feedback_state(
     await state_store.save_state(stale_orchestrator_state, status="agentic_done")
 
     assert calls[0] == "transaction_enter"
-    assert "FOR UPDATE" in calls[1][1]
-    update_sql, update_args = calls[2][1:]
+    assert "ON CONFLICT (session_id) DO NOTHING" in calls[1][1]
+    assert "FOR UPDATE" in calls[2][1]
+    update_sql, update_args = calls[3][1:]
     written = json.loads(update_args[0])
     assert written["career_state"]["current_goal"] == ["new stage goal"]
     assert written["feedback_state"] == persisted.feedback_state.model_dump()
@@ -527,7 +528,58 @@ async def test_stale_stage_save_preserves_concurrently_committed_feedback_state(
     ]
     assert "status = $2" in update_sql
     assert update_args[1:] == ("agentic_done", "s1")
-    assert calls[3] == "transaction_exit"
+    assert calls[4] == "transaction_exit"
+
+
+@pytest.mark.asyncio
+async def test_save_state_establishes_session_row_before_acquiring_row_lock(
+    monkeypatch,
+):
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    calls = []
+    state = SharedState(session_id="new-session", user_id="u1")
+    row_established = False
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def execute(self, sql, *args):
+            nonlocal row_established
+            calls.append(("execute", sql, args))
+            if "INSERT INTO session_state" in sql:
+                assert "ON CONFLICT (session_id) DO NOTHING" in sql
+                row_established = True
+
+        async def fetchrow(self, sql, *args):
+            calls.append(("fetchrow", sql, args))
+            assert row_established is True
+            return {"state": state.model_dump_json()}
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    await state_store.save_state(state, status="resume_queued")
+
+    assert calls[0] == "transaction_enter"
+    assert calls[1][0] == "execute"
+    assert calls[2][0] == "fetchrow"
+    assert "FOR UPDATE" in calls[2][1]
+    assert calls[3][0] == "execute"
+    assert "status = $2" in calls[3][1]
+    assert calls[4] == "transaction_exit"
 
 
 def test_case_base_rejects_pii_and_builds_anonymous_embedding_text():
