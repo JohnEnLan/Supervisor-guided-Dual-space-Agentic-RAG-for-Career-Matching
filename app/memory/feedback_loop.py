@@ -96,7 +96,7 @@ async def process_feedback_closure_for_session(
 
     result = await run_feedback_closure(state, feedback=feedback)
     try:
-        await _persist_closure_result(
+        return await _persist_closure_result(
             session_id=session_id,
             feedback=feedback,
             result=result,
@@ -107,8 +107,12 @@ async def process_feedback_closure_for_session(
             "closure_status": "error",
             "error_code": "closure_persistence_failed",
         }
+        failed_result = _merge_durable_case_result(
+            failed_result,
+            existing_feedback,
+        )
         try:
-            await _persist_closure_result(
+            return await _persist_closure_result(
                 session_id=session_id,
                 feedback=feedback,
                 result=failed_result,
@@ -116,29 +120,23 @@ async def process_feedback_closure_for_session(
         except Exception:
             pass
         return failed_result
-    return result
 
 
 async def _persist_closure_result(
     *, session_id: str, feedback: dict[str, Any], result: dict[str, Any]
-) -> None:
+) -> dict[str, Any]:
     soft_preference_updates = result["soft_preference_updates"]
-    log_entry = build_feedback_closure_log_entry(
-        feedback=feedback,
-        decision=result["decision"],
-        case_written=result["case_written"],
-        case_payload=result["case"],
-        soft_preference_updates=soft_preference_updates,
-        closure_status=result["closure_status"],
-        error_code=result.get("error_code"),
-    )
+    persisted_result: dict[str, Any] | None = None
 
-    def merge_closure_result(latest_state: SharedState) -> None:
+    def merge_closure_result(latest_state: SharedState) -> dict[str, Any]:
+        nonlocal persisted_result
         latest_feedback = _feedback_entry(
             latest_state, feedback.get("feedback_id")
         )
         if latest_feedback and _closure_is_complete(latest_feedback):
-            return
+            persisted_result = _completed_closure_result(latest_feedback)
+            return persisted_result
+        persisted_result = _merge_durable_case_result(result, latest_feedback)
         normalized_preferences = normalize_case_soft_preferences(
             latest_state.feedback_state.case_soft_preferences
         )
@@ -151,17 +149,29 @@ async def _persist_closure_result(
         _update_feedback_closure_metadata(
             latest_state,
             feedback_id=feedback.get("feedback_id"),
-            closure_status=result["closure_status"],
-            case_written=bool(result["case_written"]),
-            case_id=(result.get("case") or {}).get("case_id"),
-            error_code=result.get("error_code"),
+            closure_status=persisted_result["closure_status"],
+            case_written=bool(persisted_result["case_written"]),
+            case_id=(persisted_result.get("case") or {}).get("case_id"),
+            error_code=persisted_result.get("error_code"),
         )
-        latest_state.supervisor_log.append(log_entry)
+        latest_state.supervisor_log.append(
+            build_feedback_closure_log_entry(
+                feedback=feedback,
+                decision=persisted_result["decision"],
+                case_written=persisted_result["case_written"],
+                case_payload=persisted_result["case"],
+                soft_preference_updates=soft_preference_updates,
+                closure_status=persisted_result["closure_status"],
+                error_code=persisted_result.get("error_code"),
+            )
+        )
+        return persisted_result
 
-    await mutate_state_atomically(
+    atomic_result = await mutate_state_atomically(
         session_id=session_id,
         mutator=merge_closure_result,
     )
+    return atomic_result or persisted_result or result
 
 
 def _feedback_entry(state: SharedState, feedback_id: Any) -> dict[str, Any] | None:
@@ -186,6 +196,22 @@ def _completed_closure_result(feedback: dict[str, Any]) -> dict[str, Any]:
         "similar_cases": [],
         "soft_preference_updates": {},
     }
+
+
+def _merge_durable_case_result(
+    result: dict[str, Any], feedback: dict[str, Any] | None
+) -> dict[str, Any]:
+    merged = dict(result)
+    if not feedback or not feedback.get("case_written"):
+        return merged
+
+    merged["case_written"] = True
+    durable_case_id = feedback.get("case_id")
+    if durable_case_id:
+        case_payload = dict(merged.get("case") or {})
+        case_payload["case_id"] = durable_case_id
+        merged["case"] = case_payload
+    return merged
 
 
 def build_feedback_closure_log_entry(
@@ -225,9 +251,11 @@ def _update_feedback_closure_metadata(
     for entry in state.feedback_state.user_feedback:
         if str(entry.get("feedback_id")) != str(feedback_id):
             continue
+        prior_case_written = bool(entry.get("case_written"))
+        prior_case_id = entry.get("case_id")
         entry["closure_status"] = closure_status
-        entry["case_written"] = case_written
-        entry["case_id"] = case_id
+        entry["case_written"] = prior_case_written or case_written
+        entry["case_id"] = prior_case_id if prior_case_written else case_id
         if error_code:
             entry["error_code"] = error_code
         else:

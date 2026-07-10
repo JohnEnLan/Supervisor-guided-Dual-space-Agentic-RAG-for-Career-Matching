@@ -506,7 +506,14 @@ async def test_mutate_state_atomically_locks_and_updates_state_without_status(
     def add_goal(state):
         state.career_state.current_goal.append("atomic goal")
 
-    await state_store.mutate_state_atomically(session_id="s1", mutator=add_goal)
+    def add_goal_with_result(state):
+        add_goal(state)
+        return {"canonical_goal": state.career_state.current_goal[-1]}
+
+    result = await state_store.mutate_state_atomically(
+        session_id="s1",
+        mutator=add_goal_with_result,
+    )
 
     assert calls[0] == "transaction_enter"
     select_sql = calls[1][1]
@@ -518,6 +525,7 @@ async def test_mutate_state_atomically_locks_and_updates_state_without_status(
         "existing goal",
         "atomic goal",
     ]
+    assert result == {"canonical_goal": "atomic goal"}
     assert calls[3] == "transaction_exit"
 
 

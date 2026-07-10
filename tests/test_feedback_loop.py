@@ -649,3 +649,192 @@ async def test_process_feedback_closure_does_not_rerun_completed_entry(monkeypat
     assert result["closure_status"] == "processed"
     assert result["case_written"] is True
     assert result["case"] == {"case_id": "case-42"}
+
+
+@pytest.mark.asyncio
+async def test_retry_preserves_prior_durable_case_when_local_upsert_fails(monkeypatch):
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    loaded_state = SharedState(session_id="s1", user_id="u1")
+    loaded_state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 51,
+            "job_id": "job-1",
+            "outcome": "offer",
+            "closure_status": "error",
+            "case_written": True,
+            "case_id": "case-durable-51",
+            "error_code": "similar_case_search_failed",
+        }
+    ]
+    latest_state = loaded_state.model_copy(deep=True)
+
+    async def fake_load_state(session_id):
+        return loaded_state
+
+    async def fake_run_feedback_closure(state, *, feedback):
+        return {
+            "closure_status": "error",
+            "error_code": "case_upsert_failed",
+            "decision": {"is_valuable": True},
+            "case_written": False,
+            "case": {"case_id": "case-local-51"},
+            "similar_cases": [],
+            "soft_preference_updates": {},
+        }
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        return mutator(latest_state)
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 51, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    persisted = latest_state.feedback_state.user_feedback[0]
+    log_entry = latest_state.supervisor_log[-1]
+    assert result["closure_status"] == "error"
+    assert result["error_code"] == "case_upsert_failed"
+    assert result["case_written"] is True
+    assert result["case"]["case_id"] == "case-durable-51"
+    assert persisted["case_written"] is True
+    assert persisted["case_id"] == "case-durable-51"
+    assert log_entry["case_written"] is True
+    assert log_entry["case_id"] == "case-durable-51"
+
+
+@pytest.mark.asyncio
+async def test_atomic_terminal_observation_returns_canonical_persisted_result(
+    monkeypatch,
+):
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    stale_state = SharedState(session_id="s1", user_id="u1")
+    stale_state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 52,
+            "job_id": "job-1",
+            "outcome": "offer",
+            "closure_status": "error",
+            "case_written": False,
+            "case_id": None,
+        }
+    ]
+    latest_state = stale_state.model_copy(deep=True)
+    latest_state.feedback_state.user_feedback[0].update(
+        {
+            "closure_status": "processed",
+            "case_written": True,
+            "case_id": "case-canonical-52",
+        }
+    )
+
+    async def fake_load_state(session_id):
+        return stale_state
+
+    async def fake_run_feedback_closure(state, *, feedback):
+        return {
+            "closure_status": "error",
+            "error_code": "case_upsert_failed",
+            "decision": {"is_valuable": True},
+            "case_written": False,
+            "case": None,
+            "similar_cases": [],
+            "soft_preference_updates": {},
+        }
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        return mutator(latest_state)
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 52, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    assert result["closure_status"] == "processed"
+    assert result["case_written"] is True
+    assert result["case"] == {"case_id": "case-canonical-52"}
+    assert latest_state.supervisor_log == []
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_persistence_retry_returns_concurrent_terminal_result(
+    monkeypatch,
+):
+    import json
+
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {"feedback_id": 53, "job_id": "job-1", "outcome": "offer"}
+    ]
+    mutation_attempts = 0
+
+    async def fake_load_state(session_id):
+        return state.model_copy(deep=True)
+
+    async def fake_run_feedback_closure(loaded_state, *, feedback):
+        return {
+            "closure_status": "error",
+            "error_code": "case_upsert_failed",
+            "decision": {"is_valuable": True},
+            "case_written": False,
+            "case": None,
+            "similar_cases": [],
+            "soft_preference_updates": {},
+        }
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        nonlocal mutation_attempts
+        mutation_attempts += 1
+        if mutation_attempts == 1:
+            # The first transaction outcome is unknown; another request commits
+            # terminal state before this caller's bounded persistence retry.
+            state.feedback_state.user_feedback[0].update(
+                {
+                    "closure_status": "processed",
+                    "case_written": True,
+                    "case_id": "case-concurrent-53",
+                }
+            )
+            raise RuntimeError("private ambiguous commit failure")
+        return mutator(state)
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 53, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    assert mutation_attempts == 2
+    assert result["closure_status"] == "processed"
+    assert result["case_written"] is True
+    assert result["case"] == {"case_id": "case-concurrent-53"}
+    assert "private ambiguous commit failure" not in json.dumps(result)

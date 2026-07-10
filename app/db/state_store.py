@@ -4,7 +4,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from app.db.pool import get_pool
 from app.memory.case_base import (
@@ -13,6 +13,9 @@ from app.memory.case_base import (
 )
 from app.memory.feedback import normalize_application_outcome
 from app.state.schema import SharedState
+
+
+MutationResult = TypeVar("MutationResult")
 
 
 class FeedbackIdempotencyConflict(ValueError):
@@ -84,14 +87,15 @@ async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | N
 
 
 async def mutate_state_atomically(
-    *, session_id: str, mutator: Callable[[SharedState], None]
-) -> None:
+    *, session_id: str, mutator: Callable[[SharedState], MutationResult]
+) -> MutationResult:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             state = await _load_locked_state(conn, session_id)
-            mutator(state)
+            result = mutator(state)
             await _write_locked_state(conn, state)
+            return result
 
 
 async def add_feedback(

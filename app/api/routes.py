@@ -169,20 +169,15 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
             feedback=feedback,
         )
     except Exception:
-        await _record_feedback_closure_error(
+        error_result = await _record_feedback_closure_error(
             session_id=request.session_id,
             feedback_id=feedback_id,
         )
-        return {
-            "session_id": request.session_id,
-            "feedback_id": feedback_id,
-            "status": "feedback_recorded",
-            "closure_status": "error",
-            "case_written": False,
-            "case_id": None,
-            "soft_preference_updates": {},
-            "error_code": "feedback_closure_failed",
-        }
+        return _build_feedback_response(
+            session_id=request.session_id,
+            feedback_id=feedback_id,
+            result=error_result,
+        )
 
     return _build_feedback_response(
         session_id=request.session_id,
@@ -276,32 +271,60 @@ async def _record_background_error(
 
 async def _record_feedback_closure_error(
     *, session_id: str, feedback_id: int
-) -> None:
+) -> dict:
+    fallback_result = {
+        "closure_status": "error",
+        "case_written": False,
+        "case_id": None,
+        "soft_preference_updates": {},
+        "error_code": "feedback_closure_failed",
+    }
     try:
-        def append_error_log(state: SharedState) -> None:
+        def append_error_log(state: SharedState) -> dict:
+            case_written = False
+            case_id = None
             for entry in state.feedback_state.user_feedback:
                 if str(entry.get("feedback_id")) == str(feedback_id):
                     if entry.get("closure_status") in {"processed", "skipped"}:
-                        return
+                        return {
+                            "closure_status": entry["closure_status"],
+                            "case_written": bool(entry.get("case_written")),
+                            "case_id": entry.get("case_id"),
+                            "soft_preference_updates": {},
+                            "error_code": entry.get("error_code"),
+                        }
+                    case_written = bool(entry.get("case_written"))
+                    case_id = entry.get("case_id") if case_written else None
                     entry["closure_status"] = "error"
-                    entry["case_written"] = False
-                    entry["case_id"] = None
+                    entry["case_written"] = case_written
+                    entry["case_id"] = case_id
                     entry["error_code"] = "feedback_closure_failed"
                     break
             state.supervisor_log.append(
                 {
                     "stage": "feedback_closure_error",
                     "feedback_id": feedback_id,
+                    "closure_status": "error",
+                    "case_written": case_written,
+                    "case_id": case_id,
                     "error_code": "feedback_closure_failed",
                 }
             )
+            return {
+                "closure_status": "error",
+                "case_written": case_written,
+                "case_id": case_id,
+                "soft_preference_updates": {},
+                "error_code": "feedback_closure_failed",
+            }
 
-        await mutate_state_atomically(
+        result = await mutate_state_atomically(
             session_id=session_id,
             mutator=append_error_log,
         )
+        return result or fallback_result
     except Exception:
-        return
+        return fallback_result
 
 
 async def _persist_upload(session_id: str, file: UploadFile) -> Path:

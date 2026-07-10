@@ -713,3 +713,81 @@ async def test_feedback_error_recorder_does_not_regress_completed_closure(
 
     assert state.feedback_state.user_feedback == [completed_feedback]
     assert state.supervisor_log == []
+
+
+@pytest.mark.asyncio
+async def test_feedback_unexpected_retry_error_preserves_prior_durable_case(
+    monkeypatch,
+):
+    from app.api.main import app
+    from app.api import routes
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 54,
+            "job_id": "job-1",
+            "outcome": "offer",
+            "idempotency_key": "request-54",
+            "closure_status": "error",
+            "case_written": True,
+            "case_id": "case-durable-54",
+            "error_code": "similar_case_search_failed",
+        }
+    ]
+
+    async def fake_add_feedback(**kwargs):
+        return SimpleNamespace(
+            feedback_id=54,
+            created=False,
+            feedback=dict(state.feedback_state.user_feedback[0]),
+        )
+
+    async def fake_process_closure(**kwargs):
+        raise RuntimeError("private retry failure")
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        return mutator(state)
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_closure,
+    )
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={
+                "session_id": "s1",
+                "job_id": "job-1",
+                "outcome": "offer",
+                "idempotency_key": "request-54",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "session_id": "s1",
+        "feedback_id": 54,
+        "status": "feedback_recorded",
+        "closure_status": "error",
+        "case_written": True,
+        "case_id": "case-durable-54",
+        "soft_preference_updates": {},
+        "error_code": "feedback_closure_failed",
+    }
+    persisted = state.feedback_state.user_feedback[0]
+    assert persisted["case_written"] is True
+    assert persisted["case_id"] == "case-durable-54"
+    assert state.supervisor_log[-1]["case_written"] is True
+    assert state.supervisor_log[-1]["case_id"] == "case-durable-54"
+    assert "private retry failure" not in str(state.model_dump())
