@@ -651,6 +651,33 @@ async def test_process_feedback_closure_does_not_rerun_completed_entry(monkeypat
     assert result["case"] == {"case_id": "case-42"}
 
 
+def test_closure_metadata_fills_missing_legacy_case_id():
+    from app.memory.feedback_loop import _update_feedback_closure_metadata
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 91,
+            "closure_status": "error",
+            "case_written": True,
+            "case_id": None,
+        }
+    ]
+
+    _update_feedback_closure_metadata(
+        state,
+        feedback_id=91,
+        closure_status="processed",
+        case_written=True,
+        case_id="case-91",
+        error_code=None,
+    )
+
+    assert state.feedback_state.user_feedback[0]["case_written"] is True
+    assert state.feedback_state.user_feedback[0]["case_id"] == "case-91"
+
+
 @pytest.mark.asyncio
 async def test_retry_preserves_prior_durable_case_when_local_upsert_fails(monkeypatch):
     from app.memory import feedback_loop

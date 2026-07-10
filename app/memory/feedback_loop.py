@@ -255,7 +255,7 @@ def _update_feedback_closure_metadata(
         prior_case_id = entry.get("case_id")
         entry["closure_status"] = closure_status
         entry["case_written"] = prior_case_written or case_written
-        entry["case_id"] = prior_case_id if prior_case_written else case_id
+        entry["case_id"] = prior_case_id or case_id
         if error_code:
             entry["error_code"] = error_code
         else:
