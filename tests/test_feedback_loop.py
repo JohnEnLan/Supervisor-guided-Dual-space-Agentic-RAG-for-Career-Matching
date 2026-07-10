@@ -312,6 +312,47 @@ async def test_feedback_loop_skips_rejected_feedback(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_feedback_loop_reports_case_written_when_similar_search_fails(
+    monkeypatch,
+):
+    import json
+
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState, StrategyState
+
+    async def fake_upsert_case(case, *, embed_if_missing):
+        assert embed_if_missing is True
+
+    async def fake_search_similar_cases(query, *, top_k):
+        raise RuntimeError("private provider message must not persist")
+
+    monkeypatch.setattr(feedback_loop, "upsert_career_case", fake_upsert_case)
+    monkeypatch.setattr(feedback_loop, "search_similar_cases", fake_search_similar_cases)
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {"job_id": "job-1", "title": "Data Analyst", "tier": "now_fit"}
+            ]
+        ),
+    )
+
+    result = await feedback_loop.run_feedback_closure(
+        state,
+        feedback={"feedback_id": 9, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    assert result["closure_status"] == "error"
+    assert result["error_code"] == "similar_case_search_failed"
+    assert result["case_written"] is True
+    assert result["case"]["case_id"].startswith("feedback-")
+    assert state.supervisor_log[-1]["case_written"] is True
+    assert state.supervisor_log[-1]["error_code"] == "similar_case_search_failed"
+    assert "private provider message" not in json.dumps(state.model_dump())
+
+
+@pytest.mark.asyncio
 async def test_process_feedback_closure_for_session_uses_atomic_state_mutation(
     monkeypatch,
 ):
@@ -319,6 +360,9 @@ async def test_process_feedback_closure_for_session_uses_atomic_state_mutation(
     from app.state.schema import SharedState
 
     state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {"feedback_id": 42, "job_id": "job-1", "outcome": "offer"}
+    ]
     mutated = []
 
     async def fake_load_state(session_id):
@@ -329,6 +373,7 @@ async def test_process_feedback_closure_for_session_uses_atomic_state_mutation(
         assert loaded_state is state
         assert feedback == {"feedback_id": 42, "job_id": "job-1"}
         return {
+            "closure_status": "processed",
             "decision": {"is_valuable": True},
             "case_written": True,
             "case": {"case_id": "case-1"},
@@ -352,12 +397,21 @@ async def test_process_feedback_closure_for_session_uses_atomic_state_mutation(
     )
 
     assert result == {
+        "closure_status": "processed",
         "decision": {"is_valuable": True},
         "case_written": True,
         "case": {"case_id": "case-1"},
         "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
     }
     assert mutated == [state]
+    assert state.feedback_state.user_feedback[0] == {
+        "feedback_id": 42,
+        "job_id": "job-1",
+        "outcome": "offer",
+        "closure_status": "processed",
+        "case_written": True,
+        "case_id": "case-1",
+    }
 
 
 @pytest.mark.asyncio
@@ -370,6 +424,9 @@ async def test_process_feedback_closure_merges_into_latest_state_atomically(
     stale_state = SharedState(session_id="s1", user_id="u1")
     latest_state = SharedState(session_id="s1", user_id="u1")
     latest_state.career_state.current_goal = ["newer unrelated goal"]
+    latest_state.feedback_state.user_feedback = [
+        {"feedback_id": 42, "job_id": "job-1", "outcome": "offer"}
+    ]
     latest_row = {"state": latest_state, "status": "agentic_done"}
 
     async def fake_load_state(session_id):
@@ -379,6 +436,7 @@ async def test_process_feedback_closure_merges_into_latest_state_atomically(
     async def fake_run_feedback_closure(loaded_state, *, feedback):
         assert loaded_state is stale_state
         return {
+            "closure_status": "processed",
             "decision": {"is_valuable": True},
             "case_written": True,
             "case": {"case_id": "case-1"},
@@ -418,5 +476,7 @@ async def test_process_feedback_closure_merges_into_latest_state_atomically(
         "case_written": True,
         "case_id": "case-1",
         "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
+        "closure_status": "processed",
     }
+    assert latest_row["state"].feedback_state.user_feedback[0]["case_id"] == "case-1"
     assert latest_row["status"] == "agentic_done"

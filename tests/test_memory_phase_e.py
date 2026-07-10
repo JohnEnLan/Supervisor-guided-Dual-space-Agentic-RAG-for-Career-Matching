@@ -338,6 +338,60 @@ async def test_state_store_feedback_locks_and_updates_latest_state_atomically(
 
 
 @pytest.mark.asyncio
+async def test_state_store_feedback_reuses_persisted_idempotency_key(monkeypatch):
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    calls = []
+    current_state = SharedState(session_id="s1", user_id="u1")
+    current_state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 9,
+            "job_id": "job-1",
+            "outcome": "offer",
+            "idempotency_key": "feedback-request-1",
+        }
+    ]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def fetchrow(self, sql, *args):
+            calls.append(("fetchrow", sql, args))
+            if "FROM session_state" in sql:
+                return {"state": current_state.model_dump_json()}
+            raise AssertionError("idempotent retry must not insert feedback_memory")
+
+        async def execute(self, sql, *args):
+            raise AssertionError("idempotent retry must not rewrite state")
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    feedback_id = await state_store.add_feedback(
+        session_id="s1",
+        job_id="job-1",
+        outcome="offer",
+        idempotency_key="feedback-request-1",
+    )
+
+    assert feedback_id == 9
+    assert [call[0] for call in calls if isinstance(call, tuple)] == ["fetchrow"]
+    assert calls[-1] == "transaction_exit"
+
+
+@pytest.mark.asyncio
 async def test_mutate_state_atomically_locks_and_updates_state_without_status(
     monkeypatch,
 ):

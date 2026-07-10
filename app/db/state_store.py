@@ -94,12 +94,19 @@ async def add_feedback(
     outcome: str,
     reason: str | None = None,
     user_rating: int | None = None,
+    idempotency_key: str | None = None,
 ) -> int:
     canonical_outcome = normalize_application_outcome(outcome)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             state = await _load_locked_state(conn, session_id)
+            if idempotency_key:
+                existing_feedback_id = _feedback_id_for_idempotency_key(
+                    state, idempotency_key
+                )
+                if existing_feedback_id is not None:
+                    return existing_feedback_id
             row = await conn.fetchrow(
                 """
                 INSERT INTO feedback_memory (user_id, job_id, outcome, reason, user_rating)
@@ -113,17 +120,30 @@ async def add_feedback(
                 user_rating,
             )
             feedback_id = int(row["feedback_id"])
-            state.feedback_state.user_feedback.append(
-                {
-                    "job_id": job_id,
-                    "outcome": canonical_outcome,
-                    "reason": reason,
-                    "user_rating": user_rating,
-                    "feedback_id": feedback_id,
-                }
-            )
+            feedback_entry = {
+                "job_id": job_id,
+                "outcome": canonical_outcome,
+                "reason": reason,
+                "user_rating": user_rating,
+                "feedback_id": feedback_id,
+            }
+            if idempotency_key:
+                feedback_entry["idempotency_key"] = idempotency_key
+            state.feedback_state.user_feedback.append(feedback_entry)
             await _write_locked_state(conn, state)
             return feedback_id
+
+
+def _feedback_id_for_idempotency_key(
+    state: SharedState, idempotency_key: str
+) -> int | None:
+    for entry in state.feedback_state.user_feedback:
+        if entry.get("idempotency_key") != idempotency_key:
+            continue
+        feedback_id = entry.get("feedback_id")
+        if feedback_id is not None:
+            return int(feedback_id)
+    return None
 
 
 async def _load_locked_state(conn: Any, session_id: str) -> SharedState:

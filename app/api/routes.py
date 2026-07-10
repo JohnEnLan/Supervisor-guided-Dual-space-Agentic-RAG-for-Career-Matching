@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.orchestrator import run_persisted_agentic_match_from_session
 from app.db.state_store import (
@@ -15,6 +15,7 @@ from app.db.state_store import (
     save_state,
 )
 from app.memory.feedback_loop import process_feedback_closure_for_session
+from app.memory.feedback import normalize_application_outcome
 from app.normalization.resume_intake import intake_resume
 from app.retrieval.query_builder import build_resume_retrieval_query
 from app.state.schema import SharedState
@@ -38,6 +39,12 @@ class FeedbackRequest(BaseModel):
     outcome: str = Field(min_length=1)
     reason: str | None = None
     user_rating: int | None = Field(default=None, ge=1, le=5)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("outcome")
+    @classmethod
+    def validate_outcome(cls, value: str) -> str:
+        return normalize_application_outcome(value)
 
 
 @router.post("/resume", status_code=202)
@@ -127,6 +134,7 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
             outcome=request.outcome,
             reason=request.reason,
             user_rating=request.user_rating,
+            idempotency_key=request.idempotency_key,
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
@@ -137,17 +145,17 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
         "outcome": request.outcome,
         "reason": request.reason,
         "user_rating": request.user_rating,
+        "idempotency_key": request.idempotency_key,
     }
     try:
         result = await process_feedback_closure_for_session(
             session_id=request.session_id,
             feedback=feedback,
         )
-    except Exception as exc:
+    except Exception:
         await _record_feedback_closure_error(
             session_id=request.session_id,
             feedback_id=feedback_id,
-            error=exc,
         )
         return {
             "session_id": request.session_id,
@@ -155,18 +163,24 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
             "status": "feedback_recorded",
             "closure_status": "error",
             "case_written": False,
+            "case_id": None,
             "soft_preference_updates": {},
+            "error_code": "feedback_closure_failed",
         }
 
-    case_written = bool(result["case_written"])
-    return {
+    response = {
         "session_id": request.session_id,
         "feedback_id": feedback_id,
-        "status": "feedback_processed",
-        "closure_status": "processed" if case_written else "skipped",
-        "case_written": case_written,
+        "status": "feedback_recorded",
+        "closure_status": result.get("closure_status")
+        or ("processed" if result["case_written"] else "skipped"),
+        "case_written": bool(result["case_written"]),
+        "case_id": (result.get("case") or {}).get("case_id"),
         "soft_preference_updates": result["soft_preference_updates"],
     }
+    if result.get("error_code"):
+        response["error_code"] = result["error_code"]
+    return response
 
 
 async def _run_resume_task(*, session_id: str, user_id: str, resume_path: Path) -> None:
@@ -227,23 +241,29 @@ async def _record_background_error(
             "stage": "api_background_task",
             "status": status,
             "error_type": type(error).__name__,
-            "error": str(error)[:500],
+            "error_code": "background_task_failed",
         }
     )
     await save_state(state, status=status)
 
 
 async def _record_feedback_closure_error(
-    *, session_id: str, feedback_id: int, error: Exception
+    *, session_id: str, feedback_id: int
 ) -> None:
     try:
         def append_error_log(state: SharedState) -> None:
+            for entry in state.feedback_state.user_feedback:
+                if str(entry.get("feedback_id")) == str(feedback_id):
+                    entry["closure_status"] = "error"
+                    entry["case_written"] = False
+                    entry["case_id"] = None
+                    entry["error_code"] = "feedback_closure_failed"
+                    break
             state.supervisor_log.append(
                 {
                     "stage": "feedback_closure_error",
                     "feedback_id": feedback_id,
-                    "error_type": type(error).__name__,
-                    "error": str(error)[:500],
+                    "error_code": "feedback_closure_failed",
                 }
             )
 

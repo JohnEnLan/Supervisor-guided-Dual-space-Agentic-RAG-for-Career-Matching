@@ -294,6 +294,7 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
                 "outcome": "interview",
                 "reason": "good match",
                 "user_rating": 5,
+                "idempotency_key": "feedback-request-1",
             },
         )
 
@@ -301,9 +302,10 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
     assert response.json() == {
         "session_id": "s1",
         "feedback_id": 42,
-        "status": "feedback_processed",
+        "status": "feedback_recorded",
         "closure_status": "processed",
         "case_written": True,
+        "case_id": None,
         "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
     }
     assert calls == [
@@ -313,6 +315,7 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
             "outcome": "interview",
             "reason": "good match",
             "user_rating": 5,
+            "idempotency_key": "feedback-request-1",
         },
         (
             "closure",
@@ -323,6 +326,7 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
                 "outcome": "interview",
                 "reason": "good match",
                 "user_rating": 5,
+                "idempotency_key": "feedback-request-1",
             },
         ),
     ]
@@ -360,10 +364,74 @@ async def test_feedback_returns_skipped_when_closure_rejects_feedback(monkeypatc
     assert response.json() == {
         "session_id": "s1",
         "feedback_id": 43,
-        "status": "feedback_processed",
+        "status": "feedback_recorded",
         "closure_status": "skipped",
         "case_written": False,
+        "case_id": None,
         "soft_preference_updates": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_feedback_rejects_invalid_outcome_with_422(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+
+    async def fail_add_feedback(**kwargs):
+        raise AssertionError("invalid outcome must fail request validation")
+
+    monkeypatch.setattr(routes, "add_feedback", fail_add_feedback)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={"session_id": "s1", "job_id": "job-1", "outcome": "maybe"},
+        )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_feedback_response_preserves_partial_case_write_truth(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+
+    async def fake_add_feedback(**kwargs):
+        return 45
+
+    async def fake_process_feedback_closure_for_session(*, session_id, feedback):
+        return {
+            "closure_status": "error",
+            "error_code": "similar_case_search_failed",
+            "case_written": True,
+            "case": {"case_id": "feedback-case-45"},
+            "soft_preference_updates": {},
+        }
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_feedback_closure_for_session,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={"session_id": "s1", "job_id": "job-1", "outcome": "offer"},
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "session_id": "s1",
+        "feedback_id": 45,
+        "status": "feedback_recorded",
+        "closure_status": "error",
+        "case_written": True,
+        "case_id": "feedback-case-45",
+        "soft_preference_updates": {},
+        "error_code": "similar_case_search_failed",
     }
 
 
@@ -374,6 +442,9 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
     from app.state.schema import SharedState
 
     state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {"feedback_id": 44, "job_id": "job-1", "outcome": "offer"}
+    ]
     atomic_mutations = []
 
     async def fake_add_feedback(**kwargs):
@@ -415,7 +486,11 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
         "status": "feedback_recorded",
         "closure_status": "error",
         "case_written": False,
+        "case_id": None,
         "soft_preference_updates": {},
+        "error_code": "feedback_closure_failed",
     }
     assert len(atomic_mutations) == 1
     assert state.supervisor_log[-1]["stage"] == "feedback_closure_error"
+    assert "case storage unavailable" not in str(state.model_dump())
+    assert state.feedback_state.user_feedback[0]["closure_status"] == "error"
