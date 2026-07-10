@@ -28,6 +28,21 @@ def test_evaluate_rankings_computes_top_k_metrics():
     assert 0.0 < metrics["ndcg@2"] <= 1.0
 
 
+def test_evaluate_rankings_deduplicates_predictions_before_k():
+    labels = [{"case_id": "eval-1", "relevant_job_ids": ["a"]}]
+    rankings = {"eval-1": ["a", "a"]}
+
+    metrics = evaluate_rankings(labels, rankings, k=2)
+
+    assert metrics == {
+        "cases": 1,
+        "precision@2": 0.5,
+        "recall@2": 1.0,
+        "mrr@2": 1.0,
+        "ndcg@2": 1.0,
+    }
+
+
 def test_compare_retrieval_runs_reports_no_raptor_vs_with_raptor_delta():
     labels = [
         {"case_id": "eval-1", "relevant_job_ids": ["a"]},

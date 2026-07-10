@@ -23,7 +23,7 @@ def evaluate_rankings(
     for label in labels:
         case_id = str(label["case_id"])
         relevant = {str(job_id) for job_id in label["relevant_job_ids"]}
-        predicted = [str(job_id) for job_id in rankings.get(case_id, [])][:k]
+        predicted = _unique_ranked_ids(rankings.get(case_id, []))[:k]
 
         precision_values.append(_precision_at_k(predicted, relevant, k))
         recall_values.append(_recall_at_k(predicted, relevant))
@@ -186,6 +186,10 @@ def _precision_at_k(predicted: Sequence[str], relevant: set[str], k: int) -> flo
         return 0.0
     hits = sum(1 for job_id in predicted[:k] if job_id in relevant)
     return hits / k
+
+
+def _unique_ranked_ids(values: Sequence[object]) -> list[str]:
+    return list(dict.fromkeys(str(value) for value in values))
 
 
 def _recall_at_k(predicted: Sequence[str], relevant: set[str]) -> float:
