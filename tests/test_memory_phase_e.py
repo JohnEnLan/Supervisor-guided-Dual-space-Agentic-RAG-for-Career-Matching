@@ -395,6 +395,87 @@ async def test_mutate_state_atomically_locks_and_updates_state_without_status(
     assert calls[3] == "transaction_exit"
 
 
+@pytest.mark.asyncio
+async def test_stale_stage_save_preserves_concurrently_committed_feedback_state(
+    monkeypatch,
+):
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    calls = []
+    persisted = SharedState(session_id="s1", user_id="u1")
+    persisted.feedback_state.user_feedback = [
+        {
+            "feedback_id": 9,
+            "job_id": "job-1",
+            "outcome": "offer",
+            "closure_status": "processed",
+            "case_written": True,
+            "case_id": "feedback-case-1",
+        }
+    ]
+    persisted.feedback_state.case_soft_preferences = {
+        "case_target_roles": ["Data Analyst"]
+    }
+    persisted.supervisor_log = [
+        {
+            "stage": "feedback_closure",
+            "feedback_id": 9,
+            "case_written": True,
+        }
+    ]
+
+    stale_orchestrator_state = SharedState(session_id="s1", user_id="u1")
+    stale_orchestrator_state.career_state.current_goal = ["new stage goal"]
+    stale_orchestrator_state.supervisor_log = [
+        {"stage": "planning", "retrieval_plan": {"top_k": 5}}
+    ]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def fetchrow(self, sql, *args):
+            calls.append(("fetchrow", sql, args))
+            return {"state": persisted.model_dump_json()}
+
+        async def execute(self, sql, *args):
+            calls.append(("execute", sql, args))
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    await state_store.save_state(stale_orchestrator_state, status="agentic_done")
+
+    assert calls[0] == "transaction_enter"
+    assert "FOR UPDATE" in calls[1][1]
+    update_sql, update_args = calls[2][1:]
+    written = json.loads(update_args[0])
+    assert written["career_state"]["current_goal"] == ["new stage goal"]
+    assert written["feedback_state"] == persisted.feedback_state.model_dump()
+    assert written["supervisor_log"] == [
+        {
+            "stage": "feedback_closure",
+            "feedback_id": 9,
+            "case_written": True,
+        },
+        {"stage": "planning", "retrieval_plan": {"top_k": 5}},
+    ]
+    assert "status = $2" in update_sql
+    assert update_args[1:] == ("agentic_done", "s1")
+    assert calls[3] == "transaction_exit"
+
+
 def test_case_base_rejects_pii_and_builds_anonymous_embedding_text():
     from app.memory.case_base import CareerCase, build_case_embedding_text
 

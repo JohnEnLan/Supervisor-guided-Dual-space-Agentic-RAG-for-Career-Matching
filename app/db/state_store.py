@@ -13,17 +13,40 @@ from app.state.schema import SharedState
 async def save_state(state: SharedState, status: str = "running") -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO session_state (session_id, user_id, state, status, updated_at)
-            VALUES ($1, $2, $3::jsonb, $4, now())
-            ON CONFLICT (session_id)
-            DO UPDATE SET state = EXCLUDED.state,
-                          status = EXCLUDED.status,
-                          updated_at = now()
-            """,
-            state.session_id, state.user_id, state.model_dump_json(), status,
-        )
+        async with conn.transaction():
+            latest = await _load_locked_state_or_none(conn, state.session_id)
+            if latest is None:
+                await conn.execute(
+                    """
+                    INSERT INTO session_state (
+                        session_id, user_id, state, status, updated_at
+                    )
+                    VALUES ($1, $2, $3::jsonb, $4, now())
+                    ON CONFLICT (session_id)
+                    DO UPDATE SET state = EXCLUDED.state,
+                                  status = EXCLUDED.status,
+                                  updated_at = now()
+                    """,
+                    state.session_id,
+                    state.user_id,
+                    state.model_dump_json(),
+                    status,
+                )
+                return
+
+            merged = _merge_feedback_owned_state(latest, state)
+            await conn.execute(
+                """
+                UPDATE session_state
+                SET state = $1::jsonb,
+                    status = $2,
+                    updated_at = now()
+                WHERE session_id = $3
+                """,
+                merged.model_dump_json(),
+                status,
+                merged.session_id,
+            )
 
 
 async def load_state(session_id: str) -> SharedState | None:
@@ -100,13 +123,97 @@ async def add_feedback(
 
 
 async def _load_locked_state(conn: Any, session_id: str) -> SharedState:
+    state = await _load_locked_state_or_none(conn, session_id)
+    if state is None:
+        raise KeyError(session_id)
+    return state
+
+
+async def _load_locked_state_or_none(
+    conn: Any, session_id: str
+) -> SharedState | None:
     row = await conn.fetchrow(
         "SELECT state FROM session_state WHERE session_id = $1 FOR UPDATE",
         session_id,
     )
     if row is None:
-        raise KeyError(session_id)
+        return None
     return SharedState.model_validate(json.loads(row["state"]))
+
+
+def _merge_feedback_owned_state(
+    latest: SharedState, incoming: SharedState
+) -> SharedState:
+    merged = incoming.model_copy(deep=True)
+    merged.feedback_state.application_history = _merge_append_only_entries(
+        latest.feedback_state.application_history,
+        incoming.feedback_state.application_history,
+    )
+    merged.feedback_state.interview_outcomes = _merge_append_only_entries(
+        latest.feedback_state.interview_outcomes,
+        incoming.feedback_state.interview_outcomes,
+    )
+    merged.feedback_state.user_feedback = _merge_append_only_entries(
+        latest.feedback_state.user_feedback,
+        incoming.feedback_state.user_feedback,
+        identity_keys=("feedback_id", "idempotency_key"),
+    )
+    merged.feedback_state.case_soft_preferences = _merge_case_preferences(
+        latest.feedback_state.case_soft_preferences,
+        incoming.feedback_state.case_soft_preferences,
+    )
+    merged.supervisor_log = _merge_append_only_entries(
+        latest.supervisor_log,
+        incoming.supervisor_log,
+    )
+    return merged
+
+
+def _merge_append_only_entries(
+    latest: list[dict],
+    incoming: list[dict],
+    *,
+    identity_keys: tuple[str, ...] = (),
+) -> list[dict]:
+    merged = [dict(item) for item in latest]
+    identities = {
+        identity
+        for item in latest
+        if (identity := _entry_identity(item, identity_keys)) is not None
+    }
+    for item in incoming:
+        identity = _entry_identity(item, identity_keys)
+        if identity is not None:
+            if identity in identities:
+                continue
+            identities.add(identity)
+        elif item in merged:
+            continue
+        merged.append(dict(item))
+    return merged
+
+
+def _entry_identity(
+    entry: dict, identity_keys: tuple[str, ...]
+) -> tuple[str, str] | None:
+    for key in identity_keys:
+        value = entry.get(key)
+        if value is not None and str(value):
+            return key, str(value)
+    return None
+
+
+def _merge_case_preferences(latest: dict, incoming: dict) -> dict:
+    merged: dict[str, list] = {}
+    for preferences in (latest, incoming):
+        for key, values in preferences.items():
+            if not isinstance(values, list):
+                continue
+            target = merged.setdefault(key, [])
+            for value in values:
+                if value and value not in target:
+                    target.append(value)
+    return merged
 
 
 async def _write_locked_state(conn: Any, state: SharedState) -> None:
