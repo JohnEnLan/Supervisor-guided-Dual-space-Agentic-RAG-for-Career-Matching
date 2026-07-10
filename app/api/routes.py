@@ -172,6 +172,7 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
         error_result = await _record_feedback_closure_error(
             session_id=request.session_id,
             feedback_id=feedback_id,
+            persisted_feedback=feedback,
         )
         return _build_feedback_response(
             session_id=request.session_id,
@@ -270,19 +271,27 @@ async def _record_background_error(
 
 
 async def _record_feedback_closure_error(
-    *, session_id: str, feedback_id: int
+    *,
+    session_id: str,
+    feedback_id: int,
+    persisted_feedback: dict | None = None,
 ) -> dict:
+    known_feedback = persisted_feedback or {}
+    known_case_written = bool(known_feedback.get("case_written"))
+    known_case_id = (
+        known_feedback.get("case_id") if known_case_written else None
+    )
     fallback_result = {
         "closure_status": "error",
-        "case_written": False,
-        "case_id": None,
+        "case_written": known_case_written,
+        "case_id": known_case_id,
         "soft_preference_updates": {},
         "error_code": "feedback_closure_failed",
     }
     try:
         def append_error_log(state: SharedState) -> dict:
-            case_written = False
-            case_id = None
+            case_written = known_case_written
+            case_id = known_case_id
             for entry in state.feedback_state.user_feedback:
                 if str(entry.get("feedback_id")) == str(feedback_id):
                     if entry.get("closure_status") in {"processed", "skipped"}:
@@ -293,8 +302,10 @@ async def _record_feedback_closure_error(
                             "soft_preference_updates": {},
                             "error_code": entry.get("error_code"),
                         }
-                    case_written = bool(entry.get("case_written"))
-                    case_id = entry.get("case_id") if case_written else None
+                    entry_case_written = bool(entry.get("case_written"))
+                    case_written = case_written or entry_case_written
+                    if entry_case_written and entry.get("case_id"):
+                        case_id = entry["case_id"]
                     entry["closure_status"] = "error"
                     entry["case_written"] = case_written
                     entry["case_id"] = case_id

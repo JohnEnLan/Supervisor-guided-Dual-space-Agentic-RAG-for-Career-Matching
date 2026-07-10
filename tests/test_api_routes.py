@@ -791,3 +791,70 @@ async def test_feedback_unexpected_retry_error_preserves_prior_durable_case(
     assert state.supervisor_log[-1]["case_written"] is True
     assert state.supervisor_log[-1]["case_id"] == "case-durable-54"
     assert "private retry failure" not in str(state.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_feedback_outer_fallback_preserves_persisted_durable_case(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+
+    persisted_feedback = {
+        "feedback_id": 77,
+        "job_id": "job-1",
+        "outcome": "offer",
+        "idempotency_key": "request-77",
+        "closure_status": "error",
+        "case_written": True,
+        "case_id": "case-durable-77",
+        "error_code": "similar_case_search_failed",
+    }
+
+    async def fake_add_feedback(**kwargs):
+        return SimpleNamespace(
+            feedback_id=77,
+            created=False,
+            feedback=dict(persisted_feedback),
+        )
+
+    async def fake_process_closure(**kwargs):
+        raise RuntimeError("private retry failure")
+
+    async def fail_mutate_state_atomically(**kwargs):
+        raise RuntimeError("private persistence failure")
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_closure,
+    )
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fail_mutate_state_atomically,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={
+                "session_id": "s1",
+                "job_id": "job-1",
+                "outcome": "offer",
+                "idempotency_key": "request-77",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "session_id": "s1",
+        "feedback_id": 77,
+        "status": "feedback_recorded",
+        "closure_status": "error",
+        "case_written": True,
+        "case_id": "case-durable-77",
+        "soft_preference_updates": {},
+        "error_code": "feedback_closure_failed",
+    }
+    assert "private" not in response.text
