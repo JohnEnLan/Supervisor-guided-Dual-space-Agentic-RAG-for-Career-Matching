@@ -45,6 +45,7 @@ class FeedbackState(BaseModel):
     application_history: list[dict] = Field(default_factory=list)
     interview_outcomes: list[dict] = Field(default_factory=list)
     user_feedback: list[dict] = Field(default_factory=list)
+    case_soft_preferences: dict = Field(default_factory=dict)
 
 
 class SharedState(BaseModel):

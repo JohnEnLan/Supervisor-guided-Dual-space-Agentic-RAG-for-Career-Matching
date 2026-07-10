@@ -63,6 +63,23 @@ def build_case_embedding_text(case: CareerCase) -> str:
     )
 
 
+def merge_case_soft_preferences(
+    base_soft_prefs: dict[str, Any],
+    case_updates: dict[str, list[str]],
+) -> dict[str, Any]:
+    merged = {
+        key: list(value) if isinstance(value, list) else value
+        for key, value in base_soft_prefs.items()
+    }
+    for key, values in case_updates.items():
+        existing = merged.get(key)
+        merged[key] = list(existing) if isinstance(existing, list) else []
+        for value in values:
+            if value and value not in merged[key]:
+                merged[key].append(value)
+    return merged
+
+
 async def upsert_career_case(
     case: CareerCase,
     *,

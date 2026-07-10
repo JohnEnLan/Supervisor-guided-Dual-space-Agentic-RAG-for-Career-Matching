@@ -92,6 +92,10 @@ async def test_feedback_loop_writes_anonymous_case_and_returns_case_weight_hints
         "case_target_roles": ["Data Analyst"],
         "case_bridge_roles": ["Business Analyst Intern"],
     }
+    assert state.feedback_state.case_soft_preferences == {
+        "case_target_roles": ["Data Analyst"],
+        "case_bridge_roles": ["Business Analyst Intern"],
+    }
     assert state.supervisor_log[-1]["stage"] == "feedback_closure"
     assert state.supervisor_log[-1]["case_written"] is True
 
