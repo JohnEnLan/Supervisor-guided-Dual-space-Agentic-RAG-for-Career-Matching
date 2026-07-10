@@ -544,6 +544,72 @@ async def test_top_five_match_explanations_run_in_parallel():
 
 
 @pytest.mark.asyncio
+async def test_one_failed_explanation_preserves_successful_siblings():
+    from app.agents.matching_agent import enrich_top_match_explanations
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import ResumeState, SharedState, StrategyState
+
+    async def fake_chat(system, user, **kwargs):
+        assert "PHASE_C_MATCHING_AGENT" in system
+        candidate = json.loads(user)["candidate"]
+        if candidate["job_id"] == "job-3":
+            raise RuntimeError("provider temporarily unavailable")
+        return json.dumps(
+            {
+                "recommended_roles": [
+                    {
+                        "job_id": candidate["job_id"],
+                        "tier": "now_fit",
+                        "match_explanation": f"Explanation for {candidate['job_id']}",
+                        "evidence_span_ids": candidate["evidence_span_ids"],
+                    }
+                ]
+            }
+        )
+
+    candidates = [
+        JobCandidate(
+            job_id=f"job-{index}",
+            score=1.0 - index * 0.01,
+            title="Data Analyst",
+            evidence_span_ids=[f"job-{index}:skills:1"],
+        )
+        for index in range(1, 6)
+    ]
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        resume_state=ResumeState(normalized_base_resume="Python SQL analyst resume"),
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    "job_id": candidate.job_id,
+                    "tier": "stretch_fit",
+                    "match_explanation": "",
+                    "evidence_span_ids": list(candidate.evidence_span_ids),
+                }
+                for candidate in candidates
+            ]
+        ),
+    )
+
+    await enrich_top_match_explanations(
+        state,
+        candidates,
+        top_n=5,
+        chat_fn=fake_chat,
+    )
+
+    roles = state.strategy_state.recommended_roles
+    assert sum(bool(role["match_explanation"]) for role in roles) == 4
+    assert state.supervisor_log[-1]["requested"] == 5
+    assert state.supervisor_log[-1]["updated"] == 4
+    assert state.supervisor_log[-1]["failed"] == 1
+    assert state.supervisor_log[-1]["failed_job_ids"] == ["job-3"]
+    assert state.supervisor_log[-1]["mode"] == "parallel"
+
+
+@pytest.mark.asyncio
 async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch):
     from app.agents import base
     from app.agents.strategy_agent import run_strategy_agent

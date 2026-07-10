@@ -132,7 +132,7 @@ async def enrich_top_match_explanations(
     top_candidates = candidates[:top_n]
     explanation_rows = await asyncio.gather(
         *[
-            _explain_candidate_match(
+            _explain_candidate_match_safely(
                 state,
                 candidate,
                 roles_by_job.get(candidate.job_id, {}),
@@ -142,24 +142,56 @@ async def enrich_top_match_explanations(
         ]
     )
 
-    for job_id, explanation in explanation_rows:
+    updated = 0
+    failed_job_ids = [
+        job_id for job_id, _explanation, error in explanation_rows if error
+    ]
+    for job_id, explanation, error in explanation_rows:
         role = roles_by_job.get(job_id)
-        if not role or not explanation:
+        if error or not role or not explanation:
             continue
         role["tier"] = explanation["tier"]
         role["match_explanation"] = explanation["match_explanation"]
         role["evidence_span_ids"] = explanation["evidence_span_ids"]
         role["evidence_spans"] = explanation["evidence_spans"]
+        updated += 1
 
     state.supervisor_log.append(
         {
             "stage": "matching_explanations",
             "mode": "parallel",
             "requested": len(top_candidates),
-            "updated": sum(1 for _job_id, item in explanation_rows if item),
+            "updated": updated,
+            "failed": len(failed_job_ids),
+            "failed_job_ids": failed_job_ids,
         }
     )
     return state
+
+
+async def _explain_candidate_match_safely(
+    state: SharedState,
+    candidate: JobCandidate,
+    current_role: dict[str, Any],
+    *,
+    chat_fn: ChatFn,
+) -> tuple[str, dict[str, Any], str | None]:
+    try:
+        job_id, explanation = await _explain_candidate_match(
+            state,
+            candidate,
+            current_role,
+            chat_fn=chat_fn,
+        )
+    except Exception as exc:
+        return candidate.job_id, {}, type(exc).__name__
+
+    if (
+        not isinstance(explanation, dict)
+        or not str(explanation.get("match_explanation") or "").strip()
+    ):
+        return job_id, {}, "invalid_response"
+    return job_id, explanation, None
 
 
 async def _explain_candidate_match(
