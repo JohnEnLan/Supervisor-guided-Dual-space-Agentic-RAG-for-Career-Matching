@@ -55,25 +55,9 @@ async def mutate_state_atomically(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow(
-                "SELECT state FROM session_state WHERE session_id = $1 FOR UPDATE",
-                session_id,
-            )
-            if row is None:
-                raise KeyError(session_id)
-
-            state = SharedState.model_validate(json.loads(row["state"]))
+            state = await _load_locked_state(conn, session_id)
             mutator(state)
-            await conn.execute(
-                """
-                UPDATE session_state
-                SET state = $1::jsonb,
-                    updated_at = now()
-                WHERE session_id = $2
-                """,
-                state.model_dump_json(),
-                session_id,
-            )
+            await _write_locked_state(conn, state)
 
 
 async def add_feedback(
@@ -84,36 +68,55 @@ async def add_feedback(
     reason: str | None = None,
     user_rating: int | None = None,
 ) -> int:
-    state_with_status = await load_state_with_status(session_id)
-    if state_with_status is None:
-        raise KeyError(session_id)
-
-    state, status = state_with_status
     canonical_outcome = normalize_application_outcome(outcome)
-    payload: dict[str, Any] = {
-        "job_id": job_id,
-        "outcome": canonical_outcome,
-        "reason": reason,
-        "user_rating": user_rating,
-    }
-
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO feedback_memory (user_id, job_id, outcome, reason, user_rating)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING feedback_id
-            """,
-            state.user_id,
-            job_id,
-            canonical_outcome,
-            reason,
-            user_rating,
-        )
+        async with conn.transaction():
+            state = await _load_locked_state(conn, session_id)
+            row = await conn.fetchrow(
+                """
+                INSERT INTO feedback_memory (user_id, job_id, outcome, reason, user_rating)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING feedback_id
+                """,
+                state.user_id,
+                job_id,
+                canonical_outcome,
+                reason,
+                user_rating,
+            )
+            feedback_id = int(row["feedback_id"])
+            state.feedback_state.user_feedback.append(
+                {
+                    "job_id": job_id,
+                    "outcome": canonical_outcome,
+                    "reason": reason,
+                    "user_rating": user_rating,
+                    "feedback_id": feedback_id,
+                }
+            )
+            await _write_locked_state(conn, state)
+            return feedback_id
 
-    feedback_id = int(row["feedback_id"])
-    payload["feedback_id"] = feedback_id
-    state.feedback_state.user_feedback.append(payload)
-    await save_state(state, status=status or "feedback_recorded")
-    return feedback_id
+
+async def _load_locked_state(conn: Any, session_id: str) -> SharedState:
+    row = await conn.fetchrow(
+        "SELECT state FROM session_state WHERE session_id = $1 FOR UPDATE",
+        session_id,
+    )
+    if row is None:
+        raise KeyError(session_id)
+    return SharedState.model_validate(json.loads(row["state"]))
+
+
+async def _write_locked_state(conn: Any, state: SharedState) -> None:
+    await conn.execute(
+        """
+        UPDATE session_state
+        SET state = $1::jsonb,
+            updated_at = now()
+        WHERE session_id = $2
+        """,
+        state.model_dump_json(),
+        state.session_id,
+    )

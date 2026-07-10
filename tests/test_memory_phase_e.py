@@ -267,35 +267,45 @@ async def test_feedback_records_and_reads_canonical_application_outcomes(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_state_store_feedback_uses_canonical_outcome_for_db_and_state(
+async def test_state_store_feedback_locks_and_updates_latest_state_atomically(
     monkeypatch,
 ):
     from app.db import state_store
     from app.state.schema import SharedState
 
-    saved = []
+    calls = []
+    current_state = SharedState(session_id="s1", user_id="u1")
+    current_state.career_state.current_goal = ["newer unrelated goal"]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
 
     class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
         async def fetchrow(self, sql, *args):
-            self.args = args
-            return {"feedback_id": 9}
+            calls.append(("fetchrow", sql, args))
+            if "FROM session_state" in sql:
+                return {"state": current_state.model_dump_json()}
+            if "INSERT INTO feedback_memory" in sql:
+                return {"feedback_id": 9}
+            raise AssertionError(sql)
+
+        async def execute(self, sql, *args):
+            calls.append(("execute", sql, args))
 
     conn = FakeConn()
 
     async def fake_get_pool():
         return FakePool(conn)
 
-    async def fake_load_state_with_status(session_id):
-        return SharedState(session_id=session_id, user_id="u1"), "agentic_done"
-
-    async def fake_save_state(state, status):
-        saved.append((state, status))
-
     monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
-    monkeypatch.setattr(
-        state_store, "load_state_with_status", fake_load_state_with_status
-    )
-    monkeypatch.setattr(state_store, "save_state", fake_save_state)
 
     feedback_id = await state_store.add_feedback(
         session_id="s1",
@@ -304,8 +314,18 @@ async def test_state_store_feedback_uses_canonical_outcome_for_db_and_state(
     )
 
     assert feedback_id == 9
-    assert conn.args == ("u1", "job-1", "offer", None, None)
-    assert saved[0][0].feedback_state.user_feedback == [
+    assert calls[0] == "transaction_enter"
+    select_sql = calls[1][1]
+    feedback_insert_sql, feedback_insert_args = calls[2][1:]
+    update_sql, update_args = calls[3][1:]
+    assert "FOR UPDATE" in select_sql
+    assert "INSERT INTO feedback_memory" in feedback_insert_sql
+    assert feedback_insert_args == ("u1", "job-1", "offer", None, None)
+    assert "UPDATE session_state" in update_sql
+    assert "status" not in update_sql.lower()
+    written_state = json.loads(update_args[0])
+    assert written_state["career_state"]["current_goal"] == ["newer unrelated goal"]
+    assert written_state["feedback_state"]["user_feedback"] == [
         {
             "job_id": "job-1",
             "outcome": "offer",
@@ -314,7 +334,7 @@ async def test_state_store_feedback_uses_canonical_outcome_for_db_and_state(
             "feedback_id": 9,
         }
     ]
-    assert saved[0][1] == "agentic_done"
+    assert calls[4] == "transaction_exit"
 
 
 @pytest.mark.asyncio
