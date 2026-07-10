@@ -7,6 +7,35 @@ os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test")
 os.environ.setdefault("QWEN_API_KEY", "sk-test")
 
 
+def test_merge_case_soft_preferences_preserves_and_appends_hints():
+    from app.memory.case_base import merge_case_soft_preferences
+
+    base_preferences = {
+        "preferred_location": "remote",
+        "case_target_roles": ["Data Analyst", "Product Analyst"],
+    }
+
+    merged = merge_case_soft_preferences(
+        base_preferences,
+        {
+            "case_target_roles": ["Product Analyst", "Business Analyst"],
+        },
+    )
+
+    assert merged == {
+        "preferred_location": "remote",
+        "case_target_roles": [
+            "Data Analyst",
+            "Product Analyst",
+            "Business Analyst",
+        ],
+    }
+    assert base_preferences == {
+        "preferred_location": "remote",
+        "case_target_roles": ["Data Analyst", "Product Analyst"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_feedback_loop_writes_anonymous_case_and_returns_case_weight_hints(
     monkeypatch,
