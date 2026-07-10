@@ -7,7 +7,7 @@ from typing import Any
 
 from app.config import settings
 from app.llm import deepseek
-from app.memory.case_base import CareerCase
+from app.memory.case_base import CareerCase, merge_case_soft_preferences
 from app.memory.feedback import is_positive_outcome, normalize_application_outcome
 from app.state.schema import SharedState
 
@@ -71,14 +71,21 @@ async def plan_retrieval(
     clarification_loop_used = (
         1 if needs_clarification and settings.max_clarification_loops > 0 else 0
     )
+    explicit_soft_prefs = (
+        state.career_state.soft_preferences
+        or _as_dict(llm_plan.get("soft_preferences"))
+    )
+    soft_prefs = merge_case_soft_preferences(
+        explicit_soft_prefs,
+        state.feedback_state.case_soft_preferences,
+    )
     plan = {
         "needs_clarification": needs_clarification,
         "clarification_question": parsed.get("clarification_question") or "",
         "clarification_loop_used": clarification_loop_used,
         "hard_constraints": state.career_state.hard_constraints
         or _as_dict(llm_plan.get("hard_constraints")),
-        "soft_prefs": state.career_state.soft_preferences
-        or _as_dict(llm_plan.get("soft_preferences")),
+        "soft_prefs": soft_prefs,
         "top_k": int(llm_plan.get("top_k") or default_top_k),
         "include_raptor": bool(llm_plan.get("include_raptor", include_raptor)),
     }

@@ -185,6 +185,53 @@ async def test_supervisor_planning_records_one_clarification_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_supervisor_planning_merges_learned_case_preferences(monkeypatch):
+    from app.agents import supervisor
+    from app.state.schema import CareerState, FeedbackState, SharedState
+
+    async def fake_chat(system, user, **kwargs):
+        assert "PHASE_C_SUPERVISOR_PLANNING" in system
+        return json.dumps(
+            {
+                "needs_clarification": False,
+                "retrieval_plan": {
+                    "hard_constraints": {},
+                    "soft_preferences": {},
+                    "top_k": 5,
+                    "include_raptor": False,
+                },
+            }
+        )
+
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        career_state=CareerState(soft_preferences={"title_keywords": ["analyst"]}),
+        feedback_state=FeedbackState(
+            case_soft_preferences={
+                "case_target_roles": ["Data Analyst"],
+                "case_bridge_roles": ["Business Analyst Intern"],
+            }
+        ),
+    )
+
+    plan = await supervisor.plan_retrieval(
+        state,
+        user_goal_text="Find data analyst jobs",
+        default_top_k=5,
+        include_raptor=False,
+    )
+
+    assert plan["soft_prefs"] == {
+        "title_keywords": ["analyst"],
+        "case_target_roles": ["Data Analyst"],
+        "case_bridge_roles": ["Business Analyst Intern"],
+    }
+    assert state.career_state.soft_preferences == {"title_keywords": ["analyst"]}
+
+
+@pytest.mark.asyncio
 async def test_matching_agent_writes_retrieval_state_and_recommended_roles(monkeypatch):
     from app.agents import base
     from app.agents.matching_agent import run_matching_agent
