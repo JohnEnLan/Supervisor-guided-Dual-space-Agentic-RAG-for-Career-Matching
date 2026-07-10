@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.agents.orchestrator import run_persisted_agentic_match_from_session
 from app.db.state_store import (
+    FeedbackIdempotencyConflict,
     add_feedback,
     load_state,
     load_state_with_status,
@@ -128,7 +129,7 @@ async def read_result(session_id: str) -> dict:
 @router.post("/feedback", status_code=202)
 async def submit_feedback(request: FeedbackRequest) -> dict:
     try:
-        feedback_id = await add_feedback(
+        write_result = await add_feedback(
             session_id=request.session_id,
             job_id=request.job_id,
             outcome=request.outcome,
@@ -138,15 +139,30 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
+    except FeedbackIdempotencyConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="idempotency key payload conflict",
+        ) from None
 
-    feedback = {
-        "feedback_id": feedback_id,
-        "job_id": request.job_id,
-        "outcome": request.outcome,
-        "reason": request.reason,
-        "user_rating": request.user_rating,
-        "idempotency_key": request.idempotency_key,
-    }
+    feedback_id = write_result.feedback_id
+    feedback = dict(write_result.feedback)
+    if not write_result.created and feedback.get("closure_status") in {
+        "processed",
+        "skipped",
+    }:
+        return _build_feedback_response(
+            session_id=request.session_id,
+            feedback_id=feedback_id,
+            result={
+                "closure_status": feedback["closure_status"],
+                "case_written": bool(feedback.get("case_written")),
+                "case_id": feedback.get("case_id"),
+                "soft_preference_updates": {},
+                "error_code": feedback.get("error_code"),
+            },
+        )
+
     try:
         result = await process_feedback_closure_for_session(
             session_id=request.session_id,
@@ -168,14 +184,25 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
             "error_code": "feedback_closure_failed",
         }
 
+    return _build_feedback_response(
+        session_id=request.session_id,
+        feedback_id=feedback_id,
+        result=result,
+    )
+
+
+def _build_feedback_response(
+    *, session_id: str, feedback_id: int, result: dict
+) -> dict:
     response = {
-        "session_id": request.session_id,
+        "session_id": session_id,
         "feedback_id": feedback_id,
         "status": "feedback_recorded",
         "closure_status": result.get("closure_status")
         or ("processed" if result["case_written"] else "skipped"),
         "case_written": bool(result["case_written"]),
-        "case_id": (result.get("case") or {}).get("case_id"),
+        "case_id": result.get("case_id")
+        or (result.get("case") or {}).get("case_id"),
         "soft_preference_updates": result["soft_preference_updates"],
     }
     if result.get("error_code"):
@@ -254,6 +281,8 @@ async def _record_feedback_closure_error(
         def append_error_log(state: SharedState) -> None:
             for entry in state.feedback_state.user_feedback:
                 if str(entry.get("feedback_id")) == str(feedback_id):
+                    if entry.get("closure_status") in {"processed", "skipped"}:
+                        return
                     entry["closure_status"] = "error"
                     entry["case_written"] = False
                     entry["case_id"] = None

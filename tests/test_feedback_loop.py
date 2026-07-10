@@ -480,3 +480,172 @@ async def test_process_feedback_closure_merges_into_latest_state_atomically(
     }
     assert latest_row["state"].feedback_state.user_feedback[0]["case_id"] == "case-1"
     assert latest_row["status"] == "agentic_done"
+
+
+@pytest.mark.asyncio
+async def test_process_feedback_closure_preserves_case_truth_when_persistence_fails(
+    monkeypatch,
+):
+    import json
+
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {"feedback_id": 42, "job_id": "job-1", "outcome": "offer"}
+    ]
+    mutation_attempts = 0
+
+    async def fake_load_state(session_id):
+        return state
+
+    async def fake_run_feedback_closure(loaded_state, *, feedback):
+        return {
+            "closure_status": "processed",
+            "decision": {"is_valuable": True},
+            "case_written": True,
+            "case": {"case_id": "case-42"},
+            "similar_cases": [],
+            "soft_preference_updates": {
+                "case_target_roles": ["Data Analyst"]
+            },
+        }
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        nonlocal mutation_attempts
+        mutation_attempts += 1
+        if mutation_attempts == 1:
+            raise RuntimeError("private database failure")
+        mutator(state)
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 42, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    assert mutation_attempts == 2
+    assert result["closure_status"] == "error"
+    assert result["error_code"] == "closure_persistence_failed"
+    assert result["case_written"] is True
+    assert result["case"] == {"case_id": "case-42"}
+    assert state.feedback_state.user_feedback[0]["closure_status"] == "error"
+    assert state.feedback_state.user_feedback[0]["case_written"] is True
+    assert state.feedback_state.user_feedback[0]["case_id"] == "case-42"
+    assert state.feedback_state.user_feedback[0]["error_code"] == (
+        "closure_persistence_failed"
+    )
+    assert "private database failure" not in json.dumps(state.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_atomic_closure_normalizes_existing_case_preferences(monkeypatch):
+    from app.memory import feedback_loop
+    from app.memory.case_base import CASE_PREFERENCE_MAX_ITEMS
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {"feedback_id": 42, "job_id": "job-1", "outcome": "offer"}
+    ]
+    state.feedback_state.case_soft_preferences = {
+        "legacy_private_key": ["must disappear"],
+        "case_target_roles": [
+            " Data Analyst ",
+            "Data Analyst",
+            *[f"Role {index}" for index in range(20)],
+        ],
+    }
+
+    async def fake_load_state(session_id):
+        return state.model_copy(deep=True)
+
+    async def fake_run_feedback_closure(loaded_state, *, feedback):
+        return {
+            "closure_status": "processed",
+            "decision": {"is_valuable": True},
+            "case_written": True,
+            "case": {"case_id": "case-42"},
+            "similar_cases": [],
+            "soft_preference_updates": {
+                "case_bridge_roles": ["Business Analyst"]
+            },
+        }
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        mutator(state)
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 42, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    preferences = state.feedback_state.case_soft_preferences
+    assert set(preferences) == {"case_target_roles", "case_bridge_roles"}
+    assert preferences["case_target_roles"][0] == "Data Analyst"
+    assert len(preferences["case_target_roles"]) == CASE_PREFERENCE_MAX_ITEMS
+    assert preferences["case_bridge_roles"] == ["Business Analyst"]
+
+
+@pytest.mark.asyncio
+async def test_process_feedback_closure_does_not_rerun_completed_entry(monkeypatch):
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 42,
+            "job_id": "job-1",
+            "outcome": "offer",
+            "closure_status": "processed",
+            "case_written": True,
+            "case_id": "case-42",
+        }
+    ]
+
+    async def fake_load_state(session_id):
+        return state
+
+    async def fail_run_feedback_closure(*args, **kwargs):
+        raise AssertionError("completed closure must not run again")
+
+    async def fail_mutate_state_atomically(**kwargs):
+        raise AssertionError("completed closure metadata must not be rewritten")
+
+    monkeypatch.setattr(feedback_loop, "load_state", fake_load_state)
+    monkeypatch.setattr(
+        feedback_loop,
+        "run_feedback_closure",
+        fail_run_feedback_closure,
+    )
+    monkeypatch.setattr(
+        feedback_loop,
+        "mutate_state_atomically",
+        fail_mutate_state_atomically,
+    )
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 42, "job_id": "job-1", "outcome": "offer"},
+    )
+
+    assert result["closure_status"] == "processed"
+    assert result["case_written"] is True
+    assert result["case"] == {"case_id": "case-42"}

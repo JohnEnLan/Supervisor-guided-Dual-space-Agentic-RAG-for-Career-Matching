@@ -10,6 +10,7 @@ from app.memory.case_base import (
     CASE_PREFERENCE_MAX_ITEMS,
     build_case_embedding_text,
     merge_case_soft_preferences,
+    normalize_case_soft_preferences,
     search_similar_cases,
     upsert_career_case,
 )
@@ -89,7 +90,38 @@ async def process_feedback_closure_for_session(
     if state is None:
         raise KeyError(session_id)
 
+    existing_feedback = _feedback_entry(state, feedback.get("feedback_id"))
+    if existing_feedback and _closure_is_complete(existing_feedback):
+        return _completed_closure_result(existing_feedback)
+
     result = await run_feedback_closure(state, feedback=feedback)
+    try:
+        await _persist_closure_result(
+            session_id=session_id,
+            feedback=feedback,
+            result=result,
+        )
+    except Exception:
+        failed_result = {
+            **result,
+            "closure_status": "error",
+            "error_code": "closure_persistence_failed",
+        }
+        try:
+            await _persist_closure_result(
+                session_id=session_id,
+                feedback=feedback,
+                result=failed_result,
+            )
+        except Exception:
+            pass
+        return failed_result
+    return result
+
+
+async def _persist_closure_result(
+    *, session_id: str, feedback: dict[str, Any], result: dict[str, Any]
+) -> None:
     soft_preference_updates = result["soft_preference_updates"]
     log_entry = build_feedback_closure_log_entry(
         feedback=feedback,
@@ -102,9 +134,19 @@ async def process_feedback_closure_for_session(
     )
 
     def merge_closure_result(latest_state: SharedState) -> None:
-        latest_state.feedback_state.case_soft_preferences = merge_case_soft_preferences(
-            latest_state.feedback_state.case_soft_preferences,
-            soft_preference_updates,
+        latest_feedback = _feedback_entry(
+            latest_state, feedback.get("feedback_id")
+        )
+        if latest_feedback and _closure_is_complete(latest_feedback):
+            return
+        normalized_preferences = normalize_case_soft_preferences(
+            latest_state.feedback_state.case_soft_preferences
+        )
+        latest_state.feedback_state.case_soft_preferences = (
+            merge_case_soft_preferences(
+                normalized_preferences,
+                soft_preference_updates,
+            )
         )
         _update_feedback_closure_metadata(
             latest_state,
@@ -120,7 +162,30 @@ async def process_feedback_closure_for_session(
         session_id=session_id,
         mutator=merge_closure_result,
     )
-    return result
+
+
+def _feedback_entry(state: SharedState, feedback_id: Any) -> dict[str, Any] | None:
+    for entry in state.feedback_state.user_feedback:
+        if str(entry.get("feedback_id")) == str(feedback_id):
+            return entry
+    return None
+
+
+def _closure_is_complete(feedback: dict[str, Any]) -> bool:
+    return feedback.get("closure_status") in {"processed", "skipped"}
+
+
+def _completed_closure_result(feedback: dict[str, Any]) -> dict[str, Any]:
+    case_id = feedback.get("case_id")
+    return {
+        "closure_status": feedback["closure_status"],
+        "error_code": feedback.get("error_code"),
+        "decision": None,
+        "case_written": bool(feedback.get("case_written")),
+        "case": {"case_id": case_id} if case_id else None,
+        "similar_cases": [],
+        "soft_preference_updates": {},
+    }
 
 
 def build_feedback_closure_log_entry(

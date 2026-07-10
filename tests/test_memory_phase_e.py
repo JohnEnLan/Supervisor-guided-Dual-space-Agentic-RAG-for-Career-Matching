@@ -307,13 +307,21 @@ async def test_state_store_feedback_locks_and_updates_latest_state_atomically(
 
     monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
 
-    feedback_id = await state_store.add_feedback(
+    result = await state_store.add_feedback(
         session_id="s1",
         job_id="job-1",
         outcome="Offer",
     )
 
-    assert feedback_id == 9
+    assert result.feedback_id == 9
+    assert result.created is True
+    assert result.feedback == {
+        "job_id": "job-1",
+        "outcome": "offer",
+        "reason": None,
+        "user_rating": None,
+        "feedback_id": 9,
+    }
     assert calls[0] == "transaction_enter"
     select_sql = calls[1][1]
     feedback_insert_sql, feedback_insert_args = calls[2][1:]
@@ -379,16 +387,80 @@ async def test_state_store_feedback_reuses_persisted_idempotency_key(monkeypatch
 
     monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
 
-    feedback_id = await state_store.add_feedback(
+    result = await state_store.add_feedback(
         session_id="s1",
         job_id="job-1",
         outcome="offer",
         idempotency_key="feedback-request-1",
     )
 
-    assert feedback_id == 9
+    assert result.feedback_id == 9
+    assert result.created is False
+    assert result.feedback == {
+        "feedback_id": 9,
+        "job_id": "job-1",
+        "outcome": "offer",
+        "idempotency_key": "feedback-request-1",
+    }
     assert [call[0] for call in calls if isinstance(call, tuple)] == ["fetchrow"]
     assert calls[-1] == "transaction_exit"
+
+
+@pytest.mark.asyncio
+async def test_state_store_feedback_rejects_conflicting_idempotency_payload(
+    monkeypatch,
+):
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    current_state = SharedState(session_id="s1", user_id="u1")
+    current_state.feedback_state.user_feedback = [
+        {
+            "feedback_id": 9,
+            "job_id": "job-original",
+            "outcome": "offer",
+            "reason": "original reason",
+            "user_rating": 5,
+            "idempotency_key": "feedback-request-1",
+            "closure_status": "processed",
+            "case_written": True,
+            "case_id": "case-9",
+        }
+    ]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def fetchrow(self, sql, *args):
+            if "FROM session_state" in sql:
+                return {"state": current_state.model_dump_json()}
+            raise AssertionError("conflict must not insert feedback_memory")
+
+        async def execute(self, sql, *args):
+            raise AssertionError("conflict must not rewrite state")
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    with pytest.raises(state_store.FeedbackIdempotencyConflict):
+        await state_store.add_feedback(
+            session_id="s1",
+            job_id="job-conflict",
+            outcome="rejected",
+            reason="different reason",
+            user_rating=1,
+            idempotency_key="feedback-request-1",
+        )
 
 
 @pytest.mark.asyncio

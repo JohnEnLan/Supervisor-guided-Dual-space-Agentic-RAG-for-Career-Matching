@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -6,6 +7,16 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test")
 os.environ.setdefault("QWEN_API_KEY", "sk-test")
+
+
+def feedback_write_result(
+    *, feedback_id: int, created: bool = True, **feedback
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        feedback_id=feedback_id,
+        created=created,
+        feedback={"feedback_id": feedback_id, **feedback},
+    )
 
 
 @pytest.mark.asyncio
@@ -267,7 +278,14 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
 
     async def fake_add_feedback(**kwargs):
         calls.append(kwargs)
-        return 42
+        return feedback_write_result(
+            feedback_id=42,
+            job_id=kwargs["job_id"],
+            outcome=kwargs["outcome"],
+            reason=kwargs["reason"],
+            user_rating=kwargs["user_rating"],
+            idempotency_key=kwargs["idempotency_key"],
+        )
 
     async def fake_process_feedback_closure_for_session(*, session_id, feedback):
         calls.append(("closure", session_id, feedback))
@@ -338,7 +356,14 @@ async def test_feedback_returns_skipped_when_closure_rejects_feedback(monkeypatc
     from app.api import routes
 
     async def fake_add_feedback(**kwargs):
-        return 43
+        return feedback_write_result(
+            feedback_id=43,
+            job_id=kwargs["job_id"],
+            outcome=kwargs["outcome"],
+            reason=kwargs["reason"],
+            user_rating=kwargs["user_rating"],
+            idempotency_key=kwargs["idempotency_key"],
+        )
 
     async def fake_process_feedback_closure_for_session(*, session_id, feedback):
         assert session_id == "s1"
@@ -397,7 +422,14 @@ async def test_feedback_response_preserves_partial_case_write_truth(monkeypatch)
     from app.api import routes
 
     async def fake_add_feedback(**kwargs):
-        return 45
+        return feedback_write_result(
+            feedback_id=45,
+            job_id=kwargs["job_id"],
+            outcome=kwargs["outcome"],
+            reason=kwargs["reason"],
+            user_rating=kwargs["user_rating"],
+            idempotency_key=kwargs["idempotency_key"],
+        )
 
     async def fake_process_feedback_closure_for_session(*, session_id, feedback):
         return {
@@ -448,7 +480,14 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
     atomic_mutations = []
 
     async def fake_add_feedback(**kwargs):
-        return 44
+        return feedback_write_result(
+            feedback_id=44,
+            job_id=kwargs["job_id"],
+            outcome=kwargs["outcome"],
+            reason=kwargs["reason"],
+            user_rating=kwargs["user_rating"],
+            idempotency_key=kwargs["idempotency_key"],
+        )
 
     async def fake_process_feedback_closure_for_session(*, session_id, feedback):
         raise RuntimeError("case storage unavailable")
@@ -494,3 +533,183 @@ async def test_feedback_returns_error_after_durable_write_when_closure_fails(mon
     assert state.supervisor_log[-1]["stage"] == "feedback_closure_error"
     assert "case storage unavailable" not in str(state.model_dump())
     assert state.feedback_state.user_feedback[0]["closure_status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_feedback_reused_completed_closure_is_not_processed_again(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+
+    async def fake_add_feedback(**kwargs):
+        return feedback_write_result(
+            feedback_id=46,
+            created=False,
+            job_id="job-1",
+            outcome="offer",
+            reason="persisted reason",
+            user_rating=5,
+            idempotency_key="request-46",
+            closure_status="processed",
+            case_written=True,
+            case_id="case-46",
+        )
+
+    async def fail_process_closure(**kwargs):
+        raise AssertionError("completed closure must not run again")
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fail_process_closure,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={
+                "session_id": "s1",
+                "job_id": "job-1",
+                "outcome": "offer",
+                "reason": "persisted reason",
+                "user_rating": 5,
+                "idempotency_key": "request-46",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "session_id": "s1",
+        "feedback_id": 46,
+        "status": "feedback_recorded",
+        "closure_status": "processed",
+        "case_written": True,
+        "case_id": "case-46",
+        "soft_preference_updates": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_feedback_reused_failed_closure_retries_persisted_payload(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+
+    persisted_feedback = {
+        "feedback_id": 47,
+        "job_id": "job-1",
+        "outcome": "offer",
+        "reason": "persisted reason",
+        "user_rating": 4,
+        "idempotency_key": "request-47",
+        "closure_status": "error",
+        "case_written": False,
+        "case_id": None,
+        "error_code": "case_upsert_failed",
+    }
+    closure_calls = []
+
+    async def fake_add_feedback(**kwargs):
+        return SimpleNamespace(
+            feedback_id=47,
+            created=False,
+            feedback=dict(persisted_feedback),
+        )
+
+    async def fake_process_closure(*, session_id, feedback):
+        closure_calls.append((session_id, feedback))
+        return {
+            "closure_status": "processed",
+            "case_written": True,
+            "case": {"case_id": "case-47"},
+            "soft_preference_updates": {},
+        }
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_closure,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={
+                "session_id": "s1",
+                "job_id": "job-1",
+                "outcome": "offer",
+                "reason": "persisted reason",
+                "user_rating": 4,
+                "idempotency_key": "request-47",
+            },
+        )
+
+    assert response.status_code == 202
+    assert closure_calls == [("s1", persisted_feedback)]
+    assert response.json()["closure_status"] == "processed"
+    assert response.json()["case_id"] == "case-47"
+
+
+@pytest.mark.asyncio
+async def test_feedback_conflicting_idempotency_payload_returns_409(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+    from app.db.state_store import FeedbackIdempotencyConflict
+
+    async def fake_add_feedback(**kwargs):
+        raise FeedbackIdempotencyConflict("request-conflict")
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={
+                "session_id": "s1",
+                "job_id": "job-conflict",
+                "outcome": "rejected",
+                "idempotency_key": "request-conflict",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key payload conflict"
+
+
+@pytest.mark.asyncio
+async def test_feedback_error_recorder_does_not_regress_completed_closure(
+    monkeypatch,
+):
+    from app.api import routes
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    completed_feedback = {
+        "feedback_id": 48,
+        "job_id": "job-1",
+        "outcome": "offer",
+        "closure_status": "processed",
+        "case_written": True,
+        "case_id": "case-48",
+    }
+    state.feedback_state.user_feedback = [dict(completed_feedback)]
+
+    async def fake_mutate_state_atomically(*, session_id, mutator):
+        mutator(state)
+
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+
+    await routes._record_feedback_closure_error(
+        session_id="s1",
+        feedback_id=48,
+    )
+
+    assert state.feedback_state.user_feedback == [completed_feedback]
+    assert state.supervisor_log == []

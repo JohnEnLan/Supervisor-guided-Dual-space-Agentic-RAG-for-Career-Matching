@@ -3,6 +3,7 @@
 """
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from app.db.pool import get_pool
@@ -12,6 +13,17 @@ from app.memory.case_base import (
 )
 from app.memory.feedback import normalize_application_outcome
 from app.state.schema import SharedState
+
+
+class FeedbackIdempotencyConflict(ValueError):
+    """The idempotency key already belongs to a different feedback payload."""
+
+
+@dataclass(frozen=True)
+class FeedbackWriteResult:
+    feedback_id: int
+    created: bool
+    feedback: dict[str, Any]
 
 
 async def save_state(state: SharedState, status: str = "running") -> None:
@@ -90,18 +102,30 @@ async def add_feedback(
     reason: str | None = None,
     user_rating: int | None = None,
     idempotency_key: str | None = None,
-) -> int:
+) -> FeedbackWriteResult:
     canonical_outcome = normalize_application_outcome(outcome)
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             state = await _load_locked_state(conn, session_id)
             if idempotency_key:
-                existing_feedback_id = _feedback_id_for_idempotency_key(
+                existing_feedback = _feedback_for_idempotency_key(
                     state, idempotency_key
                 )
-                if existing_feedback_id is not None:
-                    return existing_feedback_id
+                if existing_feedback is not None:
+                    if not _feedback_payload_matches(
+                        existing_feedback,
+                        job_id=job_id,
+                        outcome=canonical_outcome,
+                        reason=reason,
+                        user_rating=user_rating,
+                    ):
+                        raise FeedbackIdempotencyConflict(idempotency_key)
+                    return FeedbackWriteResult(
+                        feedback_id=int(existing_feedback["feedback_id"]),
+                        created=False,
+                        feedback=dict(existing_feedback),
+                    )
             row = await conn.fetchrow(
                 """
                 INSERT INTO feedback_memory (user_id, job_id, outcome, reason, user_rating)
@@ -126,19 +150,38 @@ async def add_feedback(
                 feedback_entry["idempotency_key"] = idempotency_key
             state.feedback_state.user_feedback.append(feedback_entry)
             await _write_locked_state(conn, state)
-            return feedback_id
+            return FeedbackWriteResult(
+                feedback_id=feedback_id,
+                created=True,
+                feedback=dict(feedback_entry),
+            )
 
 
-def _feedback_id_for_idempotency_key(
+def _feedback_for_idempotency_key(
     state: SharedState, idempotency_key: str
-) -> int | None:
+) -> dict[str, Any] | None:
     for entry in state.feedback_state.user_feedback:
         if entry.get("idempotency_key") != idempotency_key:
             continue
-        feedback_id = entry.get("feedback_id")
-        if feedback_id is not None:
-            return int(feedback_id)
+        if entry.get("feedback_id") is not None:
+            return entry
     return None
+
+
+def _feedback_payload_matches(
+    entry: dict[str, Any],
+    *,
+    job_id: str,
+    outcome: str,
+    reason: str | None,
+    user_rating: int | None,
+) -> bool:
+    return (
+        entry.get("job_id") == job_id
+        and entry.get("outcome") == outcome
+        and entry.get("reason") == reason
+        and entry.get("user_rating") == user_rating
+    )
 
 
 async def _load_locked_state(conn: Any, session_id: str) -> SharedState:
