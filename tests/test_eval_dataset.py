@@ -3,26 +3,47 @@ import json
 from pathlib import Path
 
 
-def test_phase_a_relevance_labels_are_small_and_point_to_sample_jobs():
+def test_relevance_labels_are_bound_to_the_full_linkedin_corpus():
     dataset_path = Path("data/eval/relevance_labels.jsonl")
-    jobs_path = Path("data/jobs/linkedin_postings_50.csv")
+    jobs_path = Path("data/jobs/linkedin_postings_1000.csv")
+    original_sample_path = Path("data/jobs/linkedin_postings_50.csv")
+    manifest_path = Path("data/eval/evaluation_manifest.json")
 
-    rows = [
+    labels = [
         json.loads(line)
         for line in dataset_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     with jobs_path.open(newline="", encoding="utf-8") as handle:
-        sample_job_ids = {row["job_id"] for row in csv.DictReader(handle)}
+        job_rows = list(csv.DictReader(handle))
+    with original_sample_path.open(newline="", encoding="utf-8") as handle:
+        original_50_ids = {row["job_id"] for row in csv.DictReader(handle)}
 
-    assert 10 <= len(rows) <= 20
-    assert len({row["case_id"] for row in rows}) == len(rows)
+    job_ids = {row["job_id"] for row in job_rows}
+    assert len(job_rows) == 1000
+    assert len(job_ids) == 1000
+    assert len(labels) == 15
+    assert len({row["case_id"] for row in labels}) == len(labels)
+    assert all(
+        row["annotation_scope"] == "linkedin_1000_title_description_review"
+        for row in labels
+    )
+    assert all(set(row["relevant_job_ids"]) <= job_ids for row in labels)
+    assert sum(
+        bool(set(row["relevant_job_ids"]) - original_50_ids) for row in labels
+    ) >= 10
 
-    for row in rows:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["corpus_file"] == str(jobs_path).replace("\\", "/")
+    assert manifest["corpus_rows"] == len(job_rows)
+    assert manifest["unique_job_ids"] == len(job_ids)
+    assert manifest["query_cases"] == len(labels)
+    assert manifest["labels_file"] == str(dataset_path).replace("\\", "/")
+
+    for row in labels:
         assert row["case_id"].startswith("eval-")
         assert row["query"].strip()
         assert row["relevant_job_ids"]
-        assert set(row["relevant_job_ids"]) <= sample_job_ids
         assert row["expected_intent"].strip()
 
 
