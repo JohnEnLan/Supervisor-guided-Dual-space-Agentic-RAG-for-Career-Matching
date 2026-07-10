@@ -16,6 +16,9 @@ PII_PATTERNS = [
     re.compile(r"https?://\S+", re.IGNORECASE),
     re.compile(r"\b(linkedin|github)\.com/\S+", re.IGNORECASE),
 ]
+CASE_PREFERENCE_KEYS = frozenset({"case_target_roles", "case_bridge_roles"})
+# Learned case hints are a small ranking signal, not an unbounded user profile.
+CASE_PREFERENCE_MAX_ITEMS = 10
 
 
 class CareerCase(BaseModel):
@@ -71,13 +74,40 @@ def merge_case_soft_preferences(
         key: list(value) if isinstance(value, list) else value
         for key, value in base_soft_prefs.items()
     }
+    for key in CASE_PREFERENCE_KEYS:
+        existing = merged.get(key)
+        if isinstance(existing, list):
+            merged[key] = _deduplicated_text(existing)[:CASE_PREFERENCE_MAX_ITEMS]
+
     for key, values in case_updates.items():
+        if key not in CASE_PREFERENCE_KEYS or not isinstance(values, list):
+            continue
         existing = merged.get(key)
         merged[key] = list(existing) if isinstance(existing, list) else []
         for value in values:
-            if value and value not in merged[key]:
-                merged[key].append(value)
+            text = str(value).strip() if value is not None else ""
+            if text and text not in merged[key]:
+                merged[key].append(text)
+            if len(merged[key]) >= CASE_PREFERENCE_MAX_ITEMS:
+                break
     return merged
+
+
+def normalize_case_soft_preferences(preferences: dict[str, Any]) -> dict[str, list[str]]:
+    return {
+        key: _deduplicated_text(values)[:CASE_PREFERENCE_MAX_ITEMS]
+        for key, values in preferences.items()
+        if key in CASE_PREFERENCE_KEYS and isinstance(values, list)
+    }
+
+
+def _deduplicated_text(values: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        text = str(value).strip() if value is not None else ""
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
 
 
 async def upsert_career_case(

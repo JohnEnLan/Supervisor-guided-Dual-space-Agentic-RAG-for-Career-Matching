@@ -6,6 +6,10 @@ from collections.abc import Callable
 from typing import Any
 
 from app.db.pool import get_pool
+from app.memory.case_base import (
+    merge_case_soft_preferences,
+    normalize_case_soft_preferences,
+)
 from app.memory.feedback import normalize_application_outcome
 from app.state.schema import SharedState
 
@@ -204,16 +208,8 @@ def _entry_identity(
 
 
 def _merge_case_preferences(latest: dict, incoming: dict) -> dict:
-    merged: dict[str, list] = {}
-    for preferences in (latest, incoming):
-        for key, values in preferences.items():
-            if not isinstance(values, list):
-                continue
-            target = merged.setdefault(key, [])
-            for value in values:
-                if value and value not in target:
-                    target.append(value)
-    return merged
+    merged = merge_case_soft_preferences({}, normalize_case_soft_preferences(latest))
+    return merge_case_soft_preferences(merged, normalize_case_soft_preferences(incoming))
 
 
 async def _write_locked_state(conn: Any, state: SharedState) -> None:

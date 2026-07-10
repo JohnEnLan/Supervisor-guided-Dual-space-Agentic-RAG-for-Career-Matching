@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from hashlib import sha256
 from typing import Any
 
@@ -47,6 +46,50 @@ Return strict JSON:
   "needs_repair": boolean
 }
 """
+
+
+ANONYMOUS_CASE_SKILL_TAGS = {
+    "aws": "AWS",
+    "azure": "Azure",
+    "communication": "Communication",
+    "copywriting": "Copywriting",
+    "data analysis": "Data Analysis",
+    "dashboarding": "Dashboarding",
+    "docker": "Docker",
+    "excel": "Excel",
+    "fastapi": "FastAPI",
+    "figma": "Figma",
+    "gcp": "GCP",
+    "git": "Git",
+    "java": "Java",
+    "javascript": "JavaScript",
+    "jira": "Jira",
+    "kubernetes": "Kubernetes",
+    "linux": "Linux",
+    "machine learning": "Machine Learning",
+    "mongodb": "MongoDB",
+    "mysql": "MySQL",
+    "node.js": "Node.js",
+    "numpy": "NumPy",
+    "pandas": "Pandas",
+    "postgresql": "PostgreSQL",
+    "power bi": "Power BI",
+    "product management": "Product Management",
+    "project management": "Project Management",
+    "python": "Python",
+    "pytorch": "PyTorch",
+    "r": "R",
+    "react": "React",
+    "research": "Research",
+    "salesforce": "Salesforce",
+    "scikit-learn": "scikit-learn",
+    "seo": "SEO",
+    "spark": "Spark",
+    "sql": "SQL",
+    "tableau": "Tableau",
+    "tensorflow": "TensorFlow",
+    "typescript": "TypeScript",
+}
 
 
 async def plan_retrieval(
@@ -172,12 +215,11 @@ def build_anonymous_case_from_feedback(
         raise ValueError("feedback is not valuable enough to become a career case")
 
     role = _as_dict(decision.get("matched_role"))
-    feedback_id = feedback.get("feedback_id") or role.get("job_id") or "manual"
     case = CareerCase(
         case_id=_anonymous_feedback_case_id(
             session_id=state.session_id,
-            feedback_id=feedback_id,
             job_id=role.get("job_id"),
+            outcome=decision["outcome"],
         ),
         background_type=_anonymous_background_type(state),
         target_role=str(role.get("title") or role.get("job_id") or "Recommended Role"),
@@ -270,42 +312,31 @@ def _public_role(role: dict[str, Any] | None) -> dict[str, Any]:
         "job_id": role.get("job_id"),
         "title": role.get("title"),
         "tier": role.get("tier"),
-        "match_explanation": role.get("match_explanation"),
     }
 
 
 def _anonymous_background_type(state: SharedState) -> str:
-    parts = ["feedback_case"]
-    parts.extend(_safe_tokens(state.resume_state.skills[:4]))
-    parts.extend(_safe_tokens(state.career_state.current_goal[:2]))
-    return "_".join(parts) if len(parts) > 1 else "feedback_case_general_background"
+    skill_tags = _canonical_case_skill_tags(state.resume_state.skills, limit=4)
+    if not skill_tags:
+        return "feedback_case_general_background"
+    return "_".join(["feedback_case", *skill_tags])
 
 
 def _successful_resume_features(
     state: SharedState, role: dict[str, Any]
 ) -> list[str]:
-    features = []
-    evidence_ids = [
-        str(span.get("span_id") or span.get("id"))
-        for span in state.resume_state.original_evidence_spans[:3]
-        if span.get("span_id") or span.get("id")
-    ]
-    if evidence_ids:
-        features.append("resume evidence spans supported the application")
-    if role.get("match_explanation"):
-        features.append(str(role["match_explanation"])[:160])
-    if not features:
-        features.append("profile matched the recommended role evidence")
-    return features
+    del role
+    if any(
+        span.get("span_id") or span.get("id")
+        for span in state.resume_state.original_evidence_spans
+    ):
+        return ["evidence_backed_resume"]
+    return ["retrieved_role_match"]
 
 
 def _missing_skills_before(state: SharedState) -> list[str]:
-    skills = []
-    for item in state.strategy_state.skill_gap_analysis:
-        skill = item.get("skill")
-        if skill:
-            skills.append(str(skill))
-    return skills[:5]
+    values = [item.get("skill") for item in state.strategy_state.skill_gap_analysis]
+    return _canonical_case_skill_tags(values, limit=5)
 
 
 def _recommended_bridge_roles(
@@ -322,20 +353,23 @@ def _recommended_bridge_roles(
 
 
 def _anonymous_feedback_case_id(
-    *, session_id: str, feedback_id: Any, job_id: Any
+    *, session_id: str, job_id: Any, outcome: Any
 ) -> str:
-    raw = f"{session_id}|{feedback_id}|{job_id or ''}"
+    raw = f"{session_id}|{job_id or ''}|{outcome or ''}"
     digest = sha256(raw.encode("utf-8")).hexdigest()[:16]
     return f"feedback-{digest}"
 
 
-def _safe_tokens(values: list[Any]) -> list[str]:
-    tokens = []
+def _canonical_case_skill_tags(values: list[Any], *, limit: int) -> list[str]:
+    tags: list[str] = []
     for value in values:
-        token = re.sub(r"[^A-Za-z0-9]+", "_", str(value)).strip("_")
-        if token:
-            tokens.append(token)
-    return tokens
+        normalized = " ".join(str(value).strip().casefold().split())
+        tag = ANONYMOUS_CASE_SKILL_TAGS.get(normalized)
+        if tag and tag not in tags:
+            tags.append(tag)
+        if len(tags) >= limit:
+            break
+    return tags
 
 
 def _repair_unsupported_resume_advice(state: SharedState) -> int:

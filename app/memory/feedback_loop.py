@@ -7,6 +7,7 @@ from app.agents.supervisor import (
     build_anonymous_case_from_feedback,
 )
 from app.memory.case_base import (
+    CASE_PREFERENCE_MAX_ITEMS,
     build_case_embedding_text,
     merge_case_soft_preferences,
     search_similar_cases,
@@ -131,6 +132,8 @@ def build_case_soft_preferences(
 
 
 def _append_unique(values: list[str], value: Any) -> None:
+    if len(values) >= CASE_PREFERENCE_MAX_ITEMS:
+        return
     if not value:
         return
     text = str(value)

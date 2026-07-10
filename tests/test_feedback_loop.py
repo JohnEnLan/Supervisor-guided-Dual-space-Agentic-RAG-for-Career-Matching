@@ -36,6 +36,119 @@ def test_merge_case_soft_preferences_preserves_and_appends_hints():
     }
 
 
+def test_case_soft_preferences_restrict_keys_deduplicate_and_cap_values():
+    from app.memory.case_base import CASE_PREFERENCE_MAX_ITEMS
+    from app.memory.case_base import merge_case_soft_preferences
+
+    merged = merge_case_soft_preferences(
+        {"title_keywords": ["analyst"]},
+        {
+            "case_target_roles": [
+                "Data Analyst",
+                "Data Analyst",
+                *[f"Role {index}" for index in range(20)],
+            ],
+            "case_bridge_roles": ["Business Analyst", "Business Analyst"],
+            "preferred_location": ["private-user-value"],
+            "unexpected": ["must-not-persist"],
+        },
+    )
+
+    assert merged["title_keywords"] == ["analyst"]
+    assert merged["case_bridge_roles"] == ["Business Analyst"]
+    assert len(merged["case_target_roles"]) == CASE_PREFERENCE_MAX_ITEMS
+    assert merged["case_target_roles"][0] == "Data Analyst"
+    assert "preferred_location" not in merged
+    assert "unexpected" not in merged
+
+
+def test_similar_case_preferences_are_bounded_before_persistence():
+    from app.memory.case_base import CASE_PREFERENCE_MAX_ITEMS
+    from app.memory.feedback_loop import build_case_soft_preferences
+
+    cases = [
+        {
+            "target_role": f"Target {index}",
+            "recommended_bridge_roles": [f"Bridge {index}", "Shared Bridge"],
+        }
+        for index in range(CASE_PREFERENCE_MAX_ITEMS + 5)
+    ]
+
+    updates = build_case_soft_preferences(cases)
+
+    assert len(updates["case_target_roles"]) == CASE_PREFERENCE_MAX_ITEMS
+    assert len(updates["case_bridge_roles"]) == CASE_PREFERENCE_MAX_ITEMS
+    assert updates["case_bridge_roles"].count("Shared Bridge") == 1
+
+
+def test_anonymous_feedback_case_uses_only_controlled_non_private_content():
+    from app.agents.supervisor import assess_feedback_for_case
+    from app.agents.supervisor import build_anonymous_case_from_feedback
+    from app.state.schema import CareerState, ResumeState, SharedState, StrategyState
+
+    private_fragments = [
+        "John Example",
+        "john@example.com",
+        "Acme Corporation",
+        "University of Birmingham",
+        "quoted private resume sentence",
+    ]
+    state = SharedState(
+        session_id="john@example.com",
+        user_id="John Example",
+        resume_state=ResumeState(
+            skills=["Python", "SQL", *private_fragments],
+            normalized_base_resume=" ".join(private_fragments),
+            original_evidence_spans=[
+                {"span_id": "R001", "text": "quoted private resume sentence"}
+            ],
+        ),
+        career_state=CareerState(current_goal=private_fragments),
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    "job_id": "job-1",
+                    "title": "Data Analyst",
+                    "tier": "now_fit",
+                    "match_explanation": " ".join(private_fragments),
+                },
+                {
+                    "job_id": "job-2",
+                    "title": "Business Analyst Intern",
+                    "tier": "bridge_role",
+                },
+            ],
+            skill_gap_analysis=[
+                {"skill": "John Example at Acme Corporation"},
+                {"skill": "Tableau"},
+            ],
+        ),
+    )
+    feedback = {
+        "feedback_id": 101,
+        "job_id": "job-1",
+        "outcome": "offer",
+    }
+    decision = assess_feedback_for_case(state, feedback)
+
+    case = build_anonymous_case_from_feedback(state, feedback, decision)
+    retry_case = build_anonymous_case_from_feedback(
+        state,
+        {**feedback, "feedback_id": 999},
+        {**decision, "feedback_id": 999},
+    )
+
+    payload = case.model_dump_json()
+    assert case.case_id == retry_case.case_id
+    assert case.background_type == "feedback_case_Python_SQL"
+    assert case.target_role == "Data Analyst"
+    assert case.successful_resume_features == ["evidence_backed_resume"]
+    assert case.missing_skills_before == ["Tableau"]
+    assert case.recommended_bridge_roles == ["Business Analyst Intern"]
+    for fragment in private_fragments:
+        assert fragment.casefold() not in payload.casefold()
+
+
 @pytest.mark.asyncio
 async def test_feedback_loop_writes_anonymous_case_and_returns_case_weight_hints(
     monkeypatch,
