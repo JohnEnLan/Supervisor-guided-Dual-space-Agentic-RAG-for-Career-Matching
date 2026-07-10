@@ -544,6 +544,45 @@ async def test_top_five_match_explanations_run_in_parallel():
 
 
 @pytest.mark.asyncio
+async def test_match_explanation_cancellation_propagates():
+    from app.agents.matching_agent import enrich_top_match_explanations
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import ResumeState, SharedState, StrategyState
+
+    async def cancelled_chat(system, user, **kwargs):
+        raise asyncio.CancelledError
+
+    candidate = JobCandidate(
+        job_id="job-1",
+        score=0.9,
+        title="Data Analyst",
+        evidence_span_ids=["job-1:skills:1"],
+    )
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        resume_state=ResumeState(normalized_base_resume="Python SQL analyst resume"),
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    "job_id": "job-1",
+                    "tier": "stretch_fit",
+                    "match_explanation": "",
+                    "evidence_span_ids": ["job-1:skills:1"],
+                }
+            ]
+        ),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await enrich_top_match_explanations(
+            state,
+            [candidate],
+            chat_fn=cancelled_chat,
+        )
+
+
+@pytest.mark.asyncio
 async def test_one_failed_explanation_preserves_successful_siblings():
     from app.agents.matching_agent import enrich_top_match_explanations
     from app.retrieval.hybrid_search import JobCandidate
