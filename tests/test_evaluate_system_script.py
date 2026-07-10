@@ -86,6 +86,13 @@ def test_build_offline_metric_table_can_be_rendered_as_markdown():
     table = build_offline_metric_table(rows, rankings, k_values=[1, 2])
     markdown = format_report_table(table)
 
+    assert table
+    for row in table:
+        assert 0.0 <= row["precision"] <= 1.0
+        assert 0.0 <= row["recall"] <= 1.0
+        assert 0.0 <= row["mrr"] <= 1.0
+        assert 0.0 <= row["ndcg"] <= 1.0
+
     assert table[0]["run"] == "baseline"
     assert table[-1]["run"] == "with_latent"
     assert "| run | k | cases | precision | recall | mrr | ndcg |" in markdown
