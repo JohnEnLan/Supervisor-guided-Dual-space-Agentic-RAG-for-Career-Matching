@@ -12,6 +12,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+DEFAULT_EVAL_MANIFEST = ROOT / "data/eval/evaluation_manifest.json"
 
 from app.db.pool import close_pool
 from app.evaluation.metrics import (
@@ -55,29 +56,40 @@ def build_offline_report(
 ) -> dict[str, object]:
     labels = _labels_from_rows(rows)
     baseline = _select_baseline_rankings(rankings)
-    with_raptor = rankings.get("with_raptor", baseline)
-    with_latent = rankings.get("with_latent", baseline)
     case_notes = {
         row["case_id"]: row.get("qualitative_latent_expectation", "")
         for row in rows
         if row.get("qualitative_latent_expectation")
     }
 
-    return {
+    report: dict[str, object] = {
         "retrieval": evaluate_rankings(labels, baseline, k=k),
-        "raptor_ablation": compare_retrieval_runs(
-            labels, baseline, with_raptor, k=k
+        "raptor_ablation": _not_evaluated(
+            "offline artifact does not include with_raptor rankings"
         ),
-        "latent_space_comparison": compare_latent_space_runs(
+        "latent_space_comparison": _not_evaluated(
+            "offline artifact does not include with_latent rankings"
+        ),
+        "hard_filter_accuracy": _not_evaluated(
+            "offline ranking IDs do not include candidate filter metadata"
+        ),
+        "explanation_faithfulness": _not_evaluated(
+            "offline ranking IDs do not include generated explanations"
+        ),
+    }
+    if "with_raptor" in rankings:
+        report["raptor_ablation"] = compare_retrieval_runs(
+            labels, baseline, rankings["with_raptor"], k=k
+        )
+    if "with_latent" in rankings:
+        report["latent_space_comparison"] = compare_latent_space_runs(
             labels,
             baseline,
-            with_latent,
+            rankings["with_latent"],
             k=k,
             case_notes=case_notes,
-        ),
-        "hard_filter_accuracy": evaluate_hard_filter_accuracy(rows, {}),
-        "explanation_faithfulness": evaluate_explanation_faithfulness([]),
-    }
+        )
+    return report
 
 
 def build_offline_metric_table(
@@ -94,7 +106,7 @@ def format_report_table(rows: list[dict[str, float | int | str]]) -> str:
 
 
 def load_offline_rankings(
-    path: Path, *, manifest_path: Path | None = None
+    path: Path, *, manifest_path: Path | None = DEFAULT_EVAL_MANIFEST
 ) -> dict[str, dict[str, list[str]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -106,13 +118,14 @@ def load_offline_rankings(
             raise ValueError("wrapped ranking artifact requires a metadata object")
         if not isinstance(rankings, dict):
             raise ValueError("wrapped ranking artifact requires a rankings object")
-        if manifest_path is not None:
-            _validate_ranking_artifact(
-                artifact_path=path,
-                metadata=metadata,
-                rankings=rankings,
-                manifest_path=manifest_path,
-            )
+        if manifest_path is None:
+            raise ValueError("wrapped ranking artifact requires a manifest")
+        _validate_ranking_artifact(
+            artifact_path=path,
+            metadata=metadata,
+            rankings=rankings,
+            manifest_path=manifest_path,
+        )
         return rankings
     return payload
 
@@ -126,6 +139,10 @@ def _select_baseline_rankings(
     if len(rankings) == 1:
         return next(iter(rankings.values()))
     raise ValueError("offline rankings require a baseline run")
+
+
+def _not_evaluated(reason: str) -> dict[str, str]:
+    return {"status": "not_evaluated", "reason": reason}
 
 
 def _validate_ranking_artifact(
@@ -156,9 +173,17 @@ def _validate_ranking_artifact(
     if missing:
         raise ValueError(f"evaluation manifest missing fields: {missing}")
 
-    corpus_path = _project_path(manifest["corpus_file"])
-    queries_path = _project_path(manifest["queries_file"])
-    expected_artifact_path = _project_path(manifest["ranking_fixture"])
+    manifest_dir = manifest_path.resolve().parent
+    artifact_dir = artifact_path.resolve().parent
+    corpus_path = _declared_path(
+        manifest["corpus_file"], relative_to=manifest_dir
+    )
+    queries_path = _declared_path(
+        manifest["queries_file"], relative_to=manifest_dir
+    )
+    expected_artifact_path = _declared_path(
+        manifest["ranking_fixture"], relative_to=manifest_dir
+    )
     if artifact_path.resolve() != expected_artifact_path.resolve():
         raise ValueError("ranking_fixture does not match the loaded artifact")
 
@@ -189,9 +214,13 @@ def _validate_ranking_artifact(
     for field, expected in metadata_expectations.items():
         _require_equal(field, metadata.get(field), expected)
 
-    if _project_path(metadata.get("corpus_path", "")) != corpus_path.resolve():
+    if _declared_path(
+        metadata.get("corpus_path", ""), relative_to=artifact_dir
+    ) != corpus_path.resolve():
         raise ValueError("corpus_path does not match the evaluation manifest")
-    if _project_path(metadata.get("query_path", "")) != queries_path.resolve():
+    if _declared_path(
+        metadata.get("query_path", ""), relative_to=artifact_dir
+    ) != queries_path.resolve():
         raise ValueError("query_path does not match the evaluation manifest")
 
     run_name = str(manifest["ranking_run"])
@@ -226,11 +255,14 @@ def _validate_ranking_artifact(
                 raise ValueError(f"ranking {case_id!r} contains jobs outside the corpus")
 
 
-def _project_path(value: object) -> Path:
+def _declared_path(value: object, *, relative_to: Path) -> Path:
     path = Path(str(value))
-    if not path.is_absolute():
-        path = ROOT / path
-    return path.resolve()
+    if path.is_absolute():
+        return path.resolve()
+    local_path = (relative_to / path).resolve()
+    if local_path.exists():
+        return local_path
+    return (ROOT / path).resolve()
 
 
 def _require_equal(field: str, actual: object, expected: object) -> None:
@@ -434,7 +466,7 @@ def main() -> None:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("data/eval/evaluation_manifest.json"),
+        default=DEFAULT_EVAL_MANIFEST,
         help="Manifest used to validate wrapped offline ranking artifacts.",
     )
     parser.add_argument(
