@@ -196,3 +196,46 @@ async def test_feedback_loop_skips_rejected_feedback(monkeypatch):
     assert result["decision"]["is_valuable"] is False
     assert state.supervisor_log[-1]["stage"] == "feedback_closure"
     assert state.supervisor_log[-1]["case_written"] is False
+
+
+@pytest.mark.asyncio
+async def test_process_feedback_closure_for_session_preserves_workflow_status(
+    monkeypatch,
+):
+    from app.memory import feedback_loop
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    saved = []
+
+    async def fake_load_state_with_status(session_id):
+        assert session_id == "s1"
+        return state, "agentic_done"
+
+    async def fake_run_feedback_closure(loaded_state, *, feedback):
+        assert loaded_state is state
+        assert feedback == {"feedback_id": 42, "job_id": "job-1"}
+        return {
+            "case_written": True,
+            "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
+        }
+
+    async def fake_save_state(saved_state, *, status):
+        saved.append((saved_state, status))
+
+    monkeypatch.setattr(
+        feedback_loop, "load_state_with_status", fake_load_state_with_status
+    )
+    monkeypatch.setattr(feedback_loop, "run_feedback_closure", fake_run_feedback_closure)
+    monkeypatch.setattr(feedback_loop, "save_state", fake_save_state)
+
+    result = await feedback_loop.process_feedback_closure_for_session(
+        session_id="s1",
+        feedback={"feedback_id": 42, "job_id": "job-1"},
+    )
+
+    assert result == {
+        "case_written": True,
+        "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
+    }
+    assert saved == [(state, "agentic_done")]

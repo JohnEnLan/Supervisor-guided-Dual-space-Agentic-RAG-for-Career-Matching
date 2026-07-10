@@ -13,6 +13,7 @@ from app.db.state_store import (
     load_state_with_status,
     save_state,
 )
+from app.memory.feedback_loop import process_feedback_closure_for_session
 from app.normalization.resume_intake import intake_resume
 from app.retrieval.query_builder import build_resume_retrieval_query
 from app.state.schema import SharedState
@@ -117,7 +118,7 @@ async def read_result(session_id: str) -> dict:
 
 
 @router.post("/feedback", status_code=202)
-async def submit_feedback(request: FeedbackRequest) -> dict[str, str | int]:
+async def submit_feedback(request: FeedbackRequest) -> dict:
     try:
         feedback_id = await add_feedback(
             session_id=request.session_id,
@@ -129,10 +130,41 @@ async def submit_feedback(request: FeedbackRequest) -> dict[str, str | int]:
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
 
+    feedback = {
+        "feedback_id": feedback_id,
+        "job_id": request.job_id,
+        "outcome": request.outcome,
+        "reason": request.reason,
+        "user_rating": request.user_rating,
+    }
+    try:
+        result = await process_feedback_closure_for_session(
+            session_id=request.session_id,
+            feedback=feedback,
+        )
+    except Exception as exc:
+        await _record_feedback_closure_error(
+            session_id=request.session_id,
+            feedback_id=feedback_id,
+            error=exc,
+        )
+        return {
+            "session_id": request.session_id,
+            "feedback_id": feedback_id,
+            "status": "feedback_recorded",
+            "closure_status": "error",
+            "case_written": False,
+            "soft_preference_updates": {},
+        }
+
+    case_written = bool(result["case_written"])
     return {
         "session_id": request.session_id,
         "feedback_id": feedback_id,
-        "status": "feedback_recorded",
+        "status": "feedback_processed",
+        "closure_status": "processed" if case_written else "skipped",
+        "case_written": case_written,
+        "soft_preference_updates": result["soft_preference_updates"],
     }
 
 
@@ -198,6 +230,28 @@ async def _record_background_error(
         }
     )
     await save_state(state, status=status)
+
+
+async def _record_feedback_closure_error(
+    *, session_id: str, feedback_id: int, error: Exception
+) -> None:
+    try:
+        state_with_status = await load_state_with_status(session_id)
+        if state_with_status is None:
+            return
+
+        state, status = state_with_status
+        state.supervisor_log.append(
+            {
+                "stage": "feedback_closure_error",
+                "feedback_id": feedback_id,
+                "error_type": type(error).__name__,
+                "error": str(error)[:500],
+            }
+        )
+        await save_state(state, status=status)
+    except Exception:
+        return
 
 
 async def _persist_upload(session_id: str, file: UploadFile) -> Path:

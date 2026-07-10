@@ -12,6 +12,7 @@ from app.memory.case_base import (
     search_similar_cases,
     upsert_career_case,
 )
+from app.db.state_store import load_state_with_status, save_state
 from app.state.schema import SharedState
 
 
@@ -61,6 +62,19 @@ async def run_feedback_closure(
         "similar_cases": similar_cases,
         "soft_preference_updates": soft_preference_updates,
     }
+
+
+async def process_feedback_closure_for_session(
+    *, session_id: str, feedback: dict[str, Any]
+) -> dict[str, Any]:
+    state_with_status = await load_state_with_status(session_id)
+    if state_with_status is None:
+        raise KeyError(session_id)
+
+    state, status = state_with_status
+    result = await run_feedback_closure(state, feedback=feedback)
+    await save_state(state, status=status)
+    return result
 
 
 def build_case_soft_preferences(

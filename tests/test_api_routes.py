@@ -269,7 +269,20 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
         calls.append(kwargs)
         return 42
 
+    async def fake_process_feedback_closure_for_session(*, session_id, feedback):
+        calls.append(("closure", session_id, feedback))
+        return {
+            "case_written": True,
+            "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
+        }
+
     monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_feedback_closure_for_session,
+        raising=False,
+    )
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -288,7 +301,10 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
     assert response.json() == {
         "session_id": "s1",
         "feedback_id": 42,
-        "status": "feedback_recorded",
+        "status": "feedback_processed",
+        "closure_status": "processed",
+        "case_written": True,
+        "soft_preference_updates": {"case_target_roles": ["Data Analyst"]},
     }
     assert calls == [
         {
@@ -297,5 +313,106 @@ async def test_feedback_is_written_by_session_id(monkeypatch):
             "outcome": "interview",
             "reason": "good match",
             "user_rating": 5,
-        }
+        },
+        (
+            "closure",
+            "s1",
+            {
+                "feedback_id": 42,
+                "job_id": "job-1",
+                "outcome": "interview",
+                "reason": "good match",
+                "user_rating": 5,
+            },
+        ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_feedback_returns_skipped_when_closure_rejects_feedback(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+
+    async def fake_add_feedback(**kwargs):
+        return 43
+
+    async def fake_process_feedback_closure_for_session(*, session_id, feedback):
+        assert session_id == "s1"
+        assert feedback["feedback_id"] == 43
+        return {"case_written": False, "soft_preference_updates": {}}
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_feedback_closure_for_session,
+        raising=False,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={"session_id": "s1", "job_id": "job-1", "outcome": "rejected"},
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "session_id": "s1",
+        "feedback_id": 43,
+        "status": "feedback_processed",
+        "closure_status": "skipped",
+        "case_written": False,
+        "soft_preference_updates": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_feedback_returns_error_after_durable_write_when_closure_fails(monkeypatch):
+    from app.api.main import app
+    from app.api import routes
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="s1", user_id="u1")
+    saved = []
+
+    async def fake_add_feedback(**kwargs):
+        return 44
+
+    async def fake_process_feedback_closure_for_session(*, session_id, feedback):
+        raise RuntimeError("case storage unavailable")
+
+    async def fake_load_state_with_status(session_id):
+        return state, "agentic_done"
+
+    async def fake_save_state(saved_state, *, status):
+        saved.append((saved_state, status))
+
+    monkeypatch.setattr(routes, "add_feedback", fake_add_feedback)
+    monkeypatch.setattr(
+        routes,
+        "process_feedback_closure_for_session",
+        fake_process_feedback_closure_for_session,
+        raising=False,
+    )
+    monkeypatch.setattr(routes, "load_state_with_status", fake_load_state_with_status)
+    monkeypatch.setattr(routes, "save_state", fake_save_state)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/feedback",
+            json={"session_id": "s1", "job_id": "job-1", "outcome": "offer"},
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "session_id": "s1",
+        "feedback_id": 44,
+        "status": "feedback_recorded",
+        "closure_status": "error",
+        "case_written": False,
+        "soft_preference_updates": {},
+    }
+    assert saved == [(state, "agentic_done")]
+    assert state.supervisor_log[-1]["stage"] == "feedback_closure_error"
