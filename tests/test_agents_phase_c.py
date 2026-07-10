@@ -610,6 +610,59 @@ async def test_one_failed_explanation_preserves_successful_siblings():
 
 
 @pytest.mark.asyncio
+async def test_empty_new_explanation_keeps_existing_role_unchanged():
+    from app.agents.matching_agent import enrich_top_match_explanations
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import ResumeState, SharedState, StrategyState
+
+    candidate = JobCandidate(
+        job_id="job-1",
+        score=0.9,
+        title="Data Analyst",
+        evidence_span_ids=["job-1:skills:1"],
+    )
+    existing_role = {
+        "job_id": "job-1",
+        "tier": "bridge_role",
+        "match_explanation": "Existing evidence-backed explanation.",
+        "evidence_span_ids": ["job-1:skills:1"],
+    }
+
+    async def fake_chat(system, user, **kwargs):
+        assert "PHASE_C_MATCHING_AGENT" in system
+        return json.dumps(
+            {
+                "recommended_roles": [
+                    {
+                        "job_id": "job-1",
+                        "tier": "now_fit",
+                        "match_explanation": "",
+                        "evidence_span_ids": ["job-1:skills:1"],
+                    }
+                ]
+            }
+        )
+
+    state = SharedState(
+        session_id="s1",
+        user_id="u1",
+        resume_state=ResumeState(normalized_base_resume="Python SQL analyst resume"),
+        strategy_state=StrategyState(recommended_roles=[existing_role.copy()]),
+    )
+
+    await enrich_top_match_explanations(
+        state,
+        [candidate],
+        chat_fn=fake_chat,
+    )
+
+    assert state.strategy_state.recommended_roles == [existing_role]
+    assert state.supervisor_log[-1]["updated"] == 0
+    assert state.supervisor_log[-1]["failed"] == 1
+    assert state.supervisor_log[-1]["failed_job_ids"] == ["job-1"]
+
+
+@pytest.mark.asyncio
 async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch):
     from app.agents import base
     from app.agents.strategy_agent import run_strategy_agent

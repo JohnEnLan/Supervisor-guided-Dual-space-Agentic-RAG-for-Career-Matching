@@ -224,12 +224,13 @@ async def _explain_candidate_match(
     role = _role_for_candidate(parsed, candidate.job_id)
     if not role:
         return candidate.job_id, {}
+    match_explanation = role.get("match_explanation")
+    if not isinstance(match_explanation, str) or not match_explanation.strip():
+        return candidate.job_id, {}
     evidence_span_ids = _supported_evidence_ids(candidate, role)
     return candidate.job_id, {
         "tier": _valid_tier(role.get("tier") or current_role.get("tier")),
-        "match_explanation": role.get("match_explanation")
-        or current_role.get("match_explanation")
-        or "",
+        "match_explanation": match_explanation,
         "evidence_span_ids": evidence_span_ids,
         "evidence_spans": _evidence_spans_for_ids(candidate, evidence_span_ids),
     }
