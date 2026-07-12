@@ -169,7 +169,7 @@ def test_rerank_candidates_tracks_raptor_recall_source():
     assert candidates[0].sources == ["raptor"]
 
 
-def test_rerank_candidates_applies_case_derived_role_weight():
+def test_rerank_candidates_ignores_legacy_case_derived_role_weight():
     candidates = hs._rerank_candidates(
         fused=[("job-generic", 0.03), ("job-case", 0.03)],
         bm25_by_job={"job-generic": 0.5, "job-case": 0.5},
@@ -195,6 +195,7 @@ def test_rerank_candidates_applies_case_derived_role_weight():
     )
 
     assert [candidate.job_id for candidate in candidates] == [
-        "job-case",
         "job-generic",
+        "job-case",
     ]
+    assert candidates[0].score == candidates[1].score

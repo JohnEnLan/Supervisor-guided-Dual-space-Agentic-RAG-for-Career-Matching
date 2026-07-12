@@ -185,7 +185,9 @@ async def test_supervisor_planning_records_one_clarification_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_supervisor_planning_merges_learned_case_preferences(monkeypatch):
+async def test_supervisor_planning_does_not_treat_legacy_case_hints_as_preferences(
+    monkeypatch,
+):
     from app.agents import supervisor
     from app.state.schema import CareerState, FeedbackState, SharedState
 
@@ -223,11 +225,7 @@ async def test_supervisor_planning_merges_learned_case_preferences(monkeypatch):
         include_raptor=False,
     )
 
-    assert plan["soft_prefs"] == {
-        "title_keywords": ["analyst"],
-        "case_target_roles": ["Data Analyst"],
-        "case_bridge_roles": ["Business Analyst Intern"],
-    }
+    assert plan["soft_prefs"] == {"title_keywords": ["analyst"]}
     assert state.career_state.soft_preferences == {"title_keywords": ["analyst"]}
 
 
@@ -296,6 +294,146 @@ async def test_matching_agent_writes_retrieval_state_and_recommended_roles(monke
     assert updated.retrieval_state.ranking_scores[0]["sources"] == ["bm25", "dense"]
     assert updated.strategy_state.recommended_roles[0]["tier"] == "now_fit"
     assert updated.strategy_state.recommended_roles[0]["job_id"] == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_matching_agent_passes_privacy_safe_implicit_query(monkeypatch):
+    from app.agents import base
+    from app.agents.matching_agent import run_matching_agent
+    from app.state.schema import ResumeState, SharedState
+
+    async def fake_chat(system, user, **kwargs):
+        return json.dumps({"recommended_roles": []})
+
+    captured: dict = {}
+
+    async def fake_search(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(base.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s-private-query",
+        user_id="u-private-query",
+        resume_state=ResumeState(
+            experience=[
+                {
+                    "company": "Acme Analytics",
+                    "title": "Data Analyst Intern",
+                    "description": "alice@example.com +44 7700 900123",
+                }
+            ],
+            skills=["SQL"],
+            normalized_base_resume="Alice Zhang alice@example.com private resume",
+        ),
+    )
+
+    await run_matching_agent(
+        state,
+        retrieval_plan={"top_k": 5},
+        search_fn=fake_search,
+    )
+
+    implicit_query = captured["anonymized_resume_text"]
+    assert "Acme Analytics" in implicit_query
+    assert "Data Analyst Intern" in implicit_query
+    assert "SQL" in implicit_query
+    assert "Alice Zhang" not in implicit_query
+    assert "alice@example.com" not in implicit_query
+    assert "7700" not in implicit_query
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_default_search_uses_dual_space(monkeypatch):
+    import importlib
+
+    from app.agents import orchestrator
+
+    dual_module = importlib.import_module("app.retrieval.dual_space_search")
+    hybrid_module = importlib.import_module("app.retrieval.hybrid_search")
+
+    async def fake_dual(**kwargs):
+        return ["dual-space"]
+
+    async def fake_hybrid(**kwargs):
+        return ["legacy-hybrid"]
+
+    monkeypatch.setattr(dual_module, "dual_space_search", fake_dual)
+    monkeypatch.setattr(hybrid_module, "hybrid_search", fake_hybrid)
+
+    result = await orchestrator._default_search_fn(
+        query="data analyst",
+        anonymized_resume_text="SQL internship",
+        hard_constraints={},
+        soft_prefs={},
+        top_k=5,
+        include_raptor=False,
+    )
+
+    assert result == ["dual-space"]
+
+
+def test_matching_agent_default_search_resolves_to_dual_space() -> None:
+    from app.agents.matching_agent import _resolve_search_fn
+    from app.retrieval.dual_space_search import dual_space_search
+
+    assert _resolve_search_fn(None) is dual_space_search
+
+
+def test_matching_agent_exposes_separate_explicit_and_implicit_evidence() -> None:
+    from app.agents.matching_agent import MatchingAgent
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import SharedState
+
+    candidate = JobCandidate(
+        job_id="job-1",
+        score=0.91,
+        explicit_score=0.82,
+        implicit_score=0.74,
+        implicit_confidence=1.0,
+        implicit_evidence=[
+            {
+                "case_id": "case-1",
+                "highest_stage": "interview",
+                "similarity": 0.88,
+            }
+        ],
+        evidence_span_ids=["job-1:skills:1"],
+        evidence_spans=[
+            {
+                "evidence_span_id": "job-1:skills:1",
+                "content": "Requires Python and SQL",
+            }
+        ],
+    )
+    state = SharedState(session_id="s-dual", user_id="u-dual")
+
+    updated = MatchingAgent([candidate]).apply(
+        state,
+        {
+            "recommended_roles": [
+                {
+                    "job_id": "job-1",
+                    "tier": "now_fit",
+                    "match_explanation": "The JD evidence matches SQL experience.",
+                    "evidence_span_ids": ["job-1:skills:1"],
+                }
+            ]
+        },
+    )
+
+    role = updated.strategy_state.recommended_roles[0]
+    assert role["explicit_score"] == 0.82
+    assert role["implicit_score"] == 0.74
+    assert role["implicit_confidence"] == 1.0
+    assert role["explicit_explanation"] == (
+        "The JD evidence matches SQL experience."
+    )
+    assert role["implicit_explanation"] == (
+        "1 anonymized historical case provides an auxiliary ranking signal."
+    )
+    assert role["implicit_evidence"][0]["case_id"] == "case-1"
+    assert role["implicit_evidence"][0]["highest_stage"] == "interview"
 
 
 @pytest.mark.asyncio
@@ -776,6 +914,91 @@ async def test_strategy_agent_keeps_resume_advice_bound_to_evidence(monkeypatch)
     ]
     assert updated.supervisor_log[-1]["stage"] == "strategy_agent"
     assert updated.supervisor_log[-1]["dropped_unsupported_advice"] == 1
+
+
+@pytest.mark.asyncio
+async def test_supervisor_drops_unsupported_implicit_claims(monkeypatch):
+    from app.agents import supervisor
+    from app.state.schema import SharedState, StrategyState
+
+    async def fake_chat(system, user, **kwargs):
+        assert "PHASE_C_SUPERVISOR_FINAL" in system
+        return json.dumps(
+            {
+                "hard_filter_violations": [],
+                "missing_evidence": [],
+                "fabrication_risks": [],
+                "needs_reretrieval": False,
+                "needs_repair": False,
+            }
+        )
+
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    common = {
+        "tier": "now_fit",
+        "evidence_span_ids": ["job:skills:1"],
+    }
+    state = SharedState(
+        session_id="s-implicit-claims",
+        user_id="u-implicit-claims",
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    **common,
+                    "job_id": "job-no-evidence",
+                    "implicit_explanation": "Historical cases support this role.",
+                    "implicit_evidence": [],
+                },
+                {
+                    **common,
+                    "job_id": "job-over-count",
+                    "implicit_explanation": "3 anonymous cases reached interview.",
+                    "implicit_evidence": [
+                        {"case_id": "case-1", "highest_stage": "interview"}
+                    ],
+                },
+                {
+                    **common,
+                    "job_id": "job-guarantee",
+                    "implicit_explanation": "You are guaranteed to pass this role.",
+                    "implicit_evidence": [
+                        {"case_id": "case-2", "highest_stage": "offer"}
+                    ],
+                },
+                {
+                    **common,
+                    "job_id": "job-valid",
+                    "implicit_explanation": (
+                        "1 anonymous case reached interview; this is an auxiliary signal."
+                    ),
+                    "implicit_evidence": [
+                        {"case_id": "case-3", "highest_stage": "interview"}
+                    ],
+                },
+            ]
+        ),
+    )
+
+    result = await supervisor.final_verification(state)
+
+    roles = {
+        role["job_id"]: role for role in state.strategy_state.recommended_roles
+    }
+    assert roles["job-no-evidence"]["implicit_explanation"] is None
+    assert roles["job-over-count"]["implicit_explanation"] is None
+    assert roles["job-guarantee"]["implicit_explanation"] is None
+    assert roles["job-valid"]["implicit_explanation"].startswith("1 anonymous case")
+    assert result["needs_repair"] is True
+    dropped_job_ids = {
+        item["job_id"]
+        for item in result["fabrication_risks"]
+        if item.get("type") == "unsupported_implicit_claim"
+    }
+    assert dropped_job_ids == {
+        "job-no-evidence",
+        "job-over-count",
+        "job-guarantee",
+    }
 
 
 @pytest.mark.asyncio

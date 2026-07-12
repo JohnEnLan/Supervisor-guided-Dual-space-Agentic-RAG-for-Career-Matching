@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 5
     embed_max_concurrency: int = 8
 
+    dual_space_enabled: bool = True
+    implicit_min_cases: int = 3
+    implicit_max_weight: float = 0.30
+    implicit_case_top_k: int = 20
+
     max_clarification_loops: int = 1
     max_reretrieval_loops: int = 1
     max_repair_loops: int = 1

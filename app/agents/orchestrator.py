@@ -203,9 +203,9 @@ async def run_persisted_agentic_match_from_session(
 
 
 async def _default_search_fn(**kwargs):
-    from app.retrieval.hybrid_search import hybrid_search
+    from app.retrieval.dual_space_search import dual_space_search
 
-    return await hybrid_search(**kwargs)
+    return await dual_space_search(**kwargs)
 
 
 async def _load_required_state(session_id: str) -> SharedState:

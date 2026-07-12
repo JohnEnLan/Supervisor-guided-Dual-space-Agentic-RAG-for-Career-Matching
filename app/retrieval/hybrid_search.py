@@ -111,12 +111,17 @@ class JobCandidate:
     title: str | None = None
     company: str | None = None
     location: str | None = None
+    role_cluster: str | None = None
     rrf_score: float = 0.0
     bm25_score: float = 0.0
     dense_score: float = 0.0
     raptor_score: float = 0.0
     field_bonus: float = 0.0
     sources: list[str] = dataclass_field(default_factory=list)
+    explicit_score: float = 0.0
+    implicit_score: float = 0.0
+    implicit_confidence: float = 0.0
+    implicit_evidence: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
 
 def _build_hard_filter_query(hard_constraints: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -324,14 +329,6 @@ def _soft_preference_bonus(
         if str(keyword).lower() in title:
             bonus += 0.03
 
-    for role in soft_prefs.get("case_target_roles") or []:
-        if str(role).lower() in title:
-            bonus += 0.07
-
-    for role in soft_prefs.get("case_bridge_roles") or []:
-        if str(role).lower() in title:
-            bonus += 0.04
-
     return min(bonus, 0.20)
 
 
@@ -380,6 +377,7 @@ def _rerank_candidates(
                 title=metadata.get("title"),
                 company=metadata.get("company"),
                 location=metadata.get("location"),
+                role_cluster=metadata.get("role_cluster"),
                 rrf_score=round(rrf_by_job.get(job_id, 0.0), 6),
                 bm25_score=round(bm25_by_job.get(job_id, 0.0), 6),
                 dense_score=round(dense_by_job.get(job_id, 0.0), 6),
@@ -388,6 +386,7 @@ def _rerank_candidates(
                 sources=_sources_for_job(
                     job_id, bm25_by_job, dense_by_job, raptor_by_job
                 ),
+                explicit_score=round(score, 6),
             )
         )
 

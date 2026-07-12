@@ -189,6 +189,45 @@ async def search_similar_cases(query: str, *, top_k: int = 5) -> list[dict[str, 
     return [_case_row_to_dict(row) for row in rows]
 
 
+async def search_similar_resume_cases_by_embedding(
+    query_embedding: list[float], *, top_k: int = 20
+) -> list[dict[str, Any]]:
+    if len(query_embedding) != settings.embed_dim:
+        raise ValueError(
+            f"Embedding dimension mismatch: got {len(query_embedding)}, "
+            f"expected {settings.embed_dim}"
+        )
+    if top_k <= 0:
+        return []
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.case_id,
+                c.resume_payload,
+                1 - (c.embedding <=> $1::vector) AS similarity,
+                o.outcome_id,
+                o.job_id,
+                o.company,
+                o.role_family,
+                o.explicit_match_score,
+                o.highest_stage,
+                o.final_status,
+                o.source_confidence
+            FROM anonymous_resume_cases AS c
+            JOIN case_job_outcomes AS o ON o.case_id = c.case_id
+            WHERE c.embedding IS NOT NULL
+            ORDER BY c.embedding <=> $1::vector
+            LIMIT $2
+            """,
+            _to_vector_literal(query_embedding),
+            top_k,
+        )
+    return [_anonymous_case_row_to_dict(row) for row in rows]
+
+
 async def list_career_cases(*, limit: int = 20) -> list[dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -215,6 +254,22 @@ def _case_row_to_dict(row: Any) -> dict[str, Any]:
         "application_outcome": row["application_outcome"],
         "recommended_bridge_roles": list(row["recommended_bridge_roles"] or []),
         "score": float(row["score"]) if "score" in row else None,
+    }
+
+
+def _anonymous_case_row_to_dict(row: Any) -> dict[str, Any]:
+    return {
+        "case_id": str(row["case_id"]),
+        "resume_payload": row["resume_payload"],
+        "similarity": float(row["similarity"]),
+        "outcome_id": str(row["outcome_id"]),
+        "job_id": str(row["job_id"]) if row["job_id"] is not None else None,
+        "company": str(row["company"]),
+        "role_family": str(row["role_family"]),
+        "explicit_match_score": float(row["explicit_match_score"]),
+        "highest_stage": str(row["highest_stage"]),
+        "final_status": str(row["final_status"]),
+        "source_confidence": float(row["source_confidence"]),
     }
 
 

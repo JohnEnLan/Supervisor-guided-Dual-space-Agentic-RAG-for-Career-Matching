@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 from hashlib import sha256
 from typing import Any
 
 from app.config import settings
 from app.llm import deepseek
-from app.memory.case_base import CareerCase, merge_case_soft_preferences
+from app.memory.case_base import CareerCase
 from app.memory.feedback import is_positive_outcome, normalize_application_outcome
 from app.state.schema import SharedState
 
@@ -118,17 +119,13 @@ async def plan_retrieval(
         state.career_state.soft_preferences
         or _as_dict(llm_plan.get("soft_preferences"))
     )
-    soft_prefs = merge_case_soft_preferences(
-        explicit_soft_prefs,
-        state.feedback_state.case_soft_preferences,
-    )
     plan = {
         "needs_clarification": needs_clarification,
         "clarification_question": parsed.get("clarification_question") or "",
         "clarification_loop_used": clarification_loop_used,
         "hard_constraints": state.career_state.hard_constraints
         or _as_dict(llm_plan.get("hard_constraints")),
-        "soft_prefs": soft_prefs,
+        "soft_prefs": explicit_soft_prefs,
         "top_k": int(llm_plan.get("top_k") or default_top_k),
         "include_raptor": bool(llm_plan.get("include_raptor", include_raptor)),
     }
@@ -270,6 +267,7 @@ def _add_deterministic_verification(
                     "evidence_span_ids": sorted(evidence_ids),
                 }
             )
+    _drop_unsupported_implicit_claims(state, fabrication_risks)
 
     too_few_results = _as_dict(result.get("too_few_results"))
     planned_top_k = _latest_planned_top_k(state)
@@ -294,6 +292,55 @@ def _add_deterministic_verification(
     result["needs_repair"] = bool(
         result["needs_repair"] or missing_evidence or fabrication_risks
     )
+
+
+def _drop_unsupported_implicit_claims(
+    state: SharedState, fabrication_risks: list[dict[str, Any]]
+) -> None:
+    forbidden = (
+        "guaranteed",
+        "will pass",
+        "will be hired",
+        "will get an offer",
+        "certain to",
+        "一定",
+        "保证",
+        "必然",
+    )
+    for role in state.strategy_state.recommended_roles:
+        explanation = str(role.get("implicit_explanation") or "").strip()
+        if not explanation:
+            continue
+        evidence = role.get("implicit_evidence")
+        evidence_rows = evidence if isinstance(evidence, list) else []
+        case_ids = [
+            str(item.get("case_id"))
+            for item in evidence_rows
+            if isinstance(item, dict) and item.get("case_id")
+        ]
+        claimed = re.search(
+            r"\b(\d+)\s+(?:anonymized|anonymous)?\s*cases?\b",
+            explanation,
+            re.IGNORECASE,
+        )
+        reason = ""
+        if not case_ids:
+            reason = "missing_case_evidence"
+        elif claimed and int(claimed.group(1)) > len(case_ids):
+            reason = "case_count_overclaim"
+        elif any(phrase in explanation.casefold() for phrase in forbidden):
+            reason = "guaranteed_outcome_language"
+        if not reason:
+            continue
+        role["implicit_explanation"] = None
+        fabrication_risks.append(
+            {
+                "type": "unsupported_implicit_claim",
+                "job_id": role.get("job_id"),
+                "reason": reason,
+                "case_ids": case_ids,
+            }
+        )
 
 
 def _find_recommended_role(
