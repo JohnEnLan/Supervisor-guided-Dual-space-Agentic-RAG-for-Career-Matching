@@ -86,6 +86,71 @@ async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | N
     return SharedState.model_validate(json.loads(row["state"])), row["status"]
 
 
+async def get_resume_metadata(session_id: str) -> dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT resume_version, confirmed_resume_version,
+                   resume_content_hash, resume_confirmed_at
+            FROM session_state
+            WHERE session_id = $1
+            """,
+            session_id,
+        )
+    if row is None:
+        return {"exists": False}
+    return {"exists": True, **dict(row)}
+
+
+async def mark_resume_normalized(
+    *, session_id: str, content_hash: str
+) -> dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE session_state
+            SET resume_version = resume_version + 1,
+                confirmed_resume_version = NULL,
+                resume_content_hash = $2,
+                resume_confirmed_at = NULL,
+                status = 'resume_ready',
+                version = version + 1,
+                updated_at = now()
+            WHERE session_id = $1
+            RETURNING resume_version, confirmed_resume_version,
+                      resume_content_hash, resume_confirmed_at
+            """,
+            session_id,
+            content_hash,
+        )
+    if row is None:
+        raise KeyError(session_id)
+    return {"exists": True, **dict(row)}
+
+
+async def confirm_resume(*, session_id: str) -> dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE session_state
+            SET confirmed_resume_version = resume_version,
+                resume_confirmed_at = now(),
+                version = version + 1,
+                updated_at = now()
+            WHERE session_id = $1 AND resume_version > 0
+            RETURNING resume_version, confirmed_resume_version,
+                      resume_content_hash, resume_confirmed_at
+            """,
+            session_id,
+        )
+    if row is None:
+        raise KeyError(session_id)
+    return {"exists": True, **dict(row)}
+
+
 async def mutate_state_atomically(
     *, session_id: str, mutator: Callable[[SharedState], MutationResult]
 ) -> MutationResult:

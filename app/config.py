@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     implicit_max_weight: float = 0.30
     implicit_case_top_k: int = 20
 
+    evaluation_capability_enabled: bool = False
+
     max_clarification_loops: int = 1
     max_reretrieval_loops: int = 1
     max_repair_loops: int = 1
