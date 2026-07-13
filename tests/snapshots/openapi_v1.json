@@ -37,11 +37,16 @@
           "explain_enabled": {
             "title": "Explain Enabled",
             "type": "boolean"
+          },
+          "monitoring_enabled": {
+            "title": "Monitoring Enabled",
+            "type": "boolean"
           }
         },
         "required": [
           "dual_space_enabled",
-          "explain_enabled"
+          "explain_enabled",
+          "monitoring_enabled"
         ],
         "title": "CapabilitiesResponse",
         "type": "object"
@@ -539,6 +544,102 @@
         "title": "MatchBriefResponse",
         "type": "object"
       },
+      "MonitoringOverviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "average_recommendation_count": {
+            "title": "Average Recommendation Count",
+            "type": "number"
+          },
+          "completion_rate": {
+            "title": "Completion Rate",
+            "type": "number"
+          },
+          "duration_p50_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration P50 Ms"
+          },
+          "duration_p95_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration P95 Ms"
+          },
+          "failure_rate": {
+            "title": "Failure Rate",
+            "type": "number"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "implicit_usage_rate": {
+            "title": "Implicit Usage Rate",
+            "type": "number"
+          },
+          "jd_evidence_coverage_rate": {
+            "title": "Jd Evidence Coverage Rate",
+            "type": "number"
+          },
+          "reordered_run_count": {
+            "title": "Reordered Run Count",
+            "type": "integer"
+          },
+          "stage_latencies": {
+            "items": {
+              "$ref": "#/components/schemas/StageLatencyResponse"
+            },
+            "title": "Stage Latencies",
+            "type": "array"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "total_runs": {
+            "title": "Total Runs",
+            "type": "integer"
+          },
+          "warning_rate": {
+            "title": "Warning Rate",
+            "type": "number"
+          },
+          "window_hours": {
+            "title": "Window Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_hours",
+          "generated_at",
+          "total_runs",
+          "completion_rate",
+          "warning_rate",
+          "failure_rate",
+          "average_recommendation_count",
+          "jd_evidence_coverage_rate",
+          "implicit_usage_rate",
+          "reordered_run_count"
+        ],
+        "title": "MonitoringOverviewResponse",
+        "type": "object"
+      },
       "ProductResult": {
         "additionalProperties": false,
         "properties": {
@@ -762,6 +863,133 @@
           "feedback_id"
         ],
         "title": "ReactionResponse",
+        "type": "object"
+      },
+      "RecentRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "recommendation_count": {
+            "default": 0,
+            "title": "Recommendation Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "warning_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warning Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RecentRunResponse",
+        "type": "object"
+      },
+      "RecentRunsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RecentRunResponse"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "window_hours": {
+            "title": "Window Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_hours",
+          "generated_at"
+        ],
+        "title": "RecentRunsResponse",
         "type": "object"
       },
       "RecommendationResult": {
@@ -1451,6 +1679,42 @@
         "title": "SkillGap",
         "type": "object"
       },
+      "StageLatencyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage"
+        ],
+        "title": "StageLatencyResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1515,6 +1779,102 @@
           }
         },
         "summary": "Capabilities"
+      }
+    },
+    "/api/v1/monitoring/overview": {
+      "get": {
+        "operationId": "monitoring_overview_api_v1_monitoring_overview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window_hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 720,
+              "minimum": 1,
+              "title": "Window Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Monitoring Overview"
+      }
+    },
+    "/api/v1/monitoring/runs": {
+      "get": {
+        "operationId": "monitoring_runs_api_v1_monitoring_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window_hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 720,
+              "minimum": 1,
+              "title": "Window Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecentRunsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Monitoring Runs"
       }
     },
     "/api/v1/runs/{run_id}/execute": {

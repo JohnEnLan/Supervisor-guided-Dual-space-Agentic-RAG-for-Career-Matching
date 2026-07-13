@@ -25,6 +25,8 @@ PUBLIC_PATHS = {
     "/api/v1/runs/{run_id}/result",
     "/api/v1/runs/{run_id}/explain",
     "/api/v1/runs/{run_id}/reaction",
+    "/api/v1/monitoring/overview",
+    "/api/v1/monitoring/runs",
 }
 
 

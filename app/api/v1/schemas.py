@@ -17,6 +17,7 @@ class CapabilitiesResponse(PublicDTO):
     api_version: Literal["v1"] = "v1"
     dual_space_enabled: bool
     explain_enabled: bool
+    monitoring_enabled: bool
     execution_durability: Literal["process_local"] = "process_local"
 
 
@@ -202,6 +203,49 @@ class RunExplainResponse(PublicDTO):
     fusion: FusionResponse
     stage_durations_ms: dict[str, int] = Field(default_factory=dict)
     recovery_events: list[RecoveryEventResponse] = Field(default_factory=list)
+
+
+class StageLatencyResponse(PublicDTO):
+    stage: str
+    p50_ms: int | None = None
+    p95_ms: int | None = None
+
+
+class MonitoringOverviewResponse(PublicDTO):
+    window_hours: int
+    generated_at: datetime
+    total_runs: int
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    completion_rate: float
+    warning_rate: float
+    failure_rate: float
+    duration_p50_ms: int | None = None
+    duration_p95_ms: int | None = None
+    stage_latencies: list[StageLatencyResponse] = Field(default_factory=list)
+    average_recommendation_count: float
+    jd_evidence_coverage_rate: float
+    implicit_usage_rate: float
+    reordered_run_count: int
+
+
+class RecentRunResponse(PublicDTO):
+    run_id: str
+    status: str
+    stage: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    recommendation_count: int = 0
+    warning_codes: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+
+
+class RecentRunsResponse(PublicDTO):
+    window_hours: int
+    generated_at: datetime
+    runs: list[RecentRunResponse] = Field(default_factory=list)
 
 
 class ReactionRequest(PublicDTO):
