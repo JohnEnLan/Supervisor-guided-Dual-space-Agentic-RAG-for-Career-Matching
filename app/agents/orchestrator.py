@@ -44,13 +44,13 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
         run_id=run_id,
         current_status=RunStatus.QUEUED,
         target_status=RunStatus.RUNNING,
-        stage=RunStage.RETRIEVAL,
+        stage=RunStage.INTENT,
     )
     try:
         await append_event(
             run_id=run_id,
             event_type="run_started",
-            stage=RunStage.RETRIEVAL.value,
+            stage=RunStage.INTENT.value,
             status=RunStatus.RUNNING.value,
             public_payload={"message": "Matching run started"},
         )
@@ -59,7 +59,15 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
             raise RuntimeError("run is missing its confirmed state snapshot")
         state = SharedState.model_validate(initial_snapshot)
         stage_started = perf_counter()
-        state = await run_intent_agent(state, brief.career_goal)
+        if state.career_state.intent_consulted:
+            state.supervisor_log.append(
+                {
+                    "stage": "intent_consultation_reused",
+                    "reason": "approved_visible_consultation",
+                }
+            )
+        else:
+            state = await run_intent_agent(state, brief.career_goal)
         _record_stage_duration(state, "intent", stage_started)
 
         # The confirmed brief is the execution authority. Later agents may not
@@ -84,6 +92,7 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
         )
         await save_state(state, status="run_intent_done")
 
+        await update_run_stage(run_id=run_id, stage=RunStage.RETRIEVAL)
         stage_started = perf_counter()
         state = await run_matching_agent(
             state,

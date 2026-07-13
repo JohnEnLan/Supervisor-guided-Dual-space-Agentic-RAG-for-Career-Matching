@@ -203,12 +203,15 @@ def _filter_hard_constraints(raw: dict[str, Any]) -> dict[str, Any]:
         "role_cluster",
         "role_clusters",
         "degree_required",
+        "companies",
     }
     cleaned = {key: value for key, value in raw.items() if key in allowed}
     if "locations" in cleaned:
         cleaned["locations"] = _as_list(cleaned["locations"])
     if "role_clusters" in cleaned:
         cleaned["role_clusters"] = _as_list(cleaned["role_clusters"])
+    if "companies" in cleaned:
+        cleaned["companies"] = _as_list(cleaned["companies"])
     if "max_years_exp" in cleaned and cleaned["max_years_exp"] is not None:
         cleaned["max_years_exp"] = int(cleaned["max_years_exp"])
     return {key: value for key, value in cleaned.items() if value not in (None, [], "")}

@@ -163,6 +163,15 @@ def _build_hard_filter_query(hard_constraints: dict[str, Any]) -> tuple[str, lis
         placeholder = add_param(degree_required)
         clauses.append(f"degree_required = {placeholder}")
 
+    companies = [
+        str(company).casefold()
+        for company in hard_constraints.get("companies") or []
+        if str(company).strip()
+    ]
+    if companies:
+        placeholder = add_param(companies)
+        clauses.append(f"lower(company) = ANY({placeholder}::text[])")
+
     sql = f"SELECT job_id FROM jobs WHERE {' AND '.join(clauses)}"
     return sql, params
 
@@ -322,6 +331,13 @@ def _soft_preference_bonus(
 
     preferred_role_clusters = set(soft_prefs.get("preferred_role_clusters") or [])
     if metadata.get("role_cluster") in preferred_role_clusters:
+        bonus += 0.05
+
+    preferred_companies = {
+        str(company).casefold()
+        for company in soft_prefs.get("preferred_companies") or []
+    }
+    if str(metadata.get("company") or "").casefold() in preferred_companies:
         bonus += 0.05
 
     title = (metadata.get("title") or "").lower()

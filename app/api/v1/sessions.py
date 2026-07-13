@@ -205,6 +205,14 @@ async def build_match_brief(
         clarification_question=request.clarification_question,
         plan_version=1,
     )
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    state.career_state.current_goal = [request.career_goal]
+    state.career_state.hard_constraints = dict(request.hard_constraints)
+    state.career_state.soft_preferences = dict(request.soft_preferences)
+    state.career_state.avoid_roles = list(request.avoid_roles)
+    await save_state(state, status="match_brief_approved")
     try:
         run = await create_run(session_id=session_id)
     except RunConflict as exc:

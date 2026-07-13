@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 import pytest
 
 from app.domain.match_brief import create_match_brief
-from app.domain.run import MatchRun, RunStatus
-from app.state.schema import ResumeState, SharedState
+from app.domain.run import MatchRun, RunStage, RunStatus
+from app.state.schema import CareerState, ResumeState, SharedState
 
 
 @pytest.mark.asyncio
@@ -83,3 +83,77 @@ async def test_run_orchestrator_keeps_approved_hard_constraints_locked(monkeypat
     assert captured["state_snapshot"]["career_state"]["hard_constraints"] == (
         brief.hard_constraints
     )
+
+
+@pytest.mark.asyncio
+async def test_consulted_run_skips_duplicate_intent_agent(monkeypatch) -> None:
+    from app.agents import orchestrator
+
+    brief = create_match_brief(
+        career_goal="Find evidence-grounded data analyst roles",
+        hard_constraints={"locations": ["Birmingham"]},
+        soft_preferences={},
+        avoid_roles=[],
+        result_count=5,
+        plan_version=1,
+    )
+    now = datetime.now(UTC)
+    run = MatchRun(
+        run_id="run-1",
+        session_id="session-1",
+        status=RunStatus.QUEUED,
+        approved_plan=brief.model_dump(mode="json"),
+        plan_version=1,
+        created_at=now,
+        updated_at=now,
+    )
+    state = SharedState(
+        session_id="session-1",
+        user_id="private-user",
+        career_state=CareerState(intent_consulted=True),
+    )
+    transitions: list[RunStage | None] = []
+    stages: list[RunStage] = []
+
+    async def fake_get_run(**_kwargs):
+        return run
+
+    async def transition(*, stage=None, **_kwargs):
+        transitions.append(stage)
+        return run
+
+    async def update(*, stage, **_kwargs):
+        stages.append(stage)
+
+    async def load_snapshot(**_kwargs):
+        return state.model_dump(mode="json")
+
+    async def forbidden_intent(*_args, **_kwargs):
+        raise AssertionError("consulted run called Intent Agent twice")
+
+    async def same_state(current, **_kwargs):
+        return current
+
+    async def verify(_current):
+        return {"reretrieval_loop_requested": False}
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(orchestrator, "get_run", fake_get_run)
+    monkeypatch.setattr(orchestrator, "transition_run", transition)
+    monkeypatch.setattr(orchestrator, "update_run_stage", update)
+    monkeypatch.setattr(orchestrator, "append_event", no_op)
+    monkeypatch.setattr(orchestrator, "load_state_snapshot", load_snapshot)
+    monkeypatch.setattr(orchestrator, "run_intent_agent", forbidden_intent)
+    monkeypatch.setattr(orchestrator, "run_matching_agent", same_state)
+    monkeypatch.setattr(orchestrator, "run_strategy_agent", same_state)
+    monkeypatch.setattr(orchestrator, "final_verification", verify)
+    monkeypatch.setattr(orchestrator, "save_state", no_op)
+    monkeypatch.setattr(orchestrator, "save_state_snapshot", no_op)
+    monkeypatch.setattr(orchestrator, "save_run_result", no_op)
+
+    await orchestrator.run_persisted_agentic_match_run(run_id="run-1")
+
+    assert transitions == [RunStage.INTENT]
+    assert stages[0] is RunStage.RETRIEVAL

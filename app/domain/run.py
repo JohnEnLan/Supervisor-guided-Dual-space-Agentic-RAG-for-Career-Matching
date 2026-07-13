@@ -21,6 +21,7 @@ class RunStatus(StrEnum):
 
 class RunStage(StrEnum):
     PLAN = "plan"
+    INTENT = "intent"
     RETRIEVAL = "retrieval"
     STRATEGY = "strategy"
     VERIFICATION = "verification"

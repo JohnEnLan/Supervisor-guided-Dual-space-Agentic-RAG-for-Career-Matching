@@ -90,6 +90,70 @@ def test_match_brief_requires_confirmed_resume(monkeypatch) -> None:
     assert response.json()["detail"] == "resume must be confirmed"
 
 
+def test_match_brief_persists_approved_career_state_before_run_snapshot(
+    monkeypatch,
+) -> None:
+    from app.api.v1 import sessions
+    from app.state.schema import SharedState
+
+    state = SharedState(session_id="session-1", user_id="private-user")
+    call_order: list[str] = []
+
+    async def confirmed(_session_id: str):
+        return {
+            "exists": True,
+            "resume_version": 1,
+            "confirmed_resume_version": 1,
+        }
+
+    async def load(_session_id: str):
+        return state
+
+    async def save(current: SharedState, status: str):
+        call_order.append("save_state")
+        assert status == "match_brief_approved"
+        assert current.career_state.current_goal == [
+            "Find evidence-grounded platform engineering roles"
+        ]
+        assert current.career_state.hard_constraints == {
+            "companies": ["OpenAI"]
+        }
+        assert current.career_state.soft_preferences == {
+            "preferred_companies": ["DeepMind"]
+        }
+        assert current.career_state.avoid_roles == ["sales"]
+
+    async def create(*, session_id: str):
+        call_order.append("create_run")
+        assert session_id == "session-1"
+        assert call_order == ["save_state", "create_run"]
+        return _run(status=RunStatus.DRAFT)
+
+    async def save_brief(**_kwargs):
+        return _run(status=RunStatus.PLAN_READY)
+
+    monkeypatch.setattr(sessions, "get_resume_metadata", confirmed)
+    monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "save_state", save)
+    monkeypatch.setattr(sessions, "create_run", create)
+    monkeypatch.setattr(sessions, "save_match_brief", save_brief)
+
+    with TestClient(_app()) as client:
+        response = client.post(
+            "/api/v1/sessions/session-1/match-brief",
+            json={
+                "career_goal": "Find evidence-grounded platform engineering roles",
+                "hard_constraints": {"companies": ["OpenAI"]},
+                "soft_preferences": {"preferred_companies": ["DeepMind"]},
+                "avoid_roles": ["sales"],
+                "result_count": 5,
+            },
+        )
+
+    assert response.status_code == 201
+    assert call_order == ["save_state", "create_run"]
+
+
 def test_execute_rejects_stale_plan(monkeypatch) -> None:
     from app.api.v1 import runs
     from app.db.run_store import RunConflict

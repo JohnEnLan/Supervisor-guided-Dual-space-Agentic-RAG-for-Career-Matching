@@ -27,6 +27,47 @@ def test_build_hard_filter_query_uses_parameterized_sql():
     assert params == ["London", 2, "software_engineering", "bachelor"]
 
 
+def test_company_exclusive_filter_is_parameterized_and_case_insensitive():
+    sql, params = hs._build_hard_filter_query(
+        {"companies": ["OpenAI", "DeepMind"]}
+    )
+
+    assert "lower(company) = ANY($1::text[])" in sql
+    assert params == [["openai", "deepmind"]]
+
+
+def test_preferred_company_is_a_soft_ranking_bonus():
+    candidates = hs._rerank_candidates(
+        fused=[("job-other", 0.03), ("job-target", 0.03)],
+        bm25_by_job={"job-other": 0.5, "job-target": 0.5},
+        dense_by_job={"job-other": 0.5, "job-target": 0.5},
+        evidence_by_job={
+            "job-other": ["job-other:skills:1"],
+            "job-target": ["job-target:skills:1"],
+        },
+        metadata_by_job={
+            "job-other": {
+                "title": "Platform Engineer",
+                "company": "Other Co",
+                "location": "London",
+            },
+            "job-target": {
+                "title": "Platform Engineer",
+                "company": "OpenAI",
+                "location": "London",
+            },
+        },
+        soft_prefs={"preferred_companies": ["openai"]},
+        top_k=2,
+    )
+
+    assert [candidate.job_id for candidate in candidates] == [
+        "job-target",
+        "job-other",
+    ]
+    assert candidates[0].score > candidates[1].score
+
+
 def test_collapse_chunk_hits_keeps_best_job_score_and_evidence_order():
     hits = [
         hs.ChunkHit(

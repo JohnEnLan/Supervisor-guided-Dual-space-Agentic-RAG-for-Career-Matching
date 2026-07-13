@@ -150,6 +150,20 @@ def test_targeted_consultation_enforces_company_semantics() -> None:
     ]
 
 
+def test_intent_allow_lists_preserve_company_constraints_and_preferences() -> None:
+    from app.agents.intent_agent import (
+        _filter_hard_constraints,
+        _filter_soft_preferences,
+    )
+
+    assert _filter_hard_constraints(
+        {"companies": ["OpenAI"], "unsupported_company_rule": True}
+    ) == {"companies": ["OpenAI"]}
+    assert _filter_soft_preferences(
+        {"preferred_companies": ["DeepMind"], "company_weight": 100}
+    ) == {"preferred_companies": ["DeepMind"]}
+
+
 def test_explore_consultation_is_limited_to_three_directions() -> None:
     from app.agents import intent_agent
 
