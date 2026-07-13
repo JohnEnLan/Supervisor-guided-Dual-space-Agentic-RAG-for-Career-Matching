@@ -1,0 +1,21 @@
+:root {
+  color-scheme: light;
+  --canvas: #f6f3ec;
+  --surface: #ffffff;
+  --surface-muted: #f2f5f6;
+  --ink: #172238;
+  --muted: #5b6678;
+  --line: #dce2e7;
+  --navy: #17365d;
+  --navy-hover: #0e294a;
+  --teal: #147b78;
+  --teal-soft: #e4f3f1;
+  --amber: #9a6500;
+  --amber-soft: #fff4d6;
+  --red: #a43b3b;
+  --red-soft: #fbe8e8;
+  --shadow: 0 14px 40px rgb(23 54 93 / 0.08);
+  --radius: 14px;
+  --radius-small: 9px;
+  --font: Aptos, "Segoe UI", "Noto Sans SC", sans-serif;
+}

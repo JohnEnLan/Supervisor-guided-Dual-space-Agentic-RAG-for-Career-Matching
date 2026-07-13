@@ -12,6 +12,11 @@ build/
 *.egg-info/
 .DS_Store
 Thumbs.db
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.vite/
+frontend/*.tsbuildinfo
 
 # Keep generated/private inputs out of Git by default.
 data/resumes/*
