@@ -3,22 +3,27 @@ from __future__ import annotations
 import hashlib
 import uuid
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 
 from app.api.routes import _persist_upload
 from app.api.v1.schemas import (
+    IntentConsultRequest,
+    IntentConsultResponse,
     MatchBriefRequest,
     MatchBriefResponse,
     ResumeAcceptedResponse,
     ResumeConfirmResponse,
     ResumeEducationPreview,
+    ResumeEvidencePreview,
     ResumeExperiencePreview,
     ResumePreviewResponse,
     ResumeProjectPreview,
     SessionCreateRequest,
     SessionResponse,
 )
+from app.agents.intent_agent import run_visible_intent_consultation
 from app.db.run_store import RunConflict, create_run, save_match_brief
 from app.db.state_store import (
     confirm_resume,
@@ -28,6 +33,7 @@ from app.db.state_store import (
     save_state,
 )
 from app.domain.match_brief import create_match_brief
+from app.domain.intent import IntentConsultInput, project_intent_consultation
 from app.normalization.resume_intake import intake_resume
 from app.state.schema import SharedState
 
@@ -91,6 +97,7 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
         projects=[_project_preview(item) for item in resume.projects],
         skills=resume.skills,
         resume_quality_issues=resume.resume_quality_issues,
+        evidence=_resume_evidence_preview(resume),
     )
 
 
@@ -114,6 +121,62 @@ async def resume_confirm(session_id: str) -> ResumeConfirmResponse:
         confirmed=True,
         confirmed_at=metadata.get("resume_confirmed_at"),
     )
+
+
+@router.get(
+    "/sessions/{session_id}/intent-consult",
+    response_model=IntentConsultResponse,
+)
+async def get_intent_consultation(session_id: str) -> IntentConsultResponse:
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    try:
+        projection = project_intent_consultation(state)
+    except ValueError:
+        raise HTTPException(
+            status_code=404, detail="intent consultation not found"
+        ) from None
+    return IntentConsultResponse.model_validate(projection.model_dump())
+
+
+@router.post(
+    "/sessions/{session_id}/intent-consult",
+    response_model=IntentConsultResponse,
+)
+async def consult_intent(
+    session_id: str,
+    request: IntentConsultRequest,
+) -> IntentConsultResponse:
+    metadata = await get_resume_metadata(session_id)
+    if not metadata.get("exists"):
+        raise HTTPException(status_code=404, detail="session_id not found")
+    version = int(metadata.get("resume_version") or 0)
+    if version < 1 or metadata.get("confirmed_resume_version") != version:
+        raise HTTPException(status_code=409, detail="resume must be confirmed")
+
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    try:
+        updated = await run_visible_intent_consultation(
+            state,
+            IntentConsultInput.model_validate(request.model_dump()),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    if updated.career_state.intent_mode is None:
+        raise HTTPException(
+            status_code=502, detail="intent consultation unavailable"
+        )
+    status = (
+        "intent_clarification"
+        if updated.career_state.intent_needs_clarification
+        else "intent_consulted"
+    )
+    await save_state(updated, status=status)
+    projection = project_intent_consultation(updated)
+    return IntentConsultResponse.model_validate(projection.model_dump())
 
 
 @router.post(
@@ -219,3 +282,36 @@ def _strings(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [text for item in value if (text := _text(item))]
+
+
+def _resume_evidence_preview(resume) -> list[ResumeEvidencePreview]:
+    referenced_ids: set[str] = set()
+    for section in (resume.education, resume.experience, resume.projects):
+        for item in section:
+            if isinstance(item, dict):
+                referenced_ids.update(_strings(item.get("evidence_span_ids")))
+
+    evidence: list[ResumeEvidencePreview] = []
+    for span in resume.original_evidence_spans:
+        if not isinstance(span, dict):
+            continue
+        span_id = _text(span.get("span_id") or span.get("id"))
+        content = _redact_contact_text(_text(span.get("text")))
+        if span_id in referenced_ids and content:
+            evidence.append(
+                ResumeEvidencePreview(
+                    evidence_span_id=span_id,
+                    content=content,
+                )
+            )
+    return evidence
+
+
+def _redact_contact_text(text: str) -> str:
+    text = re.sub(
+        r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+        "[email hidden]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"(?<!\w)(?:\+?\d[\d ()-]{7,}\d)(?!\w)", "[phone hidden]", text)

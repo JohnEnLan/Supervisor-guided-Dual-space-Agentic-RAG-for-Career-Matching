@@ -4,6 +4,8 @@
 状态本身不持有任何业务逻辑，只是一个被 Postgres 序列化/反序列化的容器。
 """
 from __future__ import annotations
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -24,6 +26,13 @@ class CareerState(BaseModel):
     hard_constraints: dict = Field(default_factory=dict)   # 走 SQL 过滤
     soft_preferences: dict = Field(default_factory=dict)   # 走排序加权
     avoid_roles: list[str] = Field(default_factory=list)
+    intent_mode: Literal["targeted", "explore"] | None = None
+    intent_consulted: bool = False
+    intent_assistant_message: str = ""
+    intent_directions: list[dict] = Field(default_factory=list)
+    intent_needs_clarification: bool = False
+    intent_clarification_question: str | None = None
+    intent_clarification_used: int = Field(default=0, ge=0, le=1)
 
 
 class RetrievalState(BaseModel):

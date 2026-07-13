@@ -46,6 +46,47 @@
         "title": "CapabilitiesResponse",
         "type": "object"
       },
+      "CareerDirectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_role": {
+            "default": "",
+            "title": "Entry Role",
+            "type": "string"
+          },
+          "primary_gap": {
+            "default": "",
+            "title": "Primary Gap",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "resume_evidence_span_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resume Evidence Span Ids",
+            "type": "array"
+          },
+          "role_family": {
+            "title": "Role Family",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role_family",
+          "title",
+          "rationale"
+        ],
+        "title": "CareerDirectionResponse",
+        "type": "object"
+      },
       "CareerPathItem": {
         "additionalProperties": false,
         "properties": {
@@ -154,6 +195,158 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IntentConsultRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "clarification_answer": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification Answer"
+          },
+          "company_exclusive": {
+            "default": false,
+            "title": "Company Exclusive",
+            "type": "boolean"
+          },
+          "goal_text": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Text"
+          },
+          "mode": {
+            "enum": [
+              "targeted",
+              "explore"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "target_companies": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Target Companies",
+            "type": "array"
+          },
+          "target_roles": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Target Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "IntentConsultRequest",
+        "type": "object"
+      },
+      "IntentConsultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assistant_message": {
+            "title": "Assistant Message",
+            "type": "string"
+          },
+          "avoid_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Avoid Roles",
+            "type": "array"
+          },
+          "clarification_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification Question"
+          },
+          "clarification_used": {
+            "default": 0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Clarification Used",
+            "type": "integer"
+          },
+          "current_goal": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Current Goal",
+            "type": "array"
+          },
+          "directions": {
+            "items": {
+              "$ref": "#/components/schemas/CareerDirectionResponse"
+            },
+            "title": "Directions",
+            "type": "array"
+          },
+          "hard_constraints": {
+            "additionalProperties": true,
+            "title": "Hard Constraints",
+            "type": "object"
+          },
+          "long_term_goal": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Long Term Goal",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "targeted",
+              "explore"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "needs_clarification": {
+            "default": false,
+            "title": "Needs Clarification",
+            "type": "boolean"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "soft_preferences": {
+            "additionalProperties": true,
+            "title": "Soft Preferences",
+            "type": "object"
+          }
+        },
+        "required": [
+          "session_id",
+          "mode",
+          "assistant_message"
+        ],
+        "title": "IntentConsultResponse",
         "type": "object"
       },
       "MatchBrief": {
@@ -789,6 +982,25 @@
         "title": "ResumeEducationPreview",
         "type": "object"
       },
+      "ResumeEvidencePreview": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "evidence_span_id": {
+            "title": "Evidence Span Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_span_id",
+          "content"
+        ],
+        "title": "ResumeEvidencePreview",
+        "type": "object"
+      },
       "ResumeExperiencePreview": {
         "additionalProperties": false,
         "properties": {
@@ -856,6 +1068,13 @@
               "$ref": "#/components/schemas/ResumeEducationPreview"
             },
             "title": "Education",
+            "type": "array"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeEvidencePreview"
+            },
+            "title": "Evidence",
             "type": "array"
           },
           "experience": {
@@ -1473,6 +1692,92 @@
           }
         },
         "summary": "Create Session"
+      }
+    },
+    "/api/v1/sessions/{session_id}/intent-consult": {
+      "get": {
+        "operationId": "get_intent_consultation_api_v1_sessions__session_id__intent_consult_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentConsultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Intent Consultation"
+      },
+      "post": {
+        "operationId": "consult_intent_api_v1_sessions__session_id__intent_consult_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentConsultRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentConsultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consult Intent"
       }
     },
     "/api/v1/sessions/{session_id}/match-brief": {

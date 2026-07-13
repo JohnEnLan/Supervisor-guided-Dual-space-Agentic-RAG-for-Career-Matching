@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from app.agents.base import BaseAgent
+from app.domain.intent import CareerDirection, IntentConsultInput
 from app.state.schema import SharedState
 
 
@@ -74,6 +75,125 @@ async def run_intent_agent(state: SharedState, user_goal_text: str) -> SharedSta
     return await IntentAgent(user_goal_text=user_goal_text).run(state)
 
 
+class IntentConsultAgent(BaseAgent):
+    name = "intent_consult_agent"
+    system_prompt = """
+VISIBLE_INTENT_CONSULT_AGENT
+You help a user form or validate a career direction before matching.
+Use only the supplied structured resume fields and resume evidence.
+
+Return strict JSON with:
+{
+  "assistant_message": string,
+  "current_goal": [string],
+  "long_term_goal": [string],
+  "hard_constraints": object,
+  "soft_preferences": object,
+  "avoid_roles": [string],
+  "directions": [{
+    "role_family": string,
+    "title": string,
+    "rationale": string,
+    "resume_evidence_span_ids": [string],
+    "primary_gap": string,
+    "entry_role": string
+  }],
+  "needs_clarification": boolean,
+  "clarification_question": string or null
+}
+
+For targeted mode, normalize target roles and separate hard constraints from
+soft preferences. For explore mode, return at most three evidence-grounded
+directions. Ask at most one clarification about location, visa sponsorship,
+or acceptance of bridge roles. Do not invent resume evidence or promise a
+hiring outcome.
+"""
+
+    def __init__(self, request: IntentConsultInput):
+        self.request = request
+
+    def build_user_prompt(self, state: SharedState) -> str:
+        resume = state.resume_state
+        return json.dumps(
+            {
+                "request": self.request.model_dump(mode="json"),
+                "resume": {
+                    "education": resume.education,
+                    "experience": resume.experience,
+                    "projects": resume.projects,
+                    "skills": resume.skills,
+                    "evidence": [
+                        {
+                            "span_id": span.get("span_id") or span.get("id"),
+                            "text": span.get("text"),
+                        }
+                        for span in resume.original_evidence_spans
+                        if span.get("span_id") or span.get("id")
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    def apply(self, state: SharedState, parsed: dict) -> SharedState:
+        career = state.career_state
+        career.intent_mode = self.request.mode
+        career.intent_assistant_message = str(
+            parsed.get("assistant_message") or ""
+        ).strip()
+        career.current_goal = _as_list(parsed.get("current_goal"))
+        career.long_term_goal = _filter_long_term_goal(
+            self.request.goal_text or "",
+            _as_list(parsed.get("long_term_goal")),
+        )
+
+        hard_constraints = _filter_hard_constraints(
+            _as_dict(parsed.get("hard_constraints"))
+        )
+        hard_constraints.pop("companies", None)
+        if self.request.company_exclusive and self.request.target_companies:
+            hard_constraints["companies"] = list(self.request.target_companies)
+        career.hard_constraints = hard_constraints
+
+        soft_preferences = _filter_soft_preferences(
+            _as_dict(parsed.get("soft_preferences"))
+        )
+        if self.request.target_companies:
+            soft_preferences["preferred_companies"] = list(
+                self.request.target_companies
+            )
+        career.soft_preferences = soft_preferences
+        career.avoid_roles = _as_list(parsed.get("avoid_roles"))
+        career.intent_directions = _validated_directions(
+            parsed.get("directions")
+        )
+
+        if self.request.clarification_answer:
+            career.intent_clarification_used = 1
+        can_clarify = career.intent_clarification_used < 1
+        career.intent_needs_clarification = bool(
+            parsed.get("needs_clarification") and can_clarify
+        )
+        question = str(parsed.get("clarification_question") or "").strip()
+        career.intent_clarification_question = (
+            question if career.intent_needs_clarification and question else None
+        )
+        career.intent_consulted = not career.intent_needs_clarification
+        return state
+
+
+async def run_visible_intent_consultation(
+    state: SharedState,
+    request: IntentConsultInput,
+) -> SharedState:
+    if (
+        request.clarification_answer
+        and state.career_state.intent_clarification_used >= 1
+    ):
+        raise ValueError("clarification limit reached")
+    return await IntentConsultAgent(request).run(state)
+
+
 def _filter_hard_constraints(raw: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "location",
@@ -98,6 +218,7 @@ def _filter_soft_preferences(raw: dict[str, Any]) -> dict[str, Any]:
     allowed_list_fields = {
         "preferred_locations",
         "preferred_role_clusters",
+        "preferred_companies",
         "title_keywords",
     }
     cleaned = {
@@ -141,3 +262,18 @@ def _as_list(value: Any) -> list[Any]:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _validated_directions(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    directions: list[dict[str, Any]] = []
+    for item in value[:3]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            direction = CareerDirection.model_validate(item)
+        except ValueError:
+            continue
+        directions.append(direction.model_dump(mode="json"))
+    return directions

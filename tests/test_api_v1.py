@@ -18,6 +18,7 @@ PUBLIC_PATHS = {
     "/api/v1/sessions/{session_id}/resume",
     "/api/v1/sessions/{session_id}/resume-preview",
     "/api/v1/sessions/{session_id}/resume-confirm",
+    "/api/v1/sessions/{session_id}/intent-consult",
     "/api/v1/sessions/{session_id}/match-brief",
     "/api/v1/runs/{run_id}/execute",
     "/api/v1/runs/{run_id}/status",
