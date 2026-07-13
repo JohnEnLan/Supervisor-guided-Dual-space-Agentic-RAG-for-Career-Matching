@@ -12,6 +12,7 @@ from app.agents.strategy_agent import run_strategy_agent
 from app.agents.supervisor import final_verification, plan_retrieval
 from app.api.result_projector import project_product_result
 from app.db.event_store import append_event
+from app.db.monitoring_store import save_run_metrics
 from app.db.run_store import (
     get_run,
     load_state_snapshot,
@@ -22,6 +23,7 @@ from app.db.run_store import (
 )
 from app.db.state_store import load_state, save_state
 from app.domain.match_brief import MatchBrief
+from app.domain.monitoring import build_run_metrics
 from app.domain.run import RunStage, RunStatus
 from app.normalization.resume_intake import intake_resume
 from app.state.schema import SharedState
@@ -133,17 +135,27 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
         state.career_state.hard_constraints = dict(brief.hard_constraints)
         await save_state(state, status="agentic_done")
         await update_run_stage(run_id=run_id, stage=RunStage.FINALIZATION)
+        stage_started = perf_counter()
+        product_result = project_product_result(state)
+        _record_stage_duration(state, "finalization", stage_started)
         await save_state_snapshot(
             run_id=run_id,
             state_snapshot=state.model_dump(mode="json"),
         )
-        product_result = project_product_result(state)
         warning_codes = list(product_result.warnings)
         await save_run_result(
             run_id=run_id,
             result_snapshot=product_result.model_dump(mode="json"),
             warning_codes=warning_codes,
         )
+        try:
+            await save_run_metrics(
+                run_id=run_id,
+                metrics=build_run_metrics(state, product_result),
+            )
+        except Exception:
+            # Monitoring is best-effort and may not downgrade a terminal run.
+            pass
         try:
             await append_event(
                 run_id=run_id,

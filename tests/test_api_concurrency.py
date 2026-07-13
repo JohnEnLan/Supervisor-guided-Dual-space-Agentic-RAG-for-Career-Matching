@@ -228,6 +228,7 @@ async def test_two_sessions_three_v1_runs_keep_snapshots_and_results_isolated(
     monkeypatch.setattr(orchestrator, "save_state", no_op)
     monkeypatch.setattr(orchestrator, "save_state_snapshot", save_snapshot)
     monkeypatch.setattr(orchestrator, "save_run_result", save_result)
+    monkeypatch.setattr(orchestrator, "save_run_metrics", no_op)
 
     await asyncio.gather(
         *[

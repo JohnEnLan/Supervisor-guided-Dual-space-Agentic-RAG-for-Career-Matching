@@ -76,6 +76,7 @@ async def test_run_orchestrator_keeps_approved_hard_constraints_locked(monkeypat
     monkeypatch.setattr(orchestrator, "save_state", no_op)
     monkeypatch.setattr(orchestrator, "save_state_snapshot", snapshot)
     monkeypatch.setattr(orchestrator, "save_run_result", no_op)
+    monkeypatch.setattr(orchestrator, "save_run_metrics", no_op)
 
     await orchestrator.run_persisted_agentic_match_run(run_id="run-1")
 
@@ -114,6 +115,7 @@ async def test_consulted_run_skips_duplicate_intent_agent(monkeypatch) -> None:
     )
     transitions: list[RunStage | None] = []
     stages: list[RunStage] = []
+    captured_metrics = []
 
     async def fake_get_run(**_kwargs):
         return run
@@ -140,6 +142,11 @@ async def test_consulted_run_skips_duplicate_intent_agent(monkeypatch) -> None:
     async def no_op(*_args, **_kwargs):
         return None
 
+    async def capture_metrics(*, run_id, metrics):
+        assert run_id == "run-1"
+        captured_metrics.append(metrics)
+        raise RuntimeError("monitoring table unavailable")
+
     monkeypatch.setattr(orchestrator, "get_run", fake_get_run)
     monkeypatch.setattr(orchestrator, "transition_run", transition)
     monkeypatch.setattr(orchestrator, "update_run_stage", update)
@@ -152,8 +159,16 @@ async def test_consulted_run_skips_duplicate_intent_agent(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator, "save_state", no_op)
     monkeypatch.setattr(orchestrator, "save_state_snapshot", no_op)
     monkeypatch.setattr(orchestrator, "save_run_result", no_op)
+    monkeypatch.setattr(
+        orchestrator,
+        "save_run_metrics",
+        capture_metrics,
+        raising=False,
+    )
 
     await orchestrator.run_persisted_agentic_match_run(run_id="run-1")
 
     assert transitions == [RunStage.INTENT]
     assert stages[0] is RunStage.RETRIEVAL
+    assert len(captured_metrics) == 1
+    assert "finalization" in captured_metrics[0].stage_durations_ms
