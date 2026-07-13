@@ -2,9 +2,9 @@
 
 **Date:** 2026-07-12
 
-**Status:** Approved in conversation; awaiting written-spec review
+**Status:** Approved for implementation
 
-**Scope:** P0 React workbench plus the minimum backend contract needed for visible Intent Agent consultation and server-directed polling
+**Scope:** P0 React workbench plus the minimum backend contract needed for visible Intent Agent consultation, server-directed polling, a whole-flow progress board, and read-only run monitoring
 
 ## 1. Objective and Scope
 
@@ -16,6 +16,7 @@ Create session and upload resume
 -> consult Intent Agent
 -> approve Match Brief
 -> execute and recover a run
+-> inspect real whole-flow stage progress
 -> inspect one evidence-grounded result
 -> optionally inspect examiner-only dual-space trace
 -> submit a lightweight reaction
@@ -30,6 +31,7 @@ The workbench is not a marketing site. It will not include pricing, account sett
 3. **Evidence precedes confidence.** The UI shows JD evidence, resume evidence, gaps, and provenance. It never displays hiring probabilities or guaranteed outcomes.
 4. **Research detail is progressive.** Normal users see one coherent result. Examiner-only trace data lives on a capability-gated route.
 5. **P0 stays bounded.** One workbench, one primary flow, one bounded clarification, and deterministic tests.
+6. **Monitoring is a safe read-only projection.** It exposes aggregate run volume, latency, evidence coverage, and dual-space usage without user administration, mutations, or private-state browsing.
 
 ## 3. Visual System
 
@@ -52,7 +54,7 @@ Use Vite, React, TypeScript strict mode, React Router, TanStack Query, Vitest, T
 frontend/src/
   app/          shell, router, providers
   api/          generated OpenAPI types, fetch client, query options
-  features/     session, brief, run, results, evaluation, feedback
+  features/     session, brief, run, results, evaluation, feedback, monitoring
   styles/       tokens and global responsive rules
 ```
 
@@ -65,6 +67,7 @@ Routes:
 /runs/:runId                 Run status and recovery
 /runs/:runId/results         Product result and evidence
 /runs/:runId/evaluation      Examiner trace
+/monitoring                   Read-only run monitoring
 ```
 
 The URL is the recovery locator. TanStack Query refetches the relevant server resource on page load. A refresh on a Run, Results, or Evaluation route must not depend on in-memory navigation state.
@@ -178,6 +181,21 @@ Extend the allow-listed Explain DTO with typed case evidence containing case ID,
 
 Refresh `tests/snapshots/openapi_v1.json` in the same change, then regenerate `frontend/src/api/generated.ts` from that snapshot.
 
+### 6.5 Whole-flow progress and read-only monitoring API
+
+Add deterministic `completed_stages` and `total_stages` to `RunStatusResponse` alongside `stage`. The UI renders completion from these fields and never infers progress from elapsed time. The fixed order is `resume`, `intent`, `retrieval`, `strategy`, `verification`, `finalization`, and `result`; session APIs provide Resume and Intent state before run creation, and run status becomes authoritative after creation.
+
+Add `monitoring_enabled` to `/api/v1/capabilities`. Only when `MONITORING_ENABLED=true`, expose:
+
+```text
+GET /api/v1/monitoring/overview?window_hours=24
+GET /api/v1/monitoring/runs?window_hours=24&limit=20
+```
+
+`overview` returns total runs, status counts, completion/warning/failure rates, P50/P95 total and per-stage latency, average recommendation count, JD evidence coverage, runs using implicit cases, and dual-space reorder count. `runs` returns only run ID, status, current stage, timestamps, duration, recommendation count, warning codes, and safe error code.
+
+At run completion, build an allow-listed `run_metrics` read model from the final state and Product Result. Monitoring queries read only `match_runs`, `run_events`, and `run_metrics`; they never read or return full `state_snapshot`, resumes, prompts, provider errors, or user identity. P0 polls every five seconds and does not add WebSockets, Prometheus, Grafana, or another queue.
+
 ## 7. Page and Interaction Design
 
 ### 7.1 New Session
@@ -216,7 +234,13 @@ Show the real stages: Intent consultation complete, Retrieval, Strategy, Verific
 - network interruption: retain the current route and offer retry.
 - non-terminal result 409: follow the public recovery payload back to Run status.
 
-### 7.5 Results and Evidence Drawer
+### 7.5 Whole-flow Progress Board
+
+The application shell persistently displays seven stages across the primary flow: Resume, Intent, Retrieval, Strategy, Verification, Finalization, and Results. Desktop uses a labelled horizontal stepper. At 375 px it collapses to “Stage N of 7”, the active label, and an expandable stage list without horizontal overflow.
+
+Completed stages show a completion mark, the active stage reflects real server state, and future stages remain neutral. Failed or stale runs remain on the actual failed stage and show recovery actions. The board never renders time-derived percentages and never falls back to browser-default progress after refresh.
+
+### 7.6 Results and Evidence Drawer
 
 Present one recommendation list. Selecting a recommendation updates the detail pane without creating a second competing list.
 
@@ -229,15 +253,21 @@ The detail pane includes title, company, location, tier, concise explanation, sk
 
 Closing through Escape, backdrop, or close button returns focus to the exact trigger. The interface never shows a hiring probability or guaranteed outcome.
 
-### 7.6 Examiner View
+### 7.7 Examiner View
 
 The navigation entry exists only when `/capabilities` returns `explain_enabled: true`. Direct navigation while disabled shows an unavailable state with a Results link.
 
 When enabled, display explicit, implicit, and final rank; anonymous case evidence; effective implicit weight; stage durations; warnings; and bounded recovery events. This view is visually marked as examiner-only and remains separate from the normal recommendation detail.
 
-### 7.7 Reaction
+### 7.8 Reaction
 
 Each recommendation provides a lightweight usefulness reaction. Explain that the reaction is recorded for the current session and does not automatically publish a public anonymous case.
+
+### 7.9 Run Monitoring
+
+`/monitoring` is a read-only observability page for defense and development. It shows the selected time window and last refresh, then four metric groups covering volume/status, performance, result quality, and dual-space usage, plus a recent-runs table. It refreshes every five seconds; on network failure it preserves the last successful data and offers manual retry.
+
+The navigation entry appears only when `monitoring_enabled` is true. Direct access while disabled shows an unavailable state. P0 does not provide run deletion, replay, state mutation, full-resume access, or arbitrary SQL.
 
 ## 8. Accessibility and Responsive Behavior
 
@@ -281,6 +311,8 @@ Use Vitest and Testing Library beside each page or feature. Cover:
 - unified result selection;
 - Evidence Drawer focus restoration;
 - capability-gated examiner route;
+- progress mapping, mobile collapse, and refresh restoration;
+- monitoring capability gate, aggregate metrics, and safe recent-run fields;
 - reaction success and safe error handling.
 
 ### 10.3 Playwright
@@ -302,11 +334,14 @@ Day 3 is complete when:
 7. Results provide traceable evidence and never present hiring probability.
 8. Examiner content is capability-gated and contains no private state.
 9. Drawer focus restoration and 375/768/1440 overflow tests pass.
-10. Backend regression tests, frontend unit tests, type checks, build, and Playwright all pass.
+10. The progress board is driven only by server state and restores after refresh.
+11. Monitoring shows volume, success/warning/failure rates, P50/P95 latency, evidence coverage, and dual-space usage without exposing private state or resume content.
+12. Backend regression tests, frontend unit tests, type checks, build, and Playwright all pass.
 
 ## 12. Explicit Non-Goals
 
-- Marketing pages, authentication UI, billing, account settings, and admin consoles.
+- Marketing pages, authentication UI, billing, account settings, and mutating admin consoles; the read-only run monitor is in scope.
+- Public monitoring deployment, Prometheus/Grafana, WebSocket push, and a cross-instance live metrics bus.
 - User-selectable model/provider configuration.
 - RAPTOR, cross-encoder, alpha/beta, or latent-space controls in the normal UI.
 - Public deployment, production worker leasing, or queue infrastructure.
