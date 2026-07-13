@@ -109,6 +109,24 @@ async def test_create_run_persists_distinct_run_id(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_run_recovers_approved_plan_hash(monkeypatch) -> None:
+    from app.db import run_store
+
+    connection = Connection(fetchrow_results=[_run_row(plan_hash="a" * 64)])
+
+    async def fake_get_pool():
+        return Pool(connection)
+
+    monkeypatch.setattr(run_store, "get_pool", fake_get_pool)
+
+    run = await run_store.get_run(run_id="run-1")
+
+    assert run is not None
+    assert run.plan_hash == "a" * 64
+    assert "plan_hash" in connection.calls[0][0]
+
+
+@pytest.mark.asyncio
 async def test_save_match_brief_and_queue_use_cas(monkeypatch) -> None:
     from app.db import run_store
     from app.domain.match_brief import create_match_brief

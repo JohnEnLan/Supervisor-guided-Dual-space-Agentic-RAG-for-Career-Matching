@@ -29,6 +29,17 @@ def build_public_explain(
             for item in evidence
             if isinstance(item, dict) and item.get("case_id")
         ]
+        case_evidence = [
+            {
+                "case_id": str(item["case_id"]),
+                "highest_stage": str(item.get("highest_stage") or "unknown"),
+                "confidence": _optional_float(
+                    item.get("confidence", item.get("source_confidence"))
+                ),
+            }
+            for item in evidence
+            if isinstance(item, dict) and item.get("case_id")
+        ]
         rank_trace.append(
             {
                 "job_id": str(row.get("job_id") or ""),
@@ -48,6 +59,7 @@ def build_public_explain(
                     6,
                 ),
                 "case_ids": case_ids,
+                "case_evidence": case_evidence,
             }
         )
 

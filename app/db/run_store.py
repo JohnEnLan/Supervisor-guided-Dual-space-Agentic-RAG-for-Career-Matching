@@ -43,7 +43,7 @@ async def create_run(*, session_id: str, run_id: str | None = None) -> MatchRun:
               AND resume_version > 0
               AND confirmed_resume_version = resume_version
             RETURNING run_id, session_id, confirmed_resume_version,
-                      status, stage, plan_version,
+                      status, stage, plan_version, plan_hash,
                       approved_plan, result_snapshot, warning_codes, error_code,
                       execution_durability, created_at, updated_at,
                       started_at, finished_at
@@ -62,7 +62,7 @@ async def get_run(*, run_id: str) -> MatchRun | None:
         row = await connection.fetchrow(
             """
             SELECT run_id, session_id, confirmed_resume_version,
-                   status, stage, plan_version,
+                   status, stage, plan_version, plan_hash,
                    approved_plan, result_snapshot, warning_codes, error_code,
                    execution_durability, created_at, updated_at,
                    started_at, finished_at
@@ -90,7 +90,7 @@ async def save_match_brief(*, run_id: str, brief: MatchBrief) -> MatchRun:
                 updated_at = now()
             WHERE run_id = $1 AND status = 'draft'
             RETURNING run_id, session_id, confirmed_resume_version,
-                      status, stage, plan_version,
+                      status, stage, plan_version, plan_hash,
                       approved_plan, result_snapshot, warning_codes, error_code,
                       execution_durability, created_at, updated_at,
                       started_at, finished_at
@@ -121,7 +121,7 @@ async def queue_run(
               AND COALESCE((approved_plan->>'needs_clarification')::boolean, false) = false
               AND jsonb_array_length(COALESCE(approved_plan->'conflicts', '[]'::jsonb)) = 0
             RETURNING run_id, session_id, confirmed_resume_version,
-                      status, stage, plan_version,
+                      status, stage, plan_version, plan_hash,
                       approved_plan, result_snapshot, warning_codes, error_code,
                       execution_durability, created_at, updated_at,
                       started_at, finished_at
@@ -175,7 +175,7 @@ async def transition_run(
                 updated_at = now()
             WHERE run_id = $1 AND status = $2
             RETURNING run_id, session_id, confirmed_resume_version,
-                      status, stage, plan_version,
+                      status, stage, plan_version, plan_hash,
                       approved_plan, result_snapshot, warning_codes, error_code,
                       execution_durability, created_at, updated_at,
                       started_at, finished_at
@@ -214,7 +214,7 @@ async def save_run_result(
                 updated_at = now()
             WHERE run_id = $1 AND status = 'running'
             RETURNING run_id, session_id, confirmed_resume_version,
-                      status, stage, plan_version,
+                      status, stage, plan_version, plan_hash,
                       approved_plan, result_snapshot, warning_codes, error_code,
                       execution_durability, created_at, updated_at,
                       started_at, finished_at

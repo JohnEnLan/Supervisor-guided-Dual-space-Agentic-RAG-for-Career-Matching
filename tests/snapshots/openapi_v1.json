@@ -118,6 +118,36 @@
         "title": "CareerPathItem",
         "type": "object"
       },
+      "CaseEvidenceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "highest_stage": {
+            "title": "Highest Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "case_id",
+          "highest_stage"
+        ],
+        "title": "CaseEvidenceResponse",
+        "type": "object"
+      },
       "EvidenceItem": {
         "additionalProperties": false,
         "properties": {
@@ -561,6 +591,13 @@
       "RankTraceResponse": {
         "additionalProperties": false,
         "properties": {
+          "case_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/CaseEvidenceResponse"
+            },
+            "title": "Case Evidence",
+            "type": "array"
+          },
           "case_ids": {
             "items": {
               "type": "string"
@@ -1237,6 +1274,13 @@
       "RunStatusResponse": {
         "additionalProperties": false,
         "properties": {
+          "completed_stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Completed Stages",
+            "type": "array"
+          },
           "error_code": {
             "anyOf": [
               {
@@ -1252,9 +1296,35 @@
             "title": "Execution Durability",
             "type": "string"
           },
+          "plan_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Hash"
+          },
+          "plan_version": {
+            "title": "Plan Version",
+            "type": "integer"
+          },
           "result_ready": {
             "title": "Result Ready",
             "type": "boolean"
+          },
+          "retry_after_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Ms"
           },
           "run_id": {
             "title": "Run Id",
@@ -1279,6 +1349,11 @@
             "title": "Status",
             "type": "string"
           },
+          "total_stages": {
+            "default": 7,
+            "title": "Total Stages",
+            "type": "integer"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -1298,6 +1373,7 @@
           "status",
           "result_ready",
           "execution_durability",
+          "plan_version",
           "updated_at"
         ],
         "title": "RunStatusResponse",

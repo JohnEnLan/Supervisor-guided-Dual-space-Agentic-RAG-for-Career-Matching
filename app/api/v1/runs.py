@@ -17,12 +17,22 @@ from app.db.run_store import (
     load_state_snapshot,
     queue_run,
 )
-from app.domain.run import RunStatus
+from app.domain.run import RunStage, RunStatus, TERMINAL_STATUSES
 from app.domain.results import ProductResult
 from app.state.schema import SharedState
 
 
 router = APIRouter()
+
+PUBLIC_STAGE_ORDER = (
+    "resume",
+    "intent",
+    "retrieval",
+    "strategy",
+    "verification",
+    "finalization",
+    "result",
+)
 
 
 @router.post(
@@ -116,5 +126,28 @@ def _status_response(run) -> RunStatusResponse:
         warning_codes=run.warning_codes,
         error_code=run.error_code,
         execution_durability=run.execution_durability,
+        retry_after_ms=(None if run.status in TERMINAL_STATUSES else 1500),
+        completed_stages=public_progress(
+            status=run.status,
+            stage=run.stage,
+        ),
+        total_stages=len(PUBLIC_STAGE_ORDER),
+        plan_version=run.plan_version,
+        plan_hash=run.plan_hash,
         updated_at=run.updated_at,
     )
+
+
+def public_progress(
+    *,
+    status: RunStatus,
+    stage: RunStage | None,
+) -> list[str]:
+    if status in {RunStatus.COMPLETED, RunStatus.COMPLETED_WITH_WARNINGS}:
+        return list(PUBLIC_STAGE_ORDER)
+    active_stage = stage.value if stage is not None else "intent"
+    try:
+        active_index = PUBLIC_STAGE_ORDER.index(active_stage)
+    except ValueError:
+        active_index = 1
+    return list(PUBLIC_STAGE_ORDER[:active_index])

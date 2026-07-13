@@ -16,7 +16,12 @@ def _state() -> SharedState:
                     "implicit_score": 0.7,
                     "implicit_confidence": 0.6,
                     "implicit_evidence": [
-                        {"case_id": "case-1", "highest_stage": "interview"}
+                        {
+                            "case_id": "case-1",
+                            "highest_stage": "interview",
+                            "confidence": 0.75,
+                            "private_resume": "must stay private",
+                        }
                     ],
                 }
             ]
@@ -51,6 +56,13 @@ def test_explain_contains_allow_list_trace_without_prompt_or_state() -> None:
 
     assert payload is not None
     assert payload["rank_trace"][0]["case_ids"] == ["case-1"]
+    assert payload["rank_trace"][0]["case_evidence"] == [
+        {
+            "case_id": "case-1",
+            "highest_stage": "interview",
+            "confidence": 0.75,
+        }
+    ]
     assert payload["fusion"]["implicit_max_weight"] == 0.3
     assert payload["stage_durations_ms"] == {"retrieval": 45}
     assert payload["recovery_events"][0] == {

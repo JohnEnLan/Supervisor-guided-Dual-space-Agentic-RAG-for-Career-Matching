@@ -152,6 +152,11 @@ class RunStatusResponse(PublicDTO):
     warning_codes: list[str] = Field(default_factory=list)
     error_code: str | None = None
     execution_durability: str
+    retry_after_ms: int | None = None
+    completed_stages: list[str] = Field(default_factory=list)
+    total_stages: int = 7
+    plan_version: int
+    plan_hash: str | None = None
     updated_at: datetime
 
 
@@ -159,6 +164,12 @@ class RunResultResponse(PublicDTO):
     run_id: str
     status: str
     result: ProductResult
+
+
+class CaseEvidenceResponse(PublicDTO):
+    case_id: str
+    highest_stage: str
+    confidence: float | None = None
 
 
 class RankTraceResponse(PublicDTO):
@@ -171,6 +182,7 @@ class RankTraceResponse(PublicDTO):
     implicit_confidence: float | None = None
     implicit_weight: float
     case_ids: list[str] = Field(default_factory=list)
+    case_evidence: list[CaseEvidenceResponse] = Field(default_factory=list)
 
 
 class FusionResponse(PublicDTO):

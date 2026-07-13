@@ -74,6 +74,7 @@ class MatchRun(BaseModel):
     status: RunStatus
     stage: RunStage | None = None
     plan_version: int = 0
+    plan_hash: str | None = None
     approved_plan: dict[str, Any] = Field(default_factory=dict)
     result_snapshot: dict[str, Any] | None = None
     warning_codes: list[str] = Field(default_factory=list)
