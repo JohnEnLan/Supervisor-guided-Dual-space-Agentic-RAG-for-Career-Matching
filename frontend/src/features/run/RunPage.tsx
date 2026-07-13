@@ -92,7 +92,7 @@ export function RunPage() {
       <p className="eyebrow">Run {runId.slice(0, 8)}</p>
       <h1>{copy.title}</h1><p className="lead">{copy.description}</p>
       <dl className="run-facts"><div><dt>当前阶段</dt><dd>{data.stage ?? data.status}</dd></div><div><dt>已完成阶段</dt><dd>{data.completed_stages?.length ?? 0} / {data.total_stages}</dd></div><div><dt>状态恢复</dt><dd>可安全刷新</dd></div></dl>
-      {execute.isError && !(execute.error instanceof ApiError && execute.error.status === 409) ? <p className="inline-error">执行请求失败，正在保留当前运行。</p> : null}
+      {execute.isError && !(execute.error instanceof ApiError && execute.error.status === 409) ? <div className="notice error"><AlertTriangle /><div><strong>执行请求暂时失败</strong><p>运行仍保留在计划就绪状态，可以安全重试同一个运行。</p><button className="secondary" type="button" onClick={() => { if (data.plan_hash) executeRun({ plan_version: data.plan_version, plan_hash: data.plan_hash }); }}><RefreshCw size={17} />重试执行</button></div></div> : null}
     </section>
   );
 }

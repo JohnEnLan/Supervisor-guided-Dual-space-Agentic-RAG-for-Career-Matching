@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "api:generate": "openapi-typescript ../tests/snapshots/openapi_v1.json -o src/api/generated.ts",
+    "api:check": "openapi-typescript ../tests/snapshots/openapi_v1.json -o src/api/generated.ts --check",
     "e2e": "playwright test"
   },
   "dependencies": {

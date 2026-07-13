@@ -4,8 +4,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { api } from "../../api/queries";
 
-export function ExplainUnavailable() {
-  return <section className="empty-state"><p className="eyebrow">Examiner View</p><h1>评估解释未开启</h1><p>此部署未开放论文评估视图。产品推荐与岗位证据仍可正常查看。</p></section>;
+export function ExplainUnavailable({ runId }: { runId?: string }) {
+  return <section className="empty-state"><p className="eyebrow">Examiner View</p><h1>评估解释未开启</h1><p>此部署未开放论文评估视图。产品推荐与岗位证据仍可正常查看。</p>{runId ? <Link className="button secondary" to={`/runs/${runId}/results`}>返回产品结果</Link> : null}</section>;
 }
 
 export function EvaluationRunPage() {
@@ -13,7 +13,7 @@ export function EvaluationRunPage() {
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities });
   const explain = useQuery({ queryKey: ["run-explain", runId], queryFn: () => api.runExplain(runId), enabled: capabilities.data?.explain_enabled === true && Boolean(runId), retry: false });
   if (capabilities.isPending) return <section className="loading-state"><h1>正在读取评估能力</h1></section>;
-  if (!capabilities.data?.explain_enabled) return <ExplainUnavailable />;
+  if (!capabilities.data?.explain_enabled) return <ExplainUnavailable runId={runId} />;
   if (explain.isPending) return <section className="loading-state"><h1>正在读取融合解释</h1></section>;
   if (explain.isError) return <section className="notice error"><AlertTriangle /><div><h1>解释暂时不可用</h1><p>公开结果不会因此失效。</p></div></section>;
   return (

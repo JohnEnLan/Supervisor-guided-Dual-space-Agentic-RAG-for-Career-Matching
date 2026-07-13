@@ -1,16 +1,50 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Building2, Compass, MessageSquareText, Target } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { ApiError } from "../../api/client";
-import { api, type IntentConsultRequest, type MatchBriefRequest } from "../../api/queries";
+import { ApiError, recoveryMessage } from "../../api/client";
+import { api, type IntentConsult, type IntentConsultRequest, type MatchBriefRequest } from "../../api/queries";
 import { useFlowProgress } from "../../app/App";
 
 type Mode = "targeted" | "explore";
 
 export const splitList = (value: string): string[] =>
   value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
+
+function listText(value: unknown): string {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").join(", ")
+    : typeof value === "string" ? value : "";
+}
+
+function visaText(hard: Record<string, unknown>): string {
+  if (hard.need_visa_sponsor === true) return "需要签证担保";
+  if (hard.need_visa_sponsor === false) return "不需要签证担保";
+  return listText(hard.visa_requirement);
+}
+
+function needsVisaSponsor(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  const noSponsorMarkers = ["不需要", "无需", "不要求", "no sponsorship", "not require", "graduate visa", "dependent visa"];
+  return !noSponsorMarkers.some((marker) => normalized.includes(marker));
+}
+
+export function consultationToForm(consultation: IntentConsult) {
+  const hard = consultation.hard_constraints ?? {};
+  const soft = consultation.soft_preferences ?? {};
+  const hardCompanies = listText(hard.companies);
+  return {
+    mode: consultation.mode,
+    careerGoal: consultation.current_goal?.join("；") ?? "",
+    locations: listText(hard.locations ?? hard.location),
+    visa: visaText(hard),
+    roleFamilies: listText(hard.role_clusters ?? hard.role_cluster ?? soft.preferred_role_clusters ?? soft.role_families ?? soft.preferred_role_families),
+    avoidRoles: consultation.avoid_roles?.join(", ") ?? "",
+    companies: hardCompanies || listText(soft.preferred_companies),
+    companyExclusive: Boolean(hardCompanies),
+  };
+}
 
 type BriefFormValues = {
   careerGoal: string;
@@ -27,10 +61,10 @@ export function buildBriefRequest(values: BriefFormValues): MatchBriefRequest {
   const companies = splitList(values.companies);
   const hardConstraints: Record<string, unknown> = {};
   if (splitList(values.locations).length) hardConstraints.locations = splitList(values.locations);
-  if (values.visa.trim()) hardConstraints.visa_requirement = values.visa.trim();
+  if (values.visa.trim()) hardConstraints.need_visa_sponsor = needsVisaSponsor(values.visa);
   if (companies.length && values.companyExclusive) hardConstraints.companies = companies;
   const softPreferences: Record<string, unknown> = {};
-  if (splitList(values.roleFamilies).length) softPreferences.role_families = splitList(values.roleFamilies);
+  if (splitList(values.roleFamilies).length) softPreferences.preferred_role_clusters = splitList(values.roleFamilies);
   if (companies.length && !values.companyExclusive) softPreferences.preferred_companies = companies;
   return {
     career_goal: values.careerGoal.trim(),
@@ -96,14 +130,32 @@ export function MatchBriefPage() {
     setProgress({ activeStage: "intent", completedStages: ["resume"] });
   }, [setProgress]);
 
+  const hydrateConsultation = useCallback((result: IntentConsult) => {
+    const restored = consultationToForm(result);
+    setMode(restored.mode);
+    setCareerGoal(restored.careerGoal);
+    setTargetRoles(restored.careerGoal);
+    setLocations(restored.locations);
+    setVisa(restored.visa);
+    setRoleFamilies(restored.roleFamilies);
+    setAvoidRoles(restored.avoidRoles);
+    setTargetCompanies(restored.companies);
+    setCompanyExclusive(restored.companyExclusive);
+  }, []);
+  const savedConsultation = useQuery({
+    queryKey: ["intent-consult", sessionId],
+    queryFn: () => api.getIntentConsult(sessionId),
+    enabled: Boolean(sessionId),
+    retry: false,
+  });
+  useEffect(() => {
+    if (savedConsultation.data) hydrateConsultation(savedConsultation.data);
+  }, [hydrateConsultation, savedConsultation.data]);
+
   const consultation = useMutation({
     mutationFn: (request: IntentConsultRequest) => api.consultIntent(sessionId, request),
     onSuccess: (result) => {
-      if (result.current_goal?.length) setCareerGoal(result.current_goal.join("；"));
-      const hardCompanies = result.hard_constraints?.companies;
-      const preferredCompanies = result.soft_preferences?.preferred_companies;
-      const companies = Array.isArray(hardCompanies) ? hardCompanies : Array.isArray(preferredCompanies) ? preferredCompanies : [];
-      if (companies.length) setTargetCompanies(companies.filter((item): item is string => typeof item === "string").join(", "));
+      hydrateConsultation(result);
     },
   });
   const brief = useMutation({
@@ -126,12 +178,18 @@ export function MatchBriefPage() {
     brief.mutate(buildBriefRequest({ careerGoal, locations, visa, roleFamilies, avoidRoles, companies: targetCompanies, companyExclusive, resultCount }));
   };
   const consultError = consultation.error instanceof ApiError ? consultation.error : null;
+  const visibleConsultation = consultation.data ?? savedConsultation.data;
+  const savedConsultationError = savedConsultation.error instanceof ApiError && savedConsultation.error.status !== 404
+    ? savedConsultation.error
+    : null;
 
   return (
     <section>
       <p className="eyebrow">Stage 1 · Intent Agent</p>
       <h1>你已经有目标职业或目标公司吗？</h1>
       <p className="lead">你的选择会决定第一个 Agent 的工作方式：校验并细化现有目标，或从简历证据探索少量可行方向。</p>
+      {savedConsultation.isPending ? <p className="muted">正在检查已保存的咨询…</p> : null}
+      {savedConsultationError ? <p className="inline-error" role="alert">{recoveryMessage(savedConsultationError)}</p> : null}
       <div className="mode-selector" role="radiogroup" aria-label="目标状态">
         <label className={mode === "targeted" ? "selected" : ""}><input type="radio" name="mode" checked={mode === "targeted"} onChange={() => setMode("targeted")} /><Target /> <span><strong>我已有目标</strong><small>输入岗位、公司或职业想法</small></span></label>
         <label className={mode === "explore" ? "selected" : ""}><input type="radio" name="mode" checked={mode === "explore"} onChange={() => setMode("explore")} /><Compass /> <span><strong>我想先探索</strong><small>让 Agent 给出最多三个方向</small></span></label>
@@ -141,22 +199,22 @@ export function MatchBriefPage() {
           <IntentModeFields mode={mode} targetRoles={targetRoles} targetCompanies={targetCompanies} companyExclusive={companyExclusive} onTargetRolesChange={setTargetRoles} onTargetCompaniesChange={setTargetCompanies} onCompanyExclusiveChange={setCompanyExclusive} />
           <label>补充背景或偏好（可选）<textarea value={context} onChange={(event) => setContext(event.target.value)} rows={3} placeholder="例如：希望留在英国、偏好金融数据场景、长期想转向数据产品" /></label>
           <button className="primary" type="button" disabled={consultation.isPending || (mode === "targeted" && !targetRoles.trim() && !context.trim())} onClick={() => sendConsultation()}><MessageSquareText size={18} />{consultation.isPending ? "Agent 正在分析…" : "与目标咨询 Agent 对话"}</button>
-          {consultation.isError ? <p className="inline-error" role="alert">{consultError?.recovery ?? consultError?.message ?? "咨询暂时失败，请重试。"}</p> : null}
+          {consultation.isError ? <p className="inline-error" role="alert">{consultError ? recoveryMessage(consultError) : "咨询暂时失败，请重试。"}</p> : null}
         </section>
       ) : null}
-      {consultation.data ? (
+      {visibleConsultation ? (
         <section className="agent-response" aria-live="polite">
           <div className="agent-label"><span>A1</span><strong>目标咨询 Agent</strong></div>
-          <p>{consultation.data.assistant_message}</p>
-          {consultation.data.directions?.length ? <div className="direction-grid">{consultation.data.directions.slice(0, 3).map((direction) => (
+          <p>{visibleConsultation.assistant_message}</p>
+          {visibleConsultation.directions?.length ? <div className="direction-grid">{visibleConsultation.directions.slice(0, 3).map((direction) => (
             <article key={direction.role_family}><p className="eyebrow">{direction.role_family}</p><h3>{direction.title}</h3><p>{direction.rationale}</p>{direction.primary_gap ? <p><strong>主要缺口：</strong>{direction.primary_gap}</p> : null}<button className="secondary" type="button" onClick={() => { setCareerGoal(`${direction.title} — ${direction.rationale}`); setRoleFamilies(direction.role_family); }}>选择{direction.title}方向</button></article>
           ))}</div> : null}
-          {consultation.data.needs_clarification && consultation.data.clarification_question ? (
-            <div className="clarification"><label>{consultation.data.clarification_question}<textarea rows={2} value={clarification} onChange={(event) => setClarification(event.target.value)} /></label><button className="secondary" type="button" disabled={!clarification.trim() || consultation.isPending} onClick={() => sendConsultation(clarification)}>回答一次澄清问题</button></div>
+          {visibleConsultation.needs_clarification && visibleConsultation.clarification_question ? (
+            <div className="clarification"><label>{visibleConsultation.clarification_question}<textarea rows={2} value={clarification} onChange={(event) => setClarification(event.target.value)} /></label><button className="secondary" type="button" disabled={!clarification.trim() || consultation.isPending} onClick={() => sendConsultation(clarification)}>回答一次澄清问题</button></div>
           ) : null}
         </section>
       ) : null}
-      {consultation.data && !consultation.data.needs_clarification ? (
+      {visibleConsultation && !visibleConsultation.needs_clarification ? (
         <form className="brief-form" onSubmit={submitBrief}>
           <div><p className="eyebrow">Supervisor Planning</p><h2>确认 Match Brief</h2><p className="muted">运行开始后硬约束不会被 Agent 改写。</p></div>
           <div className="form-grid">

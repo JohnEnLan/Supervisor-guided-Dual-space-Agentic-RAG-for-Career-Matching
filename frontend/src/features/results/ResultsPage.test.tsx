@@ -24,4 +24,11 @@ describe("ResultsContent", () => {
     expect(screen.getByText("Advanced SQL")).toBeInTheDocument();
     expect(screen.queryByText(/录用概率|hiring probability|97%/i)).not.toBeInTheDocument();
   });
+
+  it("shows the examiner entry only when the capability is enabled", () => {
+    const { rerender } = render(<AppProviders><MemoryRouter><ResultsContent data={data} runId="run-1" explainEnabled={false} /></MemoryRouter></AppProviders>);
+    expect(screen.queryByRole("link", { name: /查看评估解释/ })).not.toBeInTheDocument();
+    rerender(<AppProviders><MemoryRouter><ResultsContent data={data} runId="run-1" explainEnabled /></MemoryRouter></AppProviders>);
+    expect(screen.getByRole("link", { name: /查看评估解释/ })).toHaveAttribute("href", "/runs/run-1/evaluation");
+  });
 });

@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Check, GraduationCap, Lightbulb, LoaderCircle, Wrench } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { ApiError } from "../../api/client";
+import { ApiError, recoveryMessage } from "../../api/client";
 import { api, type ResumePreview } from "../../api/queries";
 
 type ResumePreviewContentProps = {
@@ -76,7 +76,7 @@ export function ResumeReviewPage() {
   });
 
   if (preview.isPending) return <section className="loading-state"><LoaderCircle className="spin" /><h1>正在提取简历信息</h1><p>完成后会自动显示结构化预览。</p></section>;
-  if (preview.isError) return <section className="notice error" role="alert"><AlertTriangle /><div><h1>暂时无法读取简历预览</h1><p>{preview.error instanceof ApiError ? preview.error.recovery ?? preview.error.message : "请稍后重试。"}</p><button className="secondary" onClick={() => void preview.refetch()}>重新读取</button></div></section>;
+  if (preview.isError) return <section className="notice error" role="alert"><AlertTriangle /><div><h1>暂时无法读取简历预览</h1><p>{preview.error instanceof ApiError ? recoveryMessage(preview.error) : "请稍后重试。"}</p><button className="secondary" onClick={() => void preview.refetch()}>重新读取</button></div></section>;
 
   return (
     <section>

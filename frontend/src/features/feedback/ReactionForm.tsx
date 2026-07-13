@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Send } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { api } from "../../api/queries";
 
@@ -12,8 +12,9 @@ export function ReactionForm({ runId, jobId }: { runId: string; jobId: string })
   const [outcome, setOutcome] = useState("helpful");
   const [rating, setRating] = useState(4);
   const [reason, setReason] = useState("");
+  const idempotencyKey = useRef(crypto.randomUUID());
   const reaction = useMutation({
-    mutationFn: () => api.addReaction(runId, { job_id: jobId, outcome, user_rating: rating, reason: reason.trim() || null, idempotency_key: crypto.randomUUID() }),
+    mutationFn: () => api.addReaction(runId, { job_id: jobId, outcome, user_rating: rating, reason: reason.trim() || null, idempotency_key: idempotencyKey.current }),
   });
   const submit = (event: FormEvent) => { event.preventDefault(); reaction.mutate(); };
   if (reaction.isSuccess) return <div className="feedback-success"><CheckCircle2 /><span>反馈已记录，谢谢你的判断。</span></div>;

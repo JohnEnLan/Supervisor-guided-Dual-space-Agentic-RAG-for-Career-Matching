@@ -35,7 +35,11 @@ describe("apiRequest", () => {
           JSON.stringify({
             detail: {
               message: "The match brief is stale.",
-              recovery: "Return to the brief and approve it again.",
+              error_code: "STALE_PLAN",
+              recovery: {
+                action: "poll_status",
+                status_url: "/api/v1/runs/run-1/status",
+              },
             },
           }),
           { status: 409, headers: { "Content-Type": "application/json" } },
@@ -50,7 +54,11 @@ describe("apiRequest", () => {
         name: "ApiError",
         status: 409,
         message: "The match brief is stale.",
-        recovery: "Return to the brief and approve it again.",
+        errorCode: "STALE_PLAN",
+        recovery: {
+          action: "poll_status",
+          status_url: "/api/v1/runs/run-1/status",
+        },
       }),
     );
   });

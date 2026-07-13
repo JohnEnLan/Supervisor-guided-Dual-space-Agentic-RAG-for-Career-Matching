@@ -3,17 +3,25 @@ const API_PREFIX = "/api/v1";
 type ErrorDetail = {
   message?: unknown;
   recovery?: unknown;
+  error_code?: unknown;
+};
+
+export type RecoveryHint = {
+  action?: string;
+  status_url?: string;
 };
 
 export class ApiError extends Error {
   readonly status: number;
-  readonly recovery?: string;
+  readonly recovery?: RecoveryHint;
+  readonly errorCode?: string;
 
-  constructor(status: number, message: string, recovery?: string) {
+  constructor(status: number, message: string, recovery?: RecoveryHint, errorCode?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.recovery = recovery;
+    this.errorCode = errorCode;
   }
 }
 
@@ -36,6 +44,19 @@ function textOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function recoveryOrUndefined(value: unknown): RecoveryHint | undefined {
+  if (!isRecord(value)) return undefined;
+  const action = textOrUndefined(value.action);
+  const statusUrl = textOrUndefined(value.status_url);
+  return action || statusUrl ? { action, status_url: statusUrl } : undefined;
+}
+
+export function recoveryMessage(error: ApiError): string {
+  if (error.recovery?.action === "poll_status") return "请返回运行进度页继续等待。";
+  if (error.recovery?.action) return `建议恢复操作：${error.recovery.action}`;
+  return error.message;
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
   let body: unknown;
   try {
@@ -47,7 +68,8 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(
     response.status,
     textOrUndefined(detail.message) ?? `Request failed with status ${response.status}.`,
-    textOrUndefined(detail.recovery),
+    recoveryOrUndefined(detail.recovery),
+    textOrUndefined(detail.error_code),
   );
 }
 

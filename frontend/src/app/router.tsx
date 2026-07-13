@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { NewSessionPage } from "../features/session/NewSessionPage";
 import { ResumeReviewPage } from "../features/session/ResumeReviewPage";
@@ -20,7 +20,8 @@ export const router = createBrowserRouter([
       { path: "sessions/:sessionId/brief", element: <MatchBriefPage /> },
       { path: "runs/:runId", element: <RunPage /> },
       { path: "runs/:runId/results", element: <ResultsPage /> },
-      { path: "runs/:runId/explain", element: <EvaluationRunPage /> },
+      { path: "runs/:runId/evaluation", element: <EvaluationRunPage /> },
+      { path: "runs/:runId/explain", element: <Navigate replace to="../evaluation" /> },
       { path: "monitoring", element: <MonitoringPage /> },
     ],
   },

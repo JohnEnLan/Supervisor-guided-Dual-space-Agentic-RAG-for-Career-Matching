@@ -23,6 +23,7 @@ export type MonitoringOverview = Schemas["MonitoringOverviewResponse"];
 export type RecentRuns = Schemas["RecentRunsResponse"];
 export type EvidenceItem = Schemas["EvidenceItem"];
 export type Recommendation = Schemas["RecommendationResult"];
+export type SkillGap = Schemas["SkillGap"];
 
 const id = (value: string): string => encodeURIComponent(value);
 
