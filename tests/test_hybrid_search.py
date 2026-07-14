@@ -1,4 +1,8 @@
+import asyncio
 import os
+from time import perf_counter
+
+import pytest
 
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test")
@@ -116,6 +120,52 @@ def test_prepare_bm25_tsquery_uses_or_keywords_for_long_resume_query():
     assert "strategy:*" in tsquery
     assert tsquery.count("business:*") == 1
     assert len(tsquery.split(" | ")) <= 8
+
+
+@pytest.mark.asyncio
+async def test_bm25_and_dense_overlap_after_hard_filter(monkeypatch) -> None:
+    started: set[str] = set()
+    both_started = asyncio.Event()
+
+    async def get_pool():
+        return object()
+
+    async def hard_filter(_pool, _constraints):
+        return {"job-1"}
+
+    async def branch(name: str):
+        started.add(name)
+        if len(started) == 2:
+            both_started.set()
+        await both_started.wait()
+        await asyncio.sleep(0.1)
+        return []
+
+    async def bm25(*_args, **_kwargs):
+        return await branch("bm25")
+
+    async def dense(*_args, **_kwargs):
+        return await branch("dense")
+
+    monkeypatch.setattr(hs, "get_pool", get_pool)
+    monkeypatch.setattr(hs, "_hard_filter_ids", hard_filter)
+    monkeypatch.setattr(hs, "_bm25", bm25)
+    monkeypatch.setattr(hs, "_dense", dense)
+
+    started_at = perf_counter()
+    result = await asyncio.wait_for(
+        hs.hybrid_search(
+            query="data analyst",
+            hard_constraints={"location": "Birmingham"},
+            top_k=5,
+        ),
+        timeout=0.5,
+    )
+    elapsed = perf_counter() - started_at
+
+    assert result == []
+    assert started == {"bm25", "dense"}
+    assert elapsed < 0.18
 
 
 def test_rerank_candidates_promotes_dense_bi_encoder_match():

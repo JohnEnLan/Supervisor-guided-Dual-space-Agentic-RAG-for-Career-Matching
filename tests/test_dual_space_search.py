@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import perf_counter
 
 import pytest
 
@@ -163,6 +164,7 @@ async def test_explicit_and_implicit_io_start_concurrently() -> None:
         if len(started) == 2:
             both_started.set()
         await both_started.wait()
+        await asyncio.sleep(0.1)
 
     async def explicit_search(**kwargs):
         await rendezvous("explicit")
@@ -172,6 +174,7 @@ async def test_explicit_and_implicit_io_start_concurrently() -> None:
         await rendezvous("implicit")
         return []
 
+    started_at = perf_counter()
     result = await asyncio.wait_for(
         dual_space_search(
             query="data analyst",
@@ -184,9 +187,11 @@ async def test_explicit_and_implicit_io_start_concurrently() -> None:
         ),
         timeout=0.5,
     )
+    elapsed = perf_counter() - started_at
 
     assert started == {"explicit", "implicit"}
     assert result[0].job_id == "job-1"
+    assert elapsed < 0.18
 
 
 @pytest.mark.asyncio
