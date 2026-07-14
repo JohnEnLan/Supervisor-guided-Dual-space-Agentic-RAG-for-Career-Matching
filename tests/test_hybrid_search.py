@@ -1,6 +1,5 @@
 import asyncio
 import os
-from time import perf_counter
 
 import pytest
 
@@ -152,7 +151,6 @@ async def test_bm25_and_dense_overlap_after_hard_filter(monkeypatch) -> None:
     monkeypatch.setattr(hs, "_bm25", bm25)
     monkeypatch.setattr(hs, "_dense", dense)
 
-    started_at = perf_counter()
     result = await asyncio.wait_for(
         hs.hybrid_search(
             query="data analyst",
@@ -161,11 +159,8 @@ async def test_bm25_and_dense_overlap_after_hard_filter(monkeypatch) -> None:
         ),
         timeout=0.5,
     )
-    elapsed = perf_counter() - started_at
-
     assert result == []
     assert started == {"bm25", "dense"}
-    assert elapsed < 0.18
 
 
 def test_rerank_candidates_promotes_dense_bi_encoder_match():

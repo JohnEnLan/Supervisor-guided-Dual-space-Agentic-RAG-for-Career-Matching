@@ -92,7 +92,10 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
                 "hard_constraints_locked": True,
             }
         )
-        await save_state(state, status="run_intent_done")
+        await save_state_snapshot(
+            run_id=run_id,
+            state_snapshot=state.model_dump(mode="json"),
+        )
 
         await update_run_stage(run_id=run_id, stage=RunStage.RETRIEVAL)
         stage_started = perf_counter()
@@ -102,13 +105,19 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
             search_fn=_default_search_fn,
         )
         _record_stage_duration(state, "retrieval", stage_started)
-        await save_state(state, status="run_retrieval_done")
+        await save_state_snapshot(
+            run_id=run_id,
+            state_snapshot=state.model_dump(mode="json"),
+        )
 
         await update_run_stage(run_id=run_id, stage=RunStage.STRATEGY)
         stage_started = perf_counter()
         state = await run_strategy_agent(state)
         _record_stage_duration(state, "strategy", stage_started)
-        await save_state(state, status="run_strategy_done")
+        await save_state_snapshot(
+            run_id=run_id,
+            state_snapshot=state.model_dump(mode="json"),
+        )
         await update_run_stage(run_id=run_id, stage=RunStage.VERIFICATION)
         stage_started = perf_counter()
         verification = await final_verification(state)
@@ -133,7 +142,10 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
 
         # Reassert the immutable contract before snapshots are published.
         state.career_state.hard_constraints = dict(brief.hard_constraints)
-        await save_state(state, status="agentic_done")
+        await save_state_snapshot(
+            run_id=run_id,
+            state_snapshot=state.model_dump(mode="json"),
+        )
         await update_run_stage(run_id=run_id, stage=RunStage.FINALIZATION)
         stage_started = perf_counter()
         product_result = project_product_result(state)

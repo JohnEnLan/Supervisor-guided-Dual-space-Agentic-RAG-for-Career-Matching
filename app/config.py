@@ -1,9 +1,21 @@
-"""集中配置，从 .env 读取。其他模块只从这里拿配置，不要各处 os.getenv。"""
+"""集中配置。默认读取 .env，测试可显式关闭 dotenv 加载。"""
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _configured_env_file() -> str | None:
+    configured = os.environ.get("CAREER_RAG_ENV_FILE")
+    if configured is None:
+        return ".env"
+    return configured or None
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_configured_env_file(),
+        extra="ignore",
+    )
 
     database_url: str
     db_pool_min: int = 2

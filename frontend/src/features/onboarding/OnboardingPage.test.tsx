@@ -33,6 +33,9 @@ describe("OnboardingPage", () => {
     expect(
       screen.getByRole("heading", { name: /可信、可解释/ }),
     ).toHaveFocus();
+    expect(
+      screen.getByText(/不返回完整简历、内部提示词、供应商错误或 API Key/),
+    ).toBeVisible();
 
     fireEvent.click(
       screen.getByRole("link", { name: "进入职业匹配工作台" }),

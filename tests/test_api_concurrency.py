@@ -191,6 +191,11 @@ async def test_twenty_v1_runs_keep_snapshots_and_results_isolated(
     async def no_op(*_args, **_kwargs):
         await asyncio.sleep(0)
 
+    async def fail_shared_session_save(*_args, **_kwargs):
+        raise AssertionError(
+            "run-scoped execution must not overwrite shared session state"
+        )
+
     async def intent(state, _goal):
         await asyncio.sleep(0)
         return state
@@ -235,7 +240,7 @@ async def test_twenty_v1_runs_keep_snapshots_and_results_isolated(
     monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
     monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
     monkeypatch.setattr(orchestrator, "final_verification", verify)
-    monkeypatch.setattr(orchestrator, "save_state", no_op)
+    monkeypatch.setattr(orchestrator, "save_state", fail_shared_session_save)
     monkeypatch.setattr(orchestrator, "save_state_snapshot", save_snapshot)
     monkeypatch.setattr(orchestrator, "save_run_result", save_result)
     monkeypatch.setattr(orchestrator, "save_run_metrics", no_op)

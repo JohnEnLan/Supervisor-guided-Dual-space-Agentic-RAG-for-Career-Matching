@@ -35,11 +35,19 @@ test("orchestrates one responsive motion and restarts on refresh", async ({ page
   expect(
     await visual.evaluate((element) => getComputedStyle(element).animationName),
   ).not.toBe("none");
+  const firstAnimationStartedAt = await visual.evaluate(
+    (element) => element.getAnimations()[0]?.startTime ?? -1,
+  );
 
   await page.getByRole("button", { name: "了解它如何工作" }).click();
   await expect(
     page.getByRole("heading", { name: /Agent 协作/ }),
   ).toBeFocused();
+  await expect
+    .poll(() =>
+      visual.evaluate((element) => element.getAnimations()[0]?.startTime ?? -1),
+    )
+    .toBeGreaterThan(firstAnimationStartedAt);
   await page.reload();
   await expect(
     page.getByRole("heading", { name: /有证据的职业决策/ }),

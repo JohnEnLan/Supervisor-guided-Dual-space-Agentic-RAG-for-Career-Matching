@@ -43,7 +43,7 @@ const SCREENS: readonly IntroScreen[] = [
     eyebrow: "Dual-space, explained",
     title: "每一条推荐都可信、可解释",
     description:
-      "岗位证据与匿名案例证据分开呈现。案例只能重排已有候选，不能绕过地点、签证或岗位状态等硬约束。",
+      "岗位证据与匿名案例证据分开呈现，案例不能绕过硬约束。公开结果不返回完整简历、内部提示词、供应商错误或 API Key。",
     kind: "trust",
   },
 ];
@@ -79,7 +79,11 @@ export function OnboardingPage() {
         </Link>
       </header>
 
-      <section className="onboarding-stage" data-step={step + 1}>
+      <section
+        key={screen.kind}
+        className="onboarding-stage"
+        data-step={step + 1}
+      >
         <div className="onboarding-copy">
           <p className="onboarding-index" aria-hidden="true">
             0{step + 1} / 03
