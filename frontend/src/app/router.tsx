@@ -7,15 +7,20 @@ import { RunPage } from "../features/run/RunPage";
 import { ResultsPage } from "../features/results/ResultsPage";
 import { EvaluationRunPage } from "../features/evaluation/EvaluationRunPage";
 import { MonitoringPage } from "../features/monitoring/MonitoringPage";
+import { OnboardingPage } from "../features/onboarding/OnboardingPage";
 import { App, RouteError } from "./App";
 
 export const router = createBrowserRouter([
   {
     path: "/",
+    element: <OnboardingPage />,
+    errorElement: <RouteError />,
+  },
+  {
     element: <App />,
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <NewSessionPage /> },
+      { path: "workspace", element: <NewSessionPage /> },
       { path: "sessions/:sessionId/resume", element: <ResumeReviewPage /> },
       { path: "sessions/:sessionId/brief", element: <MatchBriefPage /> },
       { path: "runs/:runId", element: <RunPage /> },

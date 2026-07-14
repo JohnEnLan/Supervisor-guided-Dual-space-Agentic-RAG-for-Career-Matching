@@ -36,7 +36,7 @@ async function expectNoOverflow(page: Page) {
 test("completes the resume-to-evidence flow and remains responsive", async ({ page }) => {
   const calls = await installFlowApi(page);
   await page.setViewportSize({ width: 375, height: 900 });
-  await page.goto("/");
+  await page.goto("/workspace");
   await expectNoOverflow(page);
   await page.getByLabel("选择简历文件").setInputFiles({ name: "resume.txt", mimeType: "text/plain", buffer: Buffer.from("Python SQL") });
   await page.getByRole("button", { name: "上传并开始" }).click();

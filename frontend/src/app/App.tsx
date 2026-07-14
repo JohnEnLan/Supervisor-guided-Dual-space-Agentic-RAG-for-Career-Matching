@@ -62,7 +62,7 @@ export function App() {
             <span><strong>Career RAG</strong><small>双空间职业匹配工作台</small></span>
           </NavLink>
           <nav aria-label="主导航">
-            <NavLink to="/"><Gauge size={18} />开始匹配</NavLink>
+            <NavLink to="/workspace"><Gauge size={18} />开始匹配</NavLink>
             {capabilities.data?.monitoring_enabled ? (
               <NavLink to="/monitoring"><Activity size={18} />运行监控</NavLink>
             ) : null}
