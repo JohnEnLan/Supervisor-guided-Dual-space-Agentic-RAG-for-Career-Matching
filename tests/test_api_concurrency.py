@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+from time import perf_counter
 
 import httpx
 import pytest
@@ -127,7 +129,7 @@ async def test_concurrent_match_sessions_keep_state_and_status_isolated(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_two_sessions_three_v1_runs_keep_snapshots_and_results_isolated(
+async def test_twenty_v1_runs_keep_snapshots_and_results_isolated(
     monkeypatch,
 ):
     from datetime import UTC, datetime
@@ -137,10 +139,18 @@ async def test_two_sessions_three_v1_runs_keep_snapshots_and_results_isolated(
     from app.domain.run import MatchRun, RunStatus
     from app.state.schema import ResumeState, SharedState
 
+    from app.evaluation.load_validation import summarize_latencies
+
     run_specs = {
-        "run-a1": ("session-a", "Find analyst roles for run A1"),
-        "run-a2": ("session-a", "Find engineer roles for run A2"),
-        "run-b1": ("session-b", "Find product roles for run B1"),
+        f"run-{index:02d}": (
+            f"session-{index % 10:02d}",
+            (
+                f"Target Data Analyst at Company {index}"
+                if index % 2 == 0
+                else f"Explore evidence-backed direction {index}"
+            ),
+        )
+        for index in range(20)
     }
     now = datetime.now(UTC)
     runs = {}
@@ -230,17 +240,181 @@ async def test_two_sessions_three_v1_runs_keep_snapshots_and_results_isolated(
     monkeypatch.setattr(orchestrator, "save_run_result", save_result)
     monkeypatch.setattr(orchestrator, "save_run_metrics", no_op)
 
-    await asyncio.gather(
-        *[
-            orchestrator.run_persisted_agentic_match_run(run_id=run_id)
-            for run_id in run_specs
-        ]
+    active = 0
+    peak_active = 0
+    active_lock = asyncio.Lock()
+
+    async def timed_run(run_id: str) -> float:
+        nonlocal active, peak_active
+        async with active_lock:
+            active += 1
+            peak_active = max(peak_active, active)
+        started = perf_counter()
+        try:
+            await orchestrator.run_persisted_agentic_match_run(run_id=run_id)
+            return (perf_counter() - started) * 1000
+        finally:
+            async with active_lock:
+                active -= 1
+
+    batch_started = perf_counter()
+    latencies_ms = await asyncio.gather(
+        *[timed_run(run_id) for run_id in run_specs]
+    )
+    batch_elapsed_ms = (perf_counter() - batch_started) * 1000
+    summary = summarize_latencies(
+        list(latencies_ms),
+        success_count=len(results),
+        elapsed_ms=batch_elapsed_ms,
+        peak_concurrency=peak_active,
     )
 
     assert set(results) == set(run_specs)
+    assert summary.request_count == 20
+    assert summary.success_count == 20
+    assert summary.failure_count == 0
+    assert summary.peak_concurrency == 20
     for run_id, (session_id, _goal) in run_specs.items():
         assert snapshots[run_id]["session_id"] == session_id
         assert results[run_id]["recommended_roles"][0]["job_id"] == f"job-{run_id}"
         assert run_id in results[run_id]["recommended_roles"][0][
             "concise_explanation"
         ]
+
+    print("RUN_LOAD_SUMMARY " + json.dumps(summary.as_public_dict(), sort_keys=True))
+
+
+@pytest.mark.asyncio
+async def test_two_hundred_status_reads_have_no_server_errors(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.api.main import app
+    from app.api.v1 import runs as run_routes
+    from app.domain.run import MatchRun, RunStage, RunStatus
+    from app.evaluation.load_validation import summarize_latencies
+
+    now = datetime.now(UTC)
+
+    async def get_run(*, run_id: str):
+        await asyncio.sleep(0.005)
+        return MatchRun(
+            run_id=run_id,
+            session_id=f"session-{run_id}",
+            status=RunStatus.COMPLETED,
+            stage=RunStage.FINALIZATION,
+            plan_version=1,
+            plan_hash="a" * 64,
+            created_at=now,
+            updated_at=now,
+            started_at=now,
+            finished_at=now,
+        )
+
+    monkeypatch.setattr(run_routes, "get_run", get_run)
+
+    limit = asyncio.Semaphore(20)
+    active = 0
+    peak_active = 0
+    active_lock = asyncio.Lock()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+
+        async def timed_status(index: int):
+            nonlocal active, peak_active
+            async with limit:
+                async with active_lock:
+                    active += 1
+                    peak_active = max(peak_active, active)
+                started = perf_counter()
+                try:
+                    response = await client.get(f"/api/v1/runs/load-{index}/status")
+                    return response, (perf_counter() - started) * 1000
+                finally:
+                    async with active_lock:
+                        active -= 1
+
+        batch_started = perf_counter()
+        measurements = await asyncio.gather(
+            *[timed_status(index) for index in range(200)]
+        )
+        batch_elapsed_ms = (perf_counter() - batch_started) * 1000
+
+    responses = [response for response, _latency in measurements]
+    latencies_ms = [latency for _response, latency in measurements]
+    summary = summarize_latencies(
+        latencies_ms,
+        success_count=sum(response.status_code == 200 for response in responses),
+        elapsed_ms=batch_elapsed_ms,
+        peak_concurrency=peak_active,
+    )
+
+    assert all(response.status_code == 200 for response in responses)
+    assert {response.json()["run_id"] for response in responses} == {
+        f"load-{index}" for index in range(200)
+    }
+    assert summary.request_count == 200
+    assert summary.failure_count == 0
+    assert 1 < summary.peak_concurrency <= 20
+    print("READ_LOAD_SUMMARY " + json.dumps(summary.as_public_dict(), sort_keys=True))
+
+
+@pytest.mark.asyncio
+async def test_twenty_competing_executes_queue_a_run_once(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.api.main import app
+    from app.api.v1 import runs as run_routes
+    from app.db.run_store import RunConflict
+    from app.domain.run import MatchRun, RunStatus
+
+    now = datetime.now(UTC)
+    queue_lock = asyncio.Lock()
+    queued = False
+    queue_successes = 0
+
+    async def queue_run(*, run_id: str, plan_version: int, plan_hash: str):
+        nonlocal queued, queue_successes
+        assert run_id == "run-race"
+        assert plan_version == 1
+        assert plan_hash == "b" * 64
+        await asyncio.sleep(0)
+        async with queue_lock:
+            if queued:
+                raise RunConflict("run must be plan_ready with a matching plan")
+            queued = True
+            queue_successes += 1
+            return MatchRun(
+                run_id=run_id,
+                session_id="session-race",
+                status=RunStatus.QUEUED,
+                plan_version=plan_version,
+                plan_hash=plan_hash,
+                created_at=now,
+                updated_at=now,
+            )
+
+    async def no_op_execution(*, run_id: str):
+        assert run_id == "run-race"
+
+    monkeypatch.setattr(run_routes, "queue_run", queue_run)
+    monkeypatch.setattr(
+        run_routes,
+        "run_persisted_agentic_match_run",
+        no_op_execution,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        responses = await asyncio.gather(
+            *[
+                client.post(
+                    "/api/v1/runs/run-race/execute",
+                    json={"plan_version": 1, "plan_hash": "b" * 64},
+                )
+                for _index in range(20)
+            ]
+        )
+
+    assert [response.status_code for response in responses].count(202) == 1
+    assert [response.status_code for response in responses].count(409) == 19
+    assert queue_successes == 1
