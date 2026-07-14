@@ -51,10 +51,14 @@ const SCREENS: readonly IntroScreen[] = [
 export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const previousStepRef = useRef(step);
   const screen = SCREENS[step];
 
   useEffect(() => {
-    titleRef.current?.focus();
+    if (previousStepRef.current !== step) {
+      titleRef.current?.focus();
+      previousStepRef.current = step;
+    }
   }, [step]);
 
   return (

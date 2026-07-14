@@ -18,4 +18,6 @@
   --radius: 14px;
   --radius-small: 9px;
   --font: Aptos, "Segoe UI", "Noto Sans SC", sans-serif;
+  --font-display: Bahnschrift, "Arial Narrow", "Noto Sans SC", sans-serif;
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
 }

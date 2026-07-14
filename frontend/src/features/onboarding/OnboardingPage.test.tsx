@@ -22,6 +22,9 @@ describe("OnboardingPage", () => {
     expect(
       screen.getByRole("heading", { name: /有证据的职业决策/ }),
     ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /有证据的职业决策/ }),
+    ).not.toHaveFocus();
 
     fireEvent.click(screen.getByRole("button", { name: "了解它如何工作" }));
     expect(screen.getByRole("heading", { name: /Agent 协作/ })).toHaveFocus();
