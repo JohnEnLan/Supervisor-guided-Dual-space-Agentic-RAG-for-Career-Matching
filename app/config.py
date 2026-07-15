@@ -1,6 +1,7 @@
 """集中配置。默认读取 .env，测试可显式关闭 dotenv 加载。"""
 import os
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +32,7 @@ class Settings(BaseSettings):
     embed_dim: int = 1024  # 必须与 schema.sql 里的 vector(N) 一致
 
     llm_max_concurrency: int = 5
+    llm_user_prompt_max_chars: int = Field(default=60_000, ge=1_000)
     embed_max_concurrency: int = 8
 
     dual_space_enabled: bool = True

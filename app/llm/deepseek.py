@@ -6,6 +6,7 @@ Agent 只调用 chat()，不直接 new 客户端。
 import asyncio
 from openai import AsyncOpenAI
 from app.config import settings
+from app.llm.context_budget import fit_user_prompt_to_budget
 
 _client = AsyncOpenAI(
     api_key=settings.deepseek_api_key,
@@ -26,11 +27,15 @@ async def chat(
 ) -> str:
     """单轮调用。pro=True 用推理模型（贵，给 Supervisor 核查/复杂规划用）。"""
     model = settings.deepseek_model_pro if pro else settings.deepseek_model_fast
+    bounded_user = fit_user_prompt_to_budget(
+        user,
+        max_chars=settings.llm_user_prompt_max_chars,
+    )
     kwargs = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "user", "content": bounded_user},
         ],
         "temperature": temperature,
     }
