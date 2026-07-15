@@ -128,6 +128,15 @@
 - Supervisor gate 只执行一次扫描；最终信标使用低频呼吸，不持续闪烁。
 - 主要动画只使用 `transform`、`opacity` 与 SVG stroke 属性，避免布局抖动。
 
+### 5.3 指针导航彗尾
+
+- 桌面端精细指针移动时，最多 18 个固定池粒子沿指针轨迹形成短暂彗尾，表达“用户正在亲自校准航线”。
+- 粒子是 `pointer-events: none` 的展示层，不替换系统光标，也不遮挡按钮、链接或正文。
+- `pointermove` 只保存最新坐标；单个 `requestAnimationFrame` 更新固定元素的 `transform`、`opacity` 和 `scale`，不在每次移动时创建 DOM 或调用 React state。
+- 粒子颜色只使用 Starlight Blue、Navigator Teal 与 Oath Gold；生命周期短、尾迹范围有限，不形成持续满屏噪声。
+- `pointer: coarse`、触屏设备、页面失焦及 `prefers-reduced-motion: reduce` 时完全停用并隐藏彗尾。
+- 组件卸载时取消 animation frame、移除监听器并清空活动粒子，避免进入 `/workspace` 后继续运行。
+
 ## 6. 组件与数据流
 
 ### 6.1 文件边界
@@ -140,6 +149,8 @@
   - 渲染七段场景的标题、正文和语义标签。
 - `frontend/src/features/onboarding/ChapterNavigation.tsx`
   - 渲染章节进度、锚点导航和当前章节状态。
+- `frontend/src/features/onboarding/PointerComet.tsx`
+  - 使用固定粒子池渲染桌面指针彗尾；不持有业务状态，不访问 API。
 - `frontend/src/features/onboarding/onboardingContent.ts`
   - 保存静态中文文案和章节元数据。
 - `frontend/src/styles/onboarding-cinematic.css`
@@ -151,10 +162,11 @@
 
 1. 首次渲染只读取静态内容，不访问后端、不读 storage。
 2. `IntersectionObserver` 在章节越过舞台阈值时更新 `activeChapter`。
-3. 被动 scroll listener 只收集滚动位置；单个 `requestAnimationFrame` 将归一化进度写入 CSS 自定义属性。
-4. React state 仅在 active chapter 改变时更新，不在每帧滚动时更新。
-5. Chapter navigation 使用普通锚点；浏览器原生滚动仍由用户控制。
-6. “跳过远征”和最终 CTA 均使用 React Router `Link` 导航到 `/workspace`。
+3. 被动 scroll listener 只收集滚动位置；一个 scroll animation frame 将归一化进度写入 CSS 自定义属性。
+4. `PointerComet` 使用独立的 pointer animation frame 和固定 DOM 池更新彗尾，不修改 React state。
+5. React state 仅在 active chapter 改变时更新，不在每帧滚动或指针移动时更新。
+6. Chapter navigation 使用普通锚点；浏览器原生滚动仍由用户控制。
+7. “跳过远征”和最终 CTA 均使用 React Router `Link` 导航到 `/workspace`。
 
 ### 6.3 失败与降级
 
@@ -165,7 +177,7 @@
 ## 7. 性能预算
 
 - 不新增运行时依赖，不加载声音、视频、位图背景、Canvas 或 WebGL。
-- 动态 SVG 图元控制在 72 个以内；不为每颗背景星创建持续运行的独立 React 状态。
+- 职业星图动态 SVG 图元控制在 72 个以内；指针彗尾使用最多 18 个复用元素；两者都不为单个粒子创建 React state。
 - 不在 scroll handler 中读写布局并循环修改多个元素。
 - 非当前章节暂停循环动画；移动端减少背景层与持续星点数量。
 - 相比当前构建，主 JavaScript gzip 增量目标不超过 15 kB。
@@ -193,6 +205,7 @@
 - 跳过入口与最终 CTA 均指向 `/workspace`。
 - Chapter navigation 正确反映 active chapter。
 - reduced-motion hook/状态不会移除内容或导航。
+- `PointerComet` 在精细指针环境复用固定 18 个元素，并在 reduced-motion/coarse pointer 下不启动监听器。
 
 ### 9.2 Playwright 浏览器测试
 
@@ -200,6 +213,7 @@
 - 滚动到各章节时 `aria-current` 与星图 `data-chapter` 更新。
 - 航线动画使用允许的 transform/opacity/SVG stroke 属性，不依赖 width/height 动画。
 - reduced-motion 下路径与场景立即到达最终状态。
+- 指针快速移动不会增加彗尾 DOM 数量；离开首页后不再响应 pointermove。
 - 键盘可访问跳过、章节导航和最终 CTA。
 - 375、768、1440px 无横向溢出。
 - 刷新 `/` 回到序章，不使用 localStorage/sessionStorage 跳过。
@@ -218,4 +232,5 @@
 4. 用户可随时跳过，滚动和焦点不被劫持。
 5. 首页无业务 API、无持久化“已看过”状态、无声音/视频/Canvas/动画库。
 6. reduced-motion、键盘和三档响应式验收通过。
-7. 完整前端回归、业务流程和生产构建通过。
+7. 精细指针设备显示短而克制的导航彗尾；触屏、coarse pointer 和 reduced-motion 不显示粒子。
+8. 完整前端回归、业务流程和生产构建通过。
