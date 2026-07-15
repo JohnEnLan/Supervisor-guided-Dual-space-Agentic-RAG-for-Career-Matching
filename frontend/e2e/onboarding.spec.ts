@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("keeps onboarding isolated from business APIs and skips to the workspace", async ({
+test("keeps the seven-scene expedition isolated from business APIs", async ({
   page,
 }) => {
   let apiCalls = 0;
@@ -9,62 +9,100 @@ test("keeps onboarding isolated from business APIs and skips to the workspace", 
     await route.fulfill({
       status: 503,
       contentType: "application/json",
-      body: JSON.stringify({ detail: "business API is unavailable in onboarding" }),
+      body: "{}",
     });
   });
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /有证据的职业决策/ }),
+    page.getByRole("heading", { level: 1, name: "职业远征" }),
   ).toBeVisible();
+  await expect(page.getByRole("region")).toHaveCount(7);
   expect(apiCalls).toBe(0);
-
-  await page.getByRole("link", { name: "跳过介绍" }).click();
-  await expect(page).toHaveURL(/\/workspace$/);
-  await expect(
-    page.getByRole("heading", { name: "先从一份真实简历开始" }),
-  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.length + sessionStorage.length),
+  ).toBe(0);
+  await expect(page.getByRole("link", { name: "跳过远征" })).toBeVisible();
 });
 
-test("orchestrates one responsive motion and restarts on refresh", async ({ page }) => {
+test("advances the constellation and chapter rail through real scrolling", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.locator("#scene-fleet").scrollIntoViewIfNeeded();
+
+  await expect(page.locator('a[href="#scene-fleet"]')).toHaveAttribute(
+    "aria-current",
+    "step",
+  );
+  await expect(page.locator(".career-constellation")).toHaveAttribute(
+    "data-chapter",
+    "5",
+  );
+  const constellationPosition = await page
+    .locator(".career-constellation")
+    .evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    });
+  expect(constellationPosition.top).toBeGreaterThanOrEqual(0);
+  expect(constellationPosition.bottom).toBeLessThanOrEqual(900);
+});
+
+test("renders a bounded desktop comet and disables it for reduced motion", async ({
+  page,
+}) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
+  await expect(page.locator(".pointer-comet-particle")).toHaveCount(18);
 
-  const visual = page.locator(".intro-visual");
-  await expect(visual).toBeVisible();
-  expect(
-    await visual.evaluate((element) => getComputedStyle(element).animationName),
-  ).not.toBe("none");
-  const firstAnimationStartedAt = await visual.evaluate(
-    (element) => element.getAnimations()[0]?.startTime ?? -1,
-  );
+  for (let index = 0; index < 80; index += 1) {
+    await page.mouse.move(180 + index * 6, 180 + (index % 12) * 8);
+  }
 
-  await page.getByRole("button", { name: "了解它如何工作" }).click();
-  await expect(
-    page.getByRole("heading", { name: /Agent 协作/ }),
-  ).toBeFocused();
   await expect
     .poll(() =>
-      visual.evaluate((element) => element.getAnimations()[0]?.startTime ?? -1),
+      page
+        .locator(".pointer-comet-particle")
+        .first()
+        .evaluate((node) => Number(getComputedStyle(node).opacity)),
     )
-    .toBeGreaterThan(firstAnimationStartedAt);
+    .toBeGreaterThan(0);
+  await expect(page.locator(".pointer-comet-particle")).toHaveCount(18);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload();
-  await expect(
-    page.getByRole("heading", { name: /有证据的职业决策/ }),
-  ).toBeVisible();
+  await expect(page.getByTestId("pointer-comet")).toBeHidden();
+  await expect(page.locator(".route-active")).toHaveCSS(
+    "stroke-dashoffset",
+    "0px",
+  );
+});
+
+test("keeps the cinematic route responsive and preserves the workspace exit", async ({
+  page,
+}) => {
+  await page.goto("/");
 
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(
       await page.evaluate(
-        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
       ),
-    ).toBe(false);
+    ).toBe(true);
   }
 
-  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  expect(
-    await visual.evaluate((element) => getComputedStyle(element).animationDuration),
-  ).toBe("0s");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "跳过远征" })).toBeFocused();
+  await page.getByRole("link", { name: "跳过远征" }).click();
+  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(
+    page.getByRole("heading", { name: "先从一份真实简历开始" }),
+  ).toBeVisible();
 });

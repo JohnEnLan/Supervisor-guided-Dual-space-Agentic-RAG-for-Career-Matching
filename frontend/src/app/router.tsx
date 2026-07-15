@@ -7,13 +7,13 @@ import { RunPage } from "../features/run/RunPage";
 import { ResultsPage } from "../features/results/ResultsPage";
 import { EvaluationRunPage } from "../features/evaluation/EvaluationRunPage";
 import { MonitoringPage } from "../features/monitoring/MonitoringPage";
-import { OnboardingPage } from "../features/onboarding/OnboardingPage";
+import { CinematicOnboardingPage } from "../features/onboarding/CinematicOnboardingPage";
 import { App, RouteError } from "./App";
 
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <OnboardingPage />,
+    element: <CinematicOnboardingPage />,
     errorElement: <RouteError />,
   },
   {
