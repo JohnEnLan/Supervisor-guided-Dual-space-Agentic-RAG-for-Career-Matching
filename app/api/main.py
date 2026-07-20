@@ -8,8 +8,10 @@ from app.api.v1.router import router as v1_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await get_pool()
-    yield
-    await close_pool()
+    try:
+        yield
+    finally:
+        await close_pool()
 
 app = FastAPI(title="Career-RAG", lifespan=lifespan)
 app.include_router(router)
