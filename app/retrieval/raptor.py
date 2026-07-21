@@ -277,6 +277,25 @@ def _best_leaf_per_job(
     return selected
 
 
+def _limit_hits_to_top_jobs(
+    hits: Sequence[RaptorHit], *, top_k: int
+) -> list[RaptorHit]:
+    if top_k <= 0:
+        return []
+
+    scores_by_job: dict[str, float] = defaultdict(float)
+    for hit in hits:
+        scores_by_job[hit.job_id] += max(0.0, hit.score)
+
+    top_job_ids = {
+        job_id
+        for job_id, _score in sorted(
+            scores_by_job.items(), key=lambda item: (-item[1], item[0])
+        )[:top_k]
+    }
+    return [hit for hit in hits if hit.job_id in top_job_ids]
+
+
 async def build_raptor_index(
     pool,
     *,
@@ -395,7 +414,7 @@ async def search_raptor_nodes(
         max_leaf_chunks_per_node=max_leaf_chunks_per_node,
         level_decay=level_decay,
     )
-    return hits[:top_k]
+    return _limit_hits_to_top_jobs(hits, top_k=top_k)
 
 
 async def _fetch_jobs_with_chunks(pool, *, limit: int | None) -> dict[str, dict[str, Any]]:

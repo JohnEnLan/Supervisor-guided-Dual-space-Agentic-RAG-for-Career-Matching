@@ -384,3 +384,89 @@ async def test_search_raptor_nodes_returns_original_leaf_chunks(monkeypatch):
         ("job-2", "job-2:skills:1", "role:data"),
     ]
     assert len(fetch_sql) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_raptor_nodes_applies_top_k_after_job_aggregation(monkeypatch):
+    from app.retrieval import raptor
+
+    class Connection:
+        async def execute(self, _sql, *_args):
+            return None
+
+        async def fetch(self, sql, *_args):
+            if "FROM raptor_nodes" in sql:
+                return [
+                    {
+                        "node_id": "job:job-1",
+                        "node_type": "job_summary",
+                        "job_id": "job-1",
+                        "source_job_ids": ["job-1"],
+                        "score": 1.0,
+                    },
+                    {
+                        "node_id": "job:job-2",
+                        "node_type": "job_summary",
+                        "job_id": "job-2",
+                        "source_job_ids": ["job-2"],
+                        "score": 0.4,
+                    },
+                ]
+            if "FROM raptor_node_chunks" in sql:
+                return [
+                    {
+                        "node_id": "job:job-1",
+                        "chunk_id": "job-1:skills:1",
+                        "job_id": "job-1",
+                        "field": "required_skills",
+                        "depth": 1,
+                        "leaf_score": 1.0,
+                    },
+                    {
+                        "node_id": "job:job-1",
+                        "chunk_id": "job-1:skills:2",
+                        "job_id": "job-1",
+                        "field": "required_skills",
+                        "depth": 1,
+                        "leaf_score": 0.9,
+                    },
+                    {
+                        "node_id": "job:job-2",
+                        "chunk_id": "job-2:skills:1",
+                        "job_id": "job-2",
+                        "field": "required_skills",
+                        "depth": 1,
+                        "leaf_score": 1.0,
+                    },
+                ]
+            raise AssertionError(sql)
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    async def fake_embed_one(_query):
+        return [0.0] * raptor.settings.embed_dim
+
+    monkeypatch.setattr(raptor, "embed_one", fake_embed_one)
+
+    hits = await raptor.search_raptor_nodes(
+        Pool(),
+        query="python data analyst",
+        allow_ids=["job-1", "job-2"],
+        top_k=2,
+        max_leaf_chunks_per_node=2,
+    )
+
+    assert [(hit.job_id, hit.chunk_id) for hit in hits] == [
+        ("job-1", "job-1:skills:1"),
+        ("job-1", "job-1:skills:2"),
+        ("job-2", "job-2:skills:1"),
+    ]
