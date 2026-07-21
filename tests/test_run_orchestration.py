@@ -8,6 +8,107 @@ from app.state.schema import CareerState, ResumeState, SharedState
 
 
 @pytest.mark.asyncio
+async def test_supervisor_harness_surrounds_all_agents_and_publication(monkeypatch) -> None:
+    from app.agents import orchestrator
+
+    state = SharedState(
+        session_id="session-harness",
+        user_id="private-user",
+        resume_state=ResumeState(
+            normalized_base_resume="Python data analyst",
+            original_evidence_spans=[
+                {"span_id": "R001", "text": "Built a Python dashboard."}
+            ],
+        ),
+    )
+    calls: list[str] = []
+
+    async def intent(current, goal):
+        calls.append("intent")
+        current.career_state.current_goal = [goal]
+        return current
+
+    async def planning(
+        current, *, user_goal_text, default_top_k, include_raptor
+    ):
+        del current, user_goal_text, include_raptor
+        calls.append("planning")
+        return {
+            "hard_constraints": {},
+            "soft_prefs": {},
+            "top_k": default_top_k,
+            "include_raptor": False,
+        }
+
+    async def matching(current, *, retrieval_plan, search_fn):
+        del retrieval_plan, search_fn
+        calls.append("matching")
+        current.retrieval_state.candidate_job_ids = ["job-1"]
+        current.retrieval_state.evidence_span_ids = ["job-1:required_skills:1"]
+        current.retrieval_state.ranking_scores = [
+            {
+                "job_id": "job-1",
+                "evidence_span_ids": ["job-1:required_skills:1"],
+                "evidence_spans": [
+                    {
+                        "evidence_span_id": "job-1:required_skills:1",
+                        "content": "Python required",
+                    }
+                ],
+            }
+        ]
+        current.strategy_state.recommended_roles = [
+            {
+                "job_id": "job-1",
+                "tier": "now_fit",
+                "evidence_span_ids": ["job-1:required_skills:1"],
+            }
+        ]
+        return current
+
+    async def strategy(current):
+        calls.append("strategy")
+        return current
+
+    async def verify(_current):
+        calls.append("verification")
+        return {
+            "hard_filter_violations": [],
+            "missing_evidence": [],
+            "fabrication_risks": [],
+            "reretrieval_loop_requested": False,
+        }
+
+    monkeypatch.setattr(orchestrator, "run_intent_agent", intent)
+    monkeypatch.setattr(orchestrator, "plan_retrieval", planning)
+    monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
+    monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
+    monkeypatch.setattr(orchestrator, "final_verification", verify)
+
+    result = await orchestrator.run_agentic_match_from_state(
+        state,
+        user_goal_text="Find data analyst roles",
+        top_k=5,
+    )
+
+    checkpoints = [
+        entry["checkpoint"]
+        for entry in result.state.supervisor_log
+        if entry.get("stage") == "supervisor_checkpoint"
+    ]
+    assert checkpoints == [
+        "intent_input",
+        "intent_output",
+        "matching_input",
+        "matching_output",
+        "strategy_input",
+        "strategy_output",
+        "publication_gate",
+    ]
+    assert calls == ["intent", "planning", "matching", "strategy", "verification"]
+
+
+@pytest.mark.asyncio
 async def test_run_orchestrator_keeps_approved_hard_constraints_locked(monkeypatch) -> None:
     from app.agents import orchestrator
 

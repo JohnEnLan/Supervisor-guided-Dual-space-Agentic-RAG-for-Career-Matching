@@ -10,6 +10,7 @@ from app.agents.intent_agent import run_intent_agent
 from app.agents.matching_agent import SearchFn, run_matching_agent
 from app.agents.strategy_agent import run_strategy_agent
 from app.agents.supervisor import final_verification, plan_retrieval
+from app.agents.supervisor_harness import record_supervisor_checkpoint
 from app.api.result_projector import project_product_result
 from app.db.event_store import append_event
 from app.db.monitoring_store import save_run_metrics
@@ -61,15 +62,11 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
             raise RuntimeError("run is missing its confirmed state snapshot")
         state = SharedState.model_validate(initial_snapshot)
         stage_started = perf_counter()
-        if state.career_state.intent_consulted:
-            state.supervisor_log.append(
-                {
-                    "stage": "intent_consultation_reused",
-                    "reason": "approved_visible_consultation",
-                }
-            )
-        else:
-            state = await run_intent_agent(state, brief.career_goal)
+        state = await _run_intent_under_supervision(
+            state,
+            brief.career_goal,
+            skip_agent=state.career_state.intent_consulted,
+        )
         _record_stage_duration(state, "intent", stage_started)
 
         # The confirmed brief is the execution authority. Later agents may not
@@ -99,10 +96,11 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
 
         await update_run_stage(run_id=run_id, stage=RunStage.RETRIEVAL)
         stage_started = perf_counter()
-        state = await run_matching_agent(
+        state = await _run_matching_under_supervision(
             state,
             retrieval_plan=retrieval_plan,
             search_fn=_default_search_fn,
+            locked_hard_constraints=brief.hard_constraints,
         )
         _record_stage_duration(state, "retrieval", stage_started)
         await save_state_snapshot(
@@ -112,7 +110,7 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
 
         await update_run_stage(run_id=run_id, stage=RunStage.STRATEGY)
         stage_started = perf_counter()
-        state = await run_strategy_agent(state)
+        state = await _run_strategy_under_supervision(state)
         _record_stage_duration(state, "strategy", stage_started)
         await save_state_snapshot(
             run_id=run_id,
@@ -130,18 +128,26 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
                 brief.hard_constraints
             )
             state.supervisor_log.append(reretrieval_log)
-            state = await run_matching_agent(
+            state = await _run_matching_under_supervision(
                 state,
                 retrieval_plan=reretrieval_plan,
                 search_fn=_default_search_fn,
+                locked_hard_constraints=brief.hard_constraints,
+                attempt=2,
             )
-            state = await run_strategy_agent(state)
+            state = await _run_strategy_under_supervision(state, attempt=2)
             verification = await final_verification(state)
             verification = _mark_reretrieval_loop_used(state, verification)
         _record_stage_duration(state, "verification", stage_started)
 
         # Reassert the immutable contract before snapshots are published.
         state.career_state.hard_constraints = dict(brief.hard_constraints)
+        record_supervisor_checkpoint(
+            state,
+            checkpoint="publication_gate",
+            verification=verification,
+            attempt=2 if verification.get("reretrieval_loop_used") else 1,
+        )
         await save_state_snapshot(
             run_id=run_id,
             state_snapshot=state.model_dump(mode="json"),
@@ -237,19 +243,19 @@ async def run_agentic_match_from_state(
     persist_state: bool = False,
     search_fn: SearchFn | None = None,
 ) -> AgenticMatchResult:
-    state = await run_intent_agent(state, user_goal_text)
+    state = await _run_intent_under_supervision(state, user_goal_text)
     retrieval_plan = await plan_retrieval(
         state,
         user_goal_text=user_goal_text,
         default_top_k=top_k,
         include_raptor=include_raptor,
     )
-    state = await run_matching_agent(
+    state = await _run_matching_under_supervision(
         state,
         retrieval_plan=retrieval_plan,
         search_fn=search_fn or _default_search_fn,
     )
-    state = await run_strategy_agent(state)
+    state = await _run_strategy_under_supervision(state)
     verification = await final_verification(state)
     if verification.get("reretrieval_loop_requested"):
         reretrieval_plan, reretrieval_log = _build_reretrieval_plan(
@@ -258,14 +264,22 @@ async def run_agentic_match_from_state(
         state.supervisor_log.append(
             reretrieval_log
         )
-        state = await run_matching_agent(
+        state = await _run_matching_under_supervision(
             state,
             retrieval_plan=reretrieval_plan,
             search_fn=search_fn or _default_search_fn,
+            attempt=2,
         )
-        state = await run_strategy_agent(state)
+        state = await _run_strategy_under_supervision(state, attempt=2)
         verification = await final_verification(state)
         verification = _mark_reretrieval_loop_used(state, verification)
+
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="publication_gate",
+        verification=verification,
+        attempt=2 if verification.get("reretrieval_loop_used") else 1,
+    )
 
     if persist_state:
         await save_state(state, status="agentic_done")
@@ -353,7 +367,7 @@ async def run_persisted_agentic_match_from_session(
 ) -> AgenticMatchResult:
     state = await _load_required_state(session_id)
 
-    state = await run_intent_agent(state, user_goal_text)
+    state = await _run_intent_under_supervision(state, user_goal_text)
     await save_state(state, status="intent_done")
 
     state = await _load_required_state(session_id)
@@ -366,7 +380,7 @@ async def run_persisted_agentic_match_from_session(
     await save_state(state, status="supervisor_planning_done")
 
     state = await _load_required_state(session_id)
-    state = await run_matching_agent(
+    state = await _run_matching_under_supervision(
         state,
         retrieval_plan=retrieval_plan,
         search_fn=search_fn or _default_search_fn,
@@ -374,7 +388,7 @@ async def run_persisted_agentic_match_from_session(
     await save_state(state, status="retrieval_done")
 
     state = await _load_required_state(session_id)
-    state = await run_strategy_agent(state)
+    state = await _run_strategy_under_supervision(state)
     await save_state(state, status="strategy_done")
 
     state = await _load_required_state(session_id)
@@ -387,21 +401,28 @@ async def run_persisted_agentic_match_from_session(
         await save_state(state, status="reretrieval_planned")
 
         state = await _load_required_state(session_id)
-        state = await run_matching_agent(
+        state = await _run_matching_under_supervision(
             state,
             retrieval_plan=reretrieval_plan,
             search_fn=search_fn or _default_search_fn,
+            attempt=2,
         )
         await save_state(state, status="reretrieval_done")
 
         state = await _load_required_state(session_id)
-        state = await run_strategy_agent(state)
+        state = await _run_strategy_under_supervision(state, attempt=2)
         await save_state(state, status="strategy_rerun_done")
 
         state = await _load_required_state(session_id)
         verification = await final_verification(state)
         verification = _mark_reretrieval_loop_used(state, verification)
 
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="publication_gate",
+        verification=verification,
+        attempt=2 if verification.get("reretrieval_loop_used") else 1,
+    )
     await save_state(state, status="agentic_done")
     return AgenticMatchResult(
         state=state,
@@ -414,6 +435,83 @@ async def _default_search_fn(**kwargs):
     from app.retrieval.dual_space_search import dual_space_search
 
     return await dual_space_search(**kwargs)
+
+
+async def _run_intent_under_supervision(
+    state: SharedState,
+    user_goal_text: str,
+    *,
+    skip_agent: bool = False,
+    attempt: int = 1,
+) -> SharedState:
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="intent_input",
+        user_goal_text=user_goal_text,
+        attempt=attempt,
+    )
+    if skip_agent:
+        state.supervisor_log.append(
+            {
+                "stage": "intent_consultation_reused",
+                "reason": "approved_visible_consultation",
+            }
+        )
+    else:
+        state = await run_intent_agent(state, user_goal_text)
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="intent_output",
+        attempt=attempt,
+    )
+    return state
+
+
+async def _run_matching_under_supervision(
+    state: SharedState,
+    *,
+    retrieval_plan: dict[str, Any],
+    search_fn: SearchFn,
+    locked_hard_constraints: dict[str, Any] | None = None,
+    attempt: int = 1,
+) -> SharedState:
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="matching_input",
+        retrieval_plan=retrieval_plan,
+        locked_hard_constraints=locked_hard_constraints,
+        attempt=attempt,
+    )
+    state = await run_matching_agent(
+        state,
+        retrieval_plan=retrieval_plan,
+        search_fn=search_fn,
+    )
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="matching_output",
+        attempt=attempt,
+    )
+    return state
+
+
+async def _run_strategy_under_supervision(
+    state: SharedState,
+    *,
+    attempt: int = 1,
+) -> SharedState:
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="strategy_input",
+        attempt=attempt,
+    )
+    state = await run_strategy_agent(state)
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="strategy_output",
+        attempt=attempt,
+    )
+    return state
 
 
 async def _load_required_state(session_id: str) -> SharedState:

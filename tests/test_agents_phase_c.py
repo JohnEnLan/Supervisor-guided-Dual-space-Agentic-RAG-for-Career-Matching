@@ -1271,11 +1271,28 @@ async def test_orchestrator_runs_three_agents_and_supervisor(monkeypatch):
     assert result.state.strategy_state.recommended_roles[0]["tier"] == "now_fit"
     assert result.state.strategy_state.skill_gap_analysis[0]["skill"] == "SQL"
     assert result.final_verification["needs_repair"] is False
-    assert [entry["stage"] for entry in result.state.supervisor_log] == [
+    assert [
+        entry["stage"]
+        for entry in result.state.supervisor_log
+        if entry.get("stage") != "supervisor_checkpoint"
+    ] == [
         "planning",
         "matching_explanations",
         "strategy_agent",
         "final_verification",
+    ]
+    assert [
+        entry["checkpoint"]
+        for entry in result.state.supervisor_log
+        if entry.get("stage") == "supervisor_checkpoint"
+    ] == [
+        "intent_input",
+        "intent_output",
+        "matching_input",
+        "matching_output",
+        "strategy_input",
+        "strategy_output",
+        "publication_gate",
     ]
 
 
