@@ -159,7 +159,19 @@ async def test_run_orchestrator_keeps_approved_hard_constraints_locked(monkeypat
     async def strategy(current):
         return current
 
-    async def verify(_current):
+    async def verify(current):
+        planning_logs = [
+            entry
+            for entry in current.supervisor_log
+            if entry.get("stage") == "planning"
+        ]
+        assert planning_logs[-1]["source"] == "approved_match_brief"
+        assert planning_logs[-1]["retrieval_plan"] == {
+            "hard_constraints": brief.hard_constraints,
+            "soft_prefs": brief.soft_preferences,
+            "top_k": brief.result_count,
+            "include_raptor": False,
+        }
         return {"reretrieval_loop_requested": False}
 
     async def snapshot(*, state_snapshot, **_kwargs):

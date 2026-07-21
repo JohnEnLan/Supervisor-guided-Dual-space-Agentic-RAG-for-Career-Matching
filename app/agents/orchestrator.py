@@ -91,6 +91,15 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
                 "hard_constraints_locked": True,
             }
         )
+        state.supervisor_log.append(
+            {
+                "stage": "planning",
+                "source": "approved_match_brief",
+                "needs_clarification": False,
+                "clarification_loop_used": 0,
+                "retrieval_plan": _public_retrieval_plan(retrieval_plan),
+            }
+        )
         await save_state_snapshot(
             run_id=run_id,
             state_snapshot=state.model_dump(mode="json"),

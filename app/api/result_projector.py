@@ -72,6 +72,9 @@ def project_product_result(state: SharedState) -> ProductResult:
             )
         )
 
+    if not roles:
+        warnings.append("no_publishable_recommendations")
+
     return ProductResult(
         summary=(
             f"{len(roles)} evidence-grounded role"

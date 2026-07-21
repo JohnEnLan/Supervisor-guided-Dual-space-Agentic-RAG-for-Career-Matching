@@ -125,3 +125,12 @@ def test_projector_honors_supervisor_hard_filter_violations() -> None:
 
     assert "job-good" not in [role.job_id for role in result.recommended_roles]
     assert "hard_constraint_failed:job-good" in result.warnings
+
+
+def test_projector_warns_when_no_recommendation_is_publishable() -> None:
+    state = SharedState(session_id="session-empty", user_id="private-user")
+
+    result = project_product_result(state)
+
+    assert result.recommended_roles == []
+    assert result.warnings == ["no_publishable_recommendations"]
