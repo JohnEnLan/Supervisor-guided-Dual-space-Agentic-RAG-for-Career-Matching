@@ -387,24 +387,51 @@ async def search_raptor_nodes(
             return []
         leaf_rows = await conn.fetch(
             """
-            SELECT mapping.node_id,
-                   mapping.chunk_id,
-                   mapping.job_id,
-                   mapping.depth,
-                   chunks.field,
-                   1 - (chunks.embedding <=> $1::vector) AS leaf_score
-            FROM raptor_node_chunks AS mapping
-            JOIN job_chunks AS chunks ON chunks.chunk_id = mapping.chunk_id
-            WHERE mapping.node_id = ANY($2::text[])
-              AND mapping.job_id = ANY($3::text[])
-              AND chunks.embedding IS NOT NULL
-            ORDER BY mapping.node_id,
-                     chunks.embedding <=> $1::vector,
-                     mapping.leaf_rank
+            WITH scored_leaves AS (
+                SELECT mapping.node_id,
+                       mapping.chunk_id,
+                       mapping.job_id,
+                       mapping.depth,
+                       mapping.leaf_rank,
+                       nodes.node_type,
+                       chunks.field,
+                       chunks.embedding <=> $1::vector AS leaf_distance,
+                       1 - (chunks.embedding <=> $1::vector) AS leaf_score,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY mapping.node_id, mapping.job_id
+                           ORDER BY chunks.embedding <=> $1::vector,
+                                    mapping.leaf_rank
+                       ) AS job_leaf_rank
+                FROM raptor_node_chunks AS mapping
+                JOIN raptor_nodes AS nodes ON nodes.node_id = mapping.node_id
+                JOIN job_chunks AS chunks ON chunks.chunk_id = mapping.chunk_id
+                WHERE mapping.node_id = ANY($2::text[])
+                  AND mapping.job_id = ANY($3::text[])
+                  AND chunks.embedding IS NOT NULL
+            ),
+            eligible_leaves AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY node_id
+                           ORDER BY leaf_distance, leaf_rank
+                       ) AS node_leaf_rank
+                FROM scored_leaves
+                WHERE node_type <> 'role_summary' OR job_leaf_rank = 1
+            )
+            SELECT node_id,
+                   chunk_id,
+                   job_id,
+                   depth,
+                   field,
+                   leaf_score
+            FROM eligible_leaves
+            WHERE node_leaf_rank <= $4
+            ORDER BY node_id, leaf_distance, leaf_rank
             """,
             query_vector,
             node_ids,
             list(allow_ids),
+            max_leaf_chunks_per_node,
         )
 
     hits = propagate_raptor_hits(

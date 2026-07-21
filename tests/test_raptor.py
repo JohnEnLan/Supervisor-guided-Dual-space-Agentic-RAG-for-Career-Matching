@@ -316,14 +316,14 @@ def test_propagate_role_node_keeps_one_top_leaf_per_job_before_limit():
 async def test_search_raptor_nodes_returns_original_leaf_chunks(monkeypatch):
     from app.retrieval import raptor
 
-    fetch_sql: list[str] = []
+    fetch_calls: list[tuple[str, tuple[object, ...]]] = []
 
     class Connection:
         async def execute(self, _sql, *_args):
             return None
 
-        async def fetch(self, sql, *_args):
-            fetch_sql.append(sql)
+        async def fetch(self, sql, *args):
+            fetch_calls.append((sql, args))
             if "FROM raptor_nodes" in sql:
                 return [
                     {
@@ -383,7 +383,12 @@ async def test_search_raptor_nodes_returns_original_leaf_chunks(monkeypatch):
         ("job-1", "job-1:skills:1", "role:data"),
         ("job-2", "job-2:skills:1", "role:data"),
     ]
-    assert len(fetch_sql) == 2
+    assert len(fetch_calls) == 2
+    leaf_sql, leaf_args = fetch_calls[1]
+    assert "ROW_NUMBER() OVER" in leaf_sql
+    assert "PARTITION BY mapping.node_id, mapping.job_id" in leaf_sql
+    assert "node_leaf_rank <= $4" in leaf_sql
+    assert leaf_args[3] == 2
 
 
 @pytest.mark.asyncio
