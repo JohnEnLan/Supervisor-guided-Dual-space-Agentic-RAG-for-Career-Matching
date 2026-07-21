@@ -63,6 +63,18 @@ CREATE INDEX IF NOT EXISTS idx_raptor_nodes_tsv
 CREATE INDEX IF NOT EXISTS idx_raptor_nodes_type_cluster
     ON raptor_nodes (node_type, role_cluster);
 
+CREATE TABLE IF NOT EXISTS raptor_node_chunks (
+    node_id   TEXT NOT NULL REFERENCES raptor_nodes(node_id) ON DELETE CASCADE,
+    chunk_id  TEXT NOT NULL REFERENCES job_chunks(chunk_id) ON DELETE CASCADE,
+    job_id    TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+    depth     SMALLINT NOT NULL CHECK (depth >= 1),
+    leaf_rank INTEGER NOT NULL CHECK (leaf_rank >= 1),
+    PRIMARY KEY (node_id, chunk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_node_chunks_job
+    ON raptor_node_chunks (job_id, node_id);
+
 -- 硬过滤常用字段建普通索引，加速 metadata filter
 CREATE INDEX IF NOT EXISTS idx_jobs_filter
     ON jobs (location, visa_sponsor, role_cluster, is_open);

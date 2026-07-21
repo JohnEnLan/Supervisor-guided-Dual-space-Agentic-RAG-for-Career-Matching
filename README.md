@@ -36,8 +36,10 @@ The core design is:
   bi-encoder scoring.
 - Agent workflow: Intent Agent, Matching Agent, and Strategy Agent share one
   structured state object.
-- Supervisor: bounded verification and repair loops for clarification,
-  re-retrieval, and final quality checks.
+- Supervisor Harness: workflow orchestration, state/constraint management,
+  deterministic checks before and after each business Agent, bounded recovery,
+  and a final publication gate. LLM verification is reserved for judgments that
+  SQL or Python rules cannot make.
 - Stateless service: all shared state is stored by `session_id` in PostgreSQL.
 - Async execution: FastAPI, asyncpg connection pooling, and semaphore-limited
   LLM / embedding calls.
@@ -53,7 +55,7 @@ app/
   llm/             DeepSeek and Qwen embedding clients
   memory/          private memory, feedback, anonymized case base
   normalization/   resume intake and evidence-preserving normalization
-  retrieval/       hybrid search, RRF, RAPTOR placeholder
+  retrieval/       hybrid search, job-level RRF, optional RAPTOR-lite leaf propagation
   state/           shared structured state schema
 scripts/           data loading and sample case scripts
 data/              local job, resume, and case data placeholders

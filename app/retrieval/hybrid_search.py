@@ -306,6 +306,36 @@ def _collapse_chunk_hits(
     return sorted(ranks, key=lambda item: item.score, reverse=True)
 
 
+def _collapse_raptor_hits(
+    hits: list[ChunkHit], max_evidence_per_job: int = 3
+) -> list[JobRank]:
+    grouped: dict[str, list[ChunkHit]] = {}
+    for hit in hits:
+        grouped.setdefault(hit.job_id, []).append(hit)
+
+    ranks: list[JobRank] = []
+    for job_id, job_hits in grouped.items():
+        ordered_hits = sorted(job_hits, key=lambda item: item.score, reverse=True)
+        unique_hits: list[ChunkHit] = []
+        seen_chunks: set[str] = set()
+        for hit in ordered_hits:
+            if hit.chunk_id in seen_chunks:
+                continue
+            seen_chunks.add(hit.chunk_id)
+            unique_hits.append(hit)
+
+        evidence_hits = unique_hits[:max_evidence_per_job]
+        ranks.append(
+            JobRank(
+                job_id=job_id,
+                score=round(sum(max(0.0, hit.score) for hit in unique_hits), 6),
+                evidence_span_ids=[hit.chunk_id for hit in evidence_hits],
+                evidence_fields=[hit.field for hit in evidence_hits if hit.field],
+            )
+        )
+    return sorted(ranks, key=lambda item: item.score, reverse=True)
+
+
 def _normalise_scores(scores: dict[str, float]) -> dict[str, float]:
     if not scores:
         return {}
@@ -543,18 +573,6 @@ async def _fetch_evidence_payloads(
             """,
             unique_ids,
         )
-        raptor_rows = await conn.fetch(
-            """
-            SELECT node_id AS evidence_span_id,
-                   job_id,
-                   node_type AS field,
-                   content,
-                   source_job_ids
-            FROM raptor_nodes
-            WHERE node_id = ANY($1::text[])
-            """,
-            unique_ids,
-        )
 
     payload_by_id: dict[str, dict[str, Any]] = {}
     for row in chunk_rows:
@@ -564,17 +582,6 @@ async def _fetch_evidence_payloads(
             "field": row["field"],
             "content": row["content"],
             "source": "job_chunk",
-        }
-
-    for row in raptor_rows:
-        evidence_id = str(row["evidence_span_id"])
-        payload_by_id[evidence_id] = {
-            "evidence_span_id": evidence_id,
-            "job_id": str(row["job_id"]) if row["job_id"] else None,
-            "field": row["field"],
-            "content": row["content"],
-            "source": "raptor_node",
-            "source_job_ids": list(row["source_job_ids"] or []),
         }
 
     return {
@@ -621,11 +628,12 @@ async def hybrid_search(
         raptor_hits = [
             ChunkHit(
                 job_id=hit.job_id,
-                chunk_id=hit.node_id,
+                chunk_id=hit.chunk_id,
                 score=hit.score,
-                field=hit.node_type,
+                field=hit.field,
             )
             for hit in raptor_node_hits
+            if hit.chunk_id
         ]
     else:
         bm25_hits, dense_hits = await asyncio.gather(
@@ -635,7 +643,7 @@ async def hybrid_search(
 
     bm25_ranks = _collapse_chunk_hits(bm25_hits)
     dense_ranks = _collapse_chunk_hits(dense_hits)
-    raptor_ranks = _collapse_chunk_hits(raptor_hits)
+    raptor_ranks = _collapse_raptor_hits(raptor_hits)
     rank_lists = [_rank_list(bm25_ranks), _rank_list(dense_ranks)]
     if raptor_ranks:
         rank_lists.append(_rank_list(raptor_ranks))

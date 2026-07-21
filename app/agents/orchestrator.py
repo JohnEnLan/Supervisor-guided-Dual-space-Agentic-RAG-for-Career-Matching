@@ -1,3 +1,5 @@
+"""Supervisor Harness workflow orchestration and bounded recovery."""
+
 from __future__ import annotations
 
 import asyncio

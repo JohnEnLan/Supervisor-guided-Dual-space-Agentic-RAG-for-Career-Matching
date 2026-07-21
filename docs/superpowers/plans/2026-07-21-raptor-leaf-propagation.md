@@ -27,7 +27,7 @@
 - Modify: `tests/test_raptor.py`
 
 **Interfaces:**
-- `RaptorNode` gains `source_chunk_ids: list[str]`.
+- `build_node_chunk_mappings(...)` derives lineage from the fetched jobs/chunks.
 - The builder writes `(node_id, chunk_id, job_id, depth, leaf_rank)` rows to `raptor_node_chunks` after upserting nodes.
 
 - [ ] **Step 1: Write failing node-lineage and schema tests** for job and role summary mappings.
@@ -75,4 +75,3 @@
 - [ ] **Step 1: Run the complete backend test suite** with `pytest -q`.
 - [ ] **Step 2: Review `git diff --check`, `git diff --stat`, and the exact changed-file list.**
 - [ ] **Step 3: Confirm RAPTOR remains disabled in the approved Match Brief path and no LangGraph/microservice dependency was added.**
-

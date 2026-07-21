@@ -32,6 +32,18 @@ CREATE INDEX IF NOT EXISTS idx_raptor_nodes_tsv
 
 CREATE INDEX IF NOT EXISTS idx_raptor_nodes_type_cluster
     ON raptor_nodes (node_type, role_cluster);
+
+CREATE TABLE IF NOT EXISTS raptor_node_chunks (
+    node_id   TEXT NOT NULL REFERENCES raptor_nodes(node_id) ON DELETE CASCADE,
+    chunk_id  TEXT NOT NULL REFERENCES job_chunks(chunk_id) ON DELETE CASCADE,
+    job_id    TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+    depth     SMALLINT NOT NULL CHECK (depth >= 1),
+    leaf_rank INTEGER NOT NULL CHECK (leaf_rank >= 1),
+    PRIMARY KEY (node_id, chunk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_node_chunks_job
+    ON raptor_node_chunks (job_id, node_id);
 """
 
 CHUNK_FIELD_PRIORITY = {
@@ -60,6 +72,8 @@ class RaptorHit:
     node_id: str
     score: float
     node_type: str
+    chunk_id: str | None = None
+    field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +81,15 @@ class RaptorBuildStats:
     job_nodes: int
     role_nodes: int
     total_nodes: int
+
+
+@dataclass(frozen=True)
+class RaptorNodeChunk:
+    node_id: str
+    chunk_id: str
+    job_id: str
+    depth: int
+    leaf_rank: int
 
 
 async def ensure_raptor_schema(pool) -> None:
@@ -125,49 +148,133 @@ def build_role_summary_node(
     )
 
 
-def expand_raptor_hits(
+def build_node_chunk_mappings(
+    nodes: Sequence[RaptorNode],
     *,
-    rows: Sequence[Mapping[str, Any]],
+    jobs_with_chunks: Mapping[str, Mapping[str, Any]],
+) -> list[RaptorNodeChunk]:
+    mappings: list[RaptorNodeChunk] = []
+    for node in nodes:
+        depth = 1 if node.node_type == "job_summary" else 2
+        leaf_rank = 0
+        for job_id in _dedupe(node.source_job_ids):
+            job_payload = jobs_with_chunks.get(job_id) or {}
+            for chunk in job_payload.get("chunks") or []:
+                chunk_id = str(_value(chunk, "chunk_id") or "").strip()
+                if not chunk_id:
+                    continue
+                leaf_rank += 1
+                mappings.append(
+                    RaptorNodeChunk(
+                        node_id=node.node_id,
+                        chunk_id=chunk_id,
+                        job_id=job_id,
+                        depth=depth,
+                        leaf_rank=leaf_rank,
+                    )
+                )
+    return mappings
+
+
+def propagate_raptor_hits(
+    *,
+    node_rows: Sequence[Mapping[str, Any]],
+    leaf_rows: Sequence[Mapping[str, Any]],
     allow_ids: Sequence[str],
-    max_jobs_per_role: int = 20,
+    max_leaf_chunks_per_node: int = 8,
+    level_decay: float = 0.65,
 ) -> list[RaptorHit]:
+    """Project summary-node recall through relevant original JD chunks."""
+    if max_leaf_chunks_per_node <= 0:
+        return []
+
     allowed = {str(job_id) for job_id in allow_ids}
-    best_by_job: dict[str, RaptorHit] = {}
+    nodes = {
+        str(_value(row, "node_id")): row
+        for row in node_rows
+        if _value(row, "node_id")
+    }
+    leaves_by_node: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in leaf_rows:
+        node_id = str(_value(row, "node_id") or "")
+        job_id = str(_value(row, "job_id") or "")
+        if node_id in nodes and job_id in allowed and _value(row, "chunk_id"):
+            leaves_by_node[node_id].append(row)
 
-    for row in rows:
-        node_id = str(_value(row, "node_id"))
-        node_type = str(_value(row, "node_type"))
-        score = round(float(_value(row, "score") or 0.0), 6)
-        job_id = _value(row, "job_id")
-
-        if job_id:
-            _keep_best_hit(
-                best_by_job,
-                RaptorHit(
-                    job_id=str(job_id),
-                    node_id=node_id,
-                    score=score,
-                    node_type=node_type,
-                ),
-                allowed,
-            )
+    combined: dict[tuple[str, str], dict[str, Any]] = {}
+    for node_id, node in nodes.items():
+        node_type = str(_value(node, "node_type") or "")
+        candidates = sorted(
+            leaves_by_node.get(node_id, []),
+            key=lambda row: float(_value(row, "leaf_score") or 0.0),
+            reverse=True,
+        )
+        if node_type == "role_summary":
+            candidates = _best_leaf_per_job(candidates)
+        selected = candidates[:max_leaf_chunks_per_node]
+        if not selected:
             continue
 
-        source_job_ids = [str(item) for item in (_value(row, "source_job_ids") or [])]
-        expanded = [job for job in source_job_ids if job in allowed][:max_jobs_per_role]
-        for expanded_job_id in expanded:
-            _keep_best_hit(
-                best_by_job,
-                RaptorHit(
-                    job_id=expanded_job_id,
-                    node_id=node_id,
-                    score=score,
-                    node_type=node_type,
-                ),
-                allowed,
+        node_score = max(0.0, float(_value(node, "score") or 0.0))
+        fanout = len(selected)
+        for leaf in selected:
+            depth = max(1, int(_value(leaf, "depth") or 1))
+            leaf_score = max(0.0, float(_value(leaf, "leaf_score") or 0.0))
+            contribution = (
+                node_score
+                * leaf_score
+                * (level_decay ** (depth - 1))
+                / fanout
             )
+            if contribution <= 0:
+                continue
 
-    return sorted(best_by_job.values(), key=lambda hit: hit.score, reverse=True)
+            job_id = str(_value(leaf, "job_id"))
+            chunk_id = str(_value(leaf, "chunk_id"))
+            key = (job_id, chunk_id)
+            current = combined.setdefault(
+                key,
+                {
+                    "score": 0.0,
+                    "best_contribution": -1.0,
+                    "node_id": node_id,
+                    "node_type": node_type,
+                    "field": _value(leaf, "field"),
+                },
+            )
+            current["score"] += contribution
+            if contribution > current["best_contribution"]:
+                current["best_contribution"] = contribution
+                current["node_id"] = node_id
+                current["node_type"] = node_type
+                current["field"] = _value(leaf, "field")
+
+    hits = [
+        RaptorHit(
+            job_id=job_id,
+            node_id=str(payload["node_id"]),
+            score=round(float(payload["score"]), 6),
+            node_type=str(payload["node_type"]),
+            chunk_id=chunk_id,
+            field=(str(payload["field"]) if payload["field"] else None),
+        )
+        for (job_id, chunk_id), payload in combined.items()
+    ]
+    return sorted(hits, key=lambda hit: (-hit.score, hit.job_id, hit.chunk_id or ""))
+
+
+def _best_leaf_per_job(
+    candidates: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    selected = []
+    seen_jobs: set[str] = set()
+    for row in candidates:
+        job_id = str(_value(row, "job_id") or "")
+        if not job_id or job_id in seen_jobs:
+            continue
+        seen_jobs.add(job_id)
+        selected.append(row)
+    return selected
 
 
 async def build_raptor_index(
@@ -201,6 +308,14 @@ async def build_raptor_index(
     nodes = job_nodes + role_nodes
     embeddings = await _embed_nodes(nodes, batch_size=batch_size)
     await _upsert_nodes(pool, nodes, embeddings)
+    await _replace_node_chunk_mappings(
+        pool,
+        node_ids=[node.node_id for node in nodes],
+        mappings=build_node_chunk_mappings(
+            nodes,
+            jobs_with_chunks=jobs_with_chunks,
+        ),
+    )
     return RaptorBuildStats(
         job_nodes=len(job_nodes),
         role_nodes=len(role_nodes),
@@ -215,7 +330,8 @@ async def search_raptor_nodes(
     allow_ids: Sequence[str],
     top_k: int,
     node_k: int | None = None,
-    max_jobs_per_role: int = 20,
+    max_leaf_chunks_per_node: int = 8,
+    level_decay: float = 0.65,
 ) -> list[RaptorHit]:
     if not allow_ids or not query.strip():
         return []
@@ -230,7 +346,7 @@ async def search_raptor_nodes(
 
     query_vector = _to_vector_literal(query_emb)
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
+        node_rows = await conn.fetch(
             """
             SELECT node_id,
                    node_type,
@@ -239,17 +355,45 @@ async def search_raptor_nodes(
                    1 - (embedding <=> $1::vector) AS score
             FROM raptor_nodes
             WHERE embedding IS NOT NULL
+              AND (job_id IS NULL OR job_id = ANY($2::text[]))
             ORDER BY embedding <=> $1::vector
-            LIMIT $2
+            LIMIT $3
             """,
             query_vector,
+            list(allow_ids),
             node_k or max(top_k * 4, top_k, 10),
         )
+        node_ids = [str(_value(row, "node_id")) for row in node_rows]
+        if not node_ids:
+            return []
+        leaf_rows = await conn.fetch(
+            """
+            SELECT mapping.node_id,
+                   mapping.chunk_id,
+                   mapping.job_id,
+                   mapping.depth,
+                   chunks.field,
+                   1 - (chunks.embedding <=> $1::vector) AS leaf_score
+            FROM raptor_node_chunks AS mapping
+            JOIN job_chunks AS chunks ON chunks.chunk_id = mapping.chunk_id
+            WHERE mapping.node_id = ANY($2::text[])
+              AND mapping.job_id = ANY($3::text[])
+              AND chunks.embedding IS NOT NULL
+            ORDER BY mapping.node_id,
+                     chunks.embedding <=> $1::vector,
+                     mapping.leaf_rank
+            """,
+            query_vector,
+            node_ids,
+            list(allow_ids),
+        )
 
-    hits = expand_raptor_hits(
-        rows=rows,
+    hits = propagate_raptor_hits(
+        node_rows=node_rows,
+        leaf_rows=leaf_rows,
         allow_ids=allow_ids,
-        max_jobs_per_role=max_jobs_per_role,
+        max_leaf_chunks_per_node=max_leaf_chunks_per_node,
+        level_decay=level_decay,
     )
     return hits[:top_k]
 
@@ -372,6 +516,46 @@ async def _upsert_nodes(
         )
 
 
+async def _replace_node_chunk_mappings(
+    pool,
+    *,
+    node_ids: Sequence[str],
+    mappings: Sequence[RaptorNodeChunk],
+) -> None:
+    if not node_ids:
+        return
+
+    records = [
+        (
+            item.node_id,
+            item.chunk_id,
+            item.job_id,
+            item.depth,
+            item.leaf_rank,
+        )
+        for item in mappings
+    ]
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM raptor_node_chunks WHERE node_id = ANY($1::text[])",
+            list(node_ids),
+        )
+        if records:
+            await conn.executemany(
+                """
+                INSERT INTO raptor_node_chunks (
+                    node_id, chunk_id, job_id, depth, leaf_rank
+                )
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (node_id, chunk_id) DO UPDATE SET
+                    job_id = EXCLUDED.job_id,
+                    depth = EXCLUDED.depth,
+                    leaf_rank = EXCLUDED.leaf_rank
+                """,
+                records,
+            )
+
+
 def _job_metadata_lines(job: Mapping[str, Any]) -> list[str]:
     lines = []
     if _value(job, "title"):
@@ -389,16 +573,6 @@ def _chunk_sort_key(chunk: Mapping[str, Any]) -> tuple[int, str]:
     field = str(_value(chunk, "field") or "")
     chunk_id = str(_value(chunk, "chunk_id") or "")
     return (CHUNK_FIELD_PRIORITY.get(field, 99), chunk_id)
-
-
-def _keep_best_hit(
-    best_by_job: dict[str, RaptorHit], hit: RaptorHit, allowed: set[str]
-) -> None:
-    if hit.job_id not in allowed:
-        return
-    current = best_by_job.get(hit.job_id)
-    if current is None or hit.score > current.score:
-        best_by_job[hit.job_id] = hit
 
 
 def _slug_role_cluster(raw: Any) -> str:
