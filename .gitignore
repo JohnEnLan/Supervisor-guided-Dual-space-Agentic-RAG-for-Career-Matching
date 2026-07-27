@@ -17,6 +17,7 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/.vite/
 frontend/*.tsbuildinfo
+.worktrees/
 
 # Keep generated/private inputs out of Git by default.
 data/resumes/*
