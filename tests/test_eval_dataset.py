@@ -1,7 +1,8 @@
 import csv
-import hashlib
 import json
 from pathlib import Path
+
+from app.evaluation.artifacts import normalized_text_sha256
 
 
 def test_relevance_labels_are_bound_to_the_full_linkedin_corpus():
@@ -43,7 +44,7 @@ def test_relevance_labels_are_bound_to_the_full_linkedin_corpus():
     assert manifest == {
         "source": "Kaggle arshkon/linkedin-job-postings",
         "corpus_file": "data/jobs/linkedin_postings_1000.csv",
-        "corpus_sha256": hashlib.sha256(jobs_path.read_bytes()).hexdigest(),
+        "corpus_sha256": normalized_text_sha256(jobs_path),
         "corpus_rows": 1000,
         "unique_job_ids": 1000,
         "query_cases": 15,

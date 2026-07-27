@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.evaluation.artifacts import normalized_text_sha256
 
 
 METHOD = "deterministic_weighted_token_overlap_v1"
@@ -60,7 +67,7 @@ def generate_lexical_ranking_artifact(
             "artifact_kind": "offline_lexical_baseline",
             "label": "Offline lexical baseline (not live hybrid-system performance)",
             "corpus_path": corpus_path.as_posix(),
-            "corpus_sha256": hashlib.sha256(corpus_path.read_bytes()).hexdigest(),
+            "corpus_sha256": normalized_text_sha256(corpus_path),
             "corpus_row_count": len(job_rows),
             "query_path": queries_path.as_posix(),
             "query_count": len(queries),

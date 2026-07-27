@@ -3,7 +3,7 @@
     "artifact_kind": "offline_lexical_baseline",
     "label": "Offline lexical baseline (not live hybrid-system performance)",
     "corpus_path": "data/jobs/linkedin_postings_1000.csv",
-    "corpus_sha256": "a375454912fb311ebbf9797963efa4c3adb9a75db7bd820e7a111f13ed52931a",
+    "corpus_sha256": "f7e6cb7429ae9e9efe9f80f89ea1ea5b5fc165f95710468b863def91b79545e5",
     "corpus_row_count": 1000,
     "query_path": "data/eval/resume_queries.jsonl",
     "query_count": 15,

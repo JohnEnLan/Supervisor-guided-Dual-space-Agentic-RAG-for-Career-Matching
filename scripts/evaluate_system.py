@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -15,6 +14,7 @@ if str(ROOT) not in sys.path:
 DEFAULT_EVAL_MANIFEST = ROOT / "data/eval/evaluation_manifest.json"
 
 from app.db.pool import close_pool
+from app.evaluation.artifacts import normalized_text_sha256
 from app.evaluation.metrics import (
     build_metric_table,
     compare_latent_space_runs,
@@ -190,7 +190,7 @@ def _validate_ranking_artifact(
     with corpus_path.open(newline="", encoding="utf-8") as handle:
         corpus_rows = list(csv.DictReader(handle))
     corpus_job_ids = [str(row.get("job_id") or "").strip() for row in corpus_rows]
-    current_corpus_sha256 = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
+    current_corpus_sha256 = normalized_text_sha256(corpus_path)
     query_rows = _load_jsonl(queries_path)
     query_ids = [str(row.get("case_id") or "").strip() for row in query_rows]
 

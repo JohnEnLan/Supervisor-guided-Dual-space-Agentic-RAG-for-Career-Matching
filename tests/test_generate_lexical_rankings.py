@@ -1,7 +1,8 @@
 import csv
-import hashlib
 import json
 from pathlib import Path
+
+from app.evaluation.artifacts import normalized_text_sha256
 
 
 def _job_ids(path: Path) -> set[str]:
@@ -24,7 +25,7 @@ def test_lexical_ranking_fixture_covers_the_declared_1000_job_universe():
         "artifact_kind": "offline_lexical_baseline",
         "label": "Offline lexical baseline (not live hybrid-system performance)",
         "corpus_path": "data/jobs/linkedin_postings_1000.csv",
-        "corpus_sha256": hashlib.sha256(corpus_path.read_bytes()).hexdigest(),
+        "corpus_sha256": normalized_text_sha256(corpus_path),
         "corpus_row_count": 1000,
         "query_path": "data/eval/resume_queries.jsonl",
         "query_count": 15,
