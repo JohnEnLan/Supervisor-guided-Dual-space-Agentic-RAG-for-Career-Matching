@@ -170,7 +170,12 @@ async def test_post_match_rejects_session_before_resume_is_ready(monkeypatch):
 async def test_status_and_result_are_read_from_state_store(monkeypatch):
     from app.api.main import app
     from app.api import routes
-    from app.state.schema import ResumeState, SharedState, StrategyState
+    from app.state.schema import (
+        ResumeState,
+        RetrievalState,
+        SharedState,
+        StrategyState,
+    )
 
     async def fake_load_state_with_status(session_id):
         return (
@@ -178,6 +183,20 @@ async def test_status_and_result_are_read_from_state_store(monkeypatch):
                 session_id=session_id,
                 user_id="u1",
                 resume_state=ResumeState(normalized_base_resume="base resume"),
+                retrieval_state=RetrievalState(
+                    ranking_scores=[
+                        {
+                            "job_id": "job-1",
+                            "evidence_spans": [
+                                {
+                                    "evidence_span_id": "job-1:skills:1",
+                                    "field": "required_skills",
+                                    "content": "SQL and Python required.",
+                                }
+                            ],
+                        }
+                    ]
+                ),
                 strategy_state=StrategyState(
                     recommended_roles=[
                         {
@@ -198,19 +217,59 @@ async def test_status_and_result_are_read_from_state_store(monkeypatch):
         status_response = await client.get("/status/s1")
         result_response = await client.get("/result/s1")
 
-    assert status_response.json()["session_id"] == "s1"
-    assert status_response.json()["status"] == "agentic_done"
-    assert status_response.json()["result_ready"] is True
-    assert status_response.json()["state"]["strategy_state"]["recommended_roles"] == [
+    status_payload = status_response.json()
+    assert status_payload["session_id"] == "s1"
+    assert status_payload["status"] == "agentic_done"
+    assert status_payload["result_ready"] is True
+    # 遗留端点只返回投影后的产品结果，不再泄露原始 SharedState。
+    assert "state" not in status_payload
+    assert [
+        role["job_id"] for role in status_payload["result"]["recommended_roles"]
+    ] == ["job-1"]
+    assert status_payload["result"]["recommended_roles"][0]["tier"] == "now_fit"
+
+    result_payload = result_response.json()
+    assert result_response.status_code == 200
+    assert result_payload["session_id"] == "s1"
+    assert result_payload["status"] == "agentic_done"
+    assert "state" not in result_payload
+    assert result_payload["result"]["recommended_roles"][0]["evidence"] == [
         {
-            "job_id": "job-1",
-            "tier": "now_fit",
-            "evidence_span_ids": ["job-1:skills:1"],
+            "evidence_span_id": "job-1:skills:1",
+            "field": "required_skills",
+            "content": "SQL and Python required.",
         }
     ]
-    assert result_response.status_code == 200
-    assert result_response.json()["state"]["session_id"] == "s1"
-    assert result_response.json()["status"] == "agentic_done"
+    for payload in (status_payload, result_payload):
+        serialized = str(payload)
+        assert "base resume" not in serialized
+        assert "normalized_base_resume" not in serialized
+        assert "supervisor_log" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_result_returns_polling_recovery_until_agentic_done(monkeypatch):
+    from app.api import routes
+    from app.api.main import app
+    from app.state.schema import SharedState
+
+    async def fake_load_state_with_status(session_id):
+        return SharedState(session_id=session_id, user_id="u1"), "strategy_done"
+
+    monkeypatch.setattr(routes, "load_state_with_status", fake_load_state_with_status)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/result/s1")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "session result is not ready",
+        "recovery": {
+            "action": "poll_status",
+            "status_url": "/status/s1",
+        },
+    }
 
 
 @pytest.mark.asyncio

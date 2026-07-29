@@ -134,3 +134,21 @@ def test_projector_warns_when_no_recommendation_is_publishable() -> None:
 
     assert result.recommended_roles == []
     assert result.warnings == ["no_publishable_recommendations"]
+
+
+def test_projector_drops_malformed_persisted_strategy_items_with_public_warnings() -> None:
+    state = _state()
+    state.strategy_state.resume_revision_plan.append({"section": "Experience"})
+    state.strategy_state.skill_gap_analysis.append({"priority": "urgent"})
+    state.strategy_state.career_path.append(
+        {"horizon": "someday", "action": "Unsupported horizon."}
+    )
+
+    result = project_product_result(state)
+
+    assert len(result.resume_strategy) == 1
+    assert len(result.skill_gaps) == 1
+    assert len(result.career_path) == 1
+    assert "invalid_resume_advice_dropped" in result.warnings
+    assert "invalid_skill_gap_dropped" in result.warnings
+    assert "invalid_career_path_dropped" in result.warnings

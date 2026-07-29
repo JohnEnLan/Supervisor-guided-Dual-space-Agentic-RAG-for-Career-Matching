@@ -147,7 +147,10 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
                 attempt=2,
             )
             state = await _run_strategy_under_supervision(state, attempt=2)
-            verification = await final_verification(state)
+            verification = await final_verification(
+                state,
+                allow_repair=verification.get("repair_loop_used", 0) == 0,
+            )
             verification = _mark_reretrieval_loop_used(state, verification)
         _record_stage_duration(state, "verification", stage_started)
 
@@ -282,7 +285,10 @@ async def run_agentic_match_from_state(
             attempt=2,
         )
         state = await _run_strategy_under_supervision(state, attempt=2)
-        verification = await final_verification(state)
+        verification = await final_verification(
+            state,
+            allow_repair=verification.get("repair_loop_used", 0) == 0,
+        )
         verification = _mark_reretrieval_loop_used(state, verification)
 
     record_supervisor_checkpoint(
@@ -425,7 +431,10 @@ async def run_persisted_agentic_match_from_session(
         await save_state(state, status="strategy_rerun_done")
 
         state = await _load_required_state(session_id)
-        verification = await final_verification(state)
+        verification = await final_verification(
+            state,
+            allow_repair=verification.get("repair_loop_used", 0) == 0,
+        )
         verification = _mark_reretrieval_loop_used(state, verification)
 
     record_supervisor_checkpoint(

@@ -147,8 +147,8 @@ The service exposes a submit-and-poll API:
 ```text
 POST /resume          upload resume and queue normalization
 POST /match           submit matching job and return immediately
-GET  /status/{sid}    poll status and final state when ready
-GET  /result/{sid}    fetch state for a session
+GET  /status/{sid}    poll status; include ProductResult only when ready
+GET  /result/{sid}    fetch verified ProductResult, or receive 409 while pending
 POST /feedback        record outcome feedback
 ```
 
@@ -156,7 +156,10 @@ Long-running work is executed in FastAPI background tasks. The HTTP request
 returns quickly with a `session_id` and a status, while the client polls
 `/status/{session_id}`. Each background task reloads the state from Postgres by
 session id before continuing, so work for one user does not depend on mutable
-in-memory objects from another request.
+in-memory objects from another request. Public responses expose only the
+`ProductResult` projection; raw `SharedState` is never returned. A
+`/result/{session_id}` request made before `agentic_done` returns `409` with
+`action=poll_status` and the corresponding `status_url`.
 
 The status lifecycle is stored alongside the JSON state:
 
@@ -195,13 +198,16 @@ day14-b -> day14-b-job
 day14-c -> day14-c-job
 ```
 
-It then polls `/status/{session_id}` for every session and verifies:
+It then polls `/status/{session_id}` and fetches `/result/{session_id}` for
+every session, verifying:
 
 - all three submissions return `202`
 - each session reaches `agentic_done`
 - each status response contains the same `session_id` that was requested
-- each result contains only its own recommendation evidence
-- no recommendation from one session appears in another session's state
+- a not-yet-ready result returns `409` with polling recovery metadata
+- completed responses expose ProductResult projections, never raw SharedState
+- each ProductResult contains only its own recommendation evidence
+- no recommendation from one session appears in another session's ProductResult
 
 This test provides a concrete Week 2 acceptance check: multiple users can submit
 matching jobs concurrently, and the state and status for each session remain

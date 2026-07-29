@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.domain.results import (
     CareerPathItem,
     EvidenceItem,
@@ -75,24 +77,36 @@ def project_product_result(state: SharedState) -> ProductResult:
     if not roles:
         warnings.append("no_publishable_recommendations")
 
+    resume_strategy: list[ResumeAdvice] = []
+    for item in state.strategy_state.resume_revision_plan:
+        try:
+            resume_strategy.append(ResumeAdvice.model_validate(item))
+        except ValidationError:
+            warnings.append("invalid_resume_advice_dropped")
+
+    skill_gaps: list[SkillGap] = []
+    for item in state.strategy_state.skill_gap_analysis:
+        try:
+            skill_gaps.append(SkillGap.model_validate(item))
+        except ValidationError:
+            warnings.append("invalid_skill_gap_dropped")
+
+    career_path: list[CareerPathItem] = []
+    for item in state.strategy_state.career_path:
+        try:
+            career_path.append(CareerPathItem.model_validate(item))
+        except ValidationError:
+            warnings.append("invalid_career_path_dropped")
+
     return ProductResult(
         summary=(
             f"{len(roles)} evidence-grounded role"
             f"{'s' if len(roles) != 1 else ''} recommended."
         ),
         recommended_roles=roles,
-        resume_strategy=[
-            ResumeAdvice.model_validate(item)
-            for item in state.strategy_state.resume_revision_plan
-        ],
-        skill_gaps=[
-            SkillGap.model_validate(item)
-            for item in state.strategy_state.skill_gap_analysis
-        ],
-        career_path=[
-            CareerPathItem.model_validate(item)
-            for item in state.strategy_state.career_path
-        ],
+        resume_strategy=resume_strategy,
+        skill_gaps=skill_gaps,
+        career_path=career_path,
         warnings=warnings,
     )
 

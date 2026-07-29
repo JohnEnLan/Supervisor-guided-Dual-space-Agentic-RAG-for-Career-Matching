@@ -15,7 +15,12 @@ os.environ.setdefault("QWEN_API_KEY", "sk-test")
 async def test_concurrent_match_sessions_keep_state_and_status_isolated(monkeypatch):
     from app.api.main import app
     from app.api import routes
-    from app.state.schema import ResumeState, SharedState, StrategyState
+    from app.state.schema import (
+        ResumeState,
+        RetrievalState,
+        SharedState,
+        StrategyState,
+    )
 
     session_ids = ("day14-a", "day14-b", "day14-c")
     store = {
@@ -60,6 +65,20 @@ async def test_concurrent_match_sessions_keep_state_and_status_isolated(monkeypa
         state = await fake_load_state(session_id)
         assert state is not None
         assert state.session_id == session_id
+        state.retrieval_state = RetrievalState(
+            ranking_scores=[
+                {
+                    "job_id": f"{session_id}-job",
+                    "evidence_spans": [
+                        {
+                            "evidence_span_id": f"{session_id}:skills:1",
+                            "field": "required_skills",
+                            "content": f"{session_id}-evidence",
+                        }
+                    ],
+                }
+            ]
+        )
         state.strategy_state = StrategyState(
             recommended_roles=[
                 {
@@ -117,12 +136,13 @@ async def test_concurrent_match_sessions_keep_state_and_status_isolated(monkeypa
         assert response.status_code == 200
         payload = response.json()
         session_id = payload["session_id"]
-        role = payload["state"]["strategy_state"]["recommended_roles"][0]
+        # 遗留端点只返回投影后的产品结果，不再泄露原始 SharedState。
+        assert "state" not in payload
+        role = payload["result"]["recommended_roles"][0]
         assert payload["status"] == "agentic_done"
         assert payload["result_ready"] is True
-        assert payload["state"]["session_id"] == session_id
         assert role["job_id"] == f"{session_id}-job"
-        assert role["match_evidence"] == [f"{session_id}-evidence"]
+        assert role["evidence"][0]["content"] == f"{session_id}-evidence"
         seen_jobs.add(role["job_id"])
 
     assert seen_jobs == {f"{session_id}-job" for session_id in session_ids}

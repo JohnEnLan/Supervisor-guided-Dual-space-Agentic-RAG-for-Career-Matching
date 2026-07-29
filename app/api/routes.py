@@ -15,6 +15,7 @@ from app.db.state_store import (
     mutate_state_atomically,
     save_state,
 )
+from app.api.result_projector import project_product_result
 from app.memory.feedback_loop import process_feedback_closure_for_session
 from app.memory.feedback import normalize_application_outcome
 from app.normalization.resume_intake import intake_resume
@@ -107,8 +108,9 @@ async def read_status(session_id: str) -> dict:
         "status": status,
         "result_ready": status == "agentic_done",
     }
+    # 公共响应只暴露投影后的产品结果，不返回原始 SharedState。
     if response["result_ready"]:
-        response["state"] = state.model_dump(mode="json")
+        response["result"] = project_product_result(state).model_dump(mode="json")
     return response
 
 
@@ -119,10 +121,22 @@ async def read_result(session_id: str) -> dict:
         raise HTTPException(status_code=404, detail="session_id not found")
 
     state, status = state_with_status
+    if status != "agentic_done":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "session result is not ready",
+                "recovery": {
+                    "action": "poll_status",
+                    "status_url": f"/status/{session_id}",
+                },
+            },
+        )
+    # 公共响应只暴露投影后的产品结果，不返回原始 SharedState。
     return {
         "session_id": session_id,
         "status": status,
-        "state": state.model_dump(mode="json"),
+        "result": project_product_result(state).model_dump(mode="json"),
     }
 
 

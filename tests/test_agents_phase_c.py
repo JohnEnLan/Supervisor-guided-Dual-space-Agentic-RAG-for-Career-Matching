@@ -139,12 +139,21 @@ async def test_intent_agent_keeps_explicit_long_term_goal(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_supervisor_planning_records_one_clarification_loop(monkeypatch):
+@pytest.mark.parametrize(
+    ("caller_include_raptor", "llm_include_raptor"),
+    [(False, True), (True, False)],
+)
+async def test_supervisor_planning_records_one_clarification_loop(
+    monkeypatch,
+    caller_include_raptor,
+    llm_include_raptor,
+):
     from app.agents import supervisor
     from app.state.schema import CareerState, SharedState
 
     async def fake_chat(system, user, **kwargs):
         assert "PHASE_C_SUPERVISOR_PLANNING" in system
+        assert '"include_raptor"' not in system
         return json.dumps(
             {
                 "needs_clarification": True,
@@ -153,7 +162,7 @@ async def test_supervisor_planning_records_one_clarification_loop(monkeypatch):
                     "hard_constraints": {"locations": ["London"]},
                     "soft_preferences": {"title_keywords": ["analyst"]},
                     "top_k": 4,
-                    "include_raptor": True,
+                    "include_raptor": llm_include_raptor,
                 },
             }
         )
@@ -172,7 +181,7 @@ async def test_supervisor_planning_records_one_clarification_loop(monkeypatch):
         state,
         user_goal_text="something good",
         default_top_k=5,
-        include_raptor=False,
+        include_raptor=caller_include_raptor,
     )
 
     assert plan["needs_clarification"] is True
@@ -180,7 +189,7 @@ async def test_supervisor_planning_records_one_clarification_loop(monkeypatch):
     assert plan["hard_constraints"] == {"locations": ["Birmingham"]}
     assert plan["soft_prefs"] == {"title_keywords": ["data"]}
     assert plan["top_k"] == 4
-    assert plan["include_raptor"] is True
+    assert plan["include_raptor"] is caller_include_raptor
     assert state.supervisor_log[-1]["stage"] == "planning"
 
 
@@ -999,6 +1008,100 @@ async def test_supervisor_drops_unsupported_implicit_claims(monkeypatch):
         "job-over-count",
         "job-guarantee",
     }
+    repair_events = [
+        entry
+        for entry in state.supervisor_log
+        if entry.get("stage") == "repair_loop"
+    ]
+    assert len(repair_events) == 1
+    assert repair_events[0]["reason"] == "unsupported_implicit_claim"
+    assert repair_events[0]["repaired_implicit_claims"] == 3
+    assert repair_events[0]["repaired_resume_advice"] == 0
+    assert repair_events[0]["loop_used"] == 1
+    assert repair_events[0]["max_loops"] == 1
+
+
+@pytest.mark.asyncio
+async def test_supervisor_does_not_record_repair_loop_without_a_repair_action(
+    monkeypatch,
+):
+    from app.agents import supervisor
+    from app.state.schema import SharedState
+
+    async def fake_chat(system, user, **kwargs):
+        return json.dumps(
+            {
+                "hard_filter_violations": [],
+                "missing_evidence": [],
+                "fabrication_risks": [],
+                "needs_reretrieval": False,
+                "needs_repair": True,
+            }
+        )
+
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    state = SharedState(session_id="s-no-repair-action", user_id="u1")
+
+    result = await supervisor.final_verification(state)
+
+    assert result["repair_loop_used"] == 0
+    assert [
+        entry
+        for entry in state.supervisor_log
+        if entry.get("stage") == "repair_loop"
+    ] == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_records_removed_resume_advice_count(monkeypatch):
+    from app.agents import supervisor
+    from app.state.schema import ResumeState, SharedState, StrategyState
+
+    async def fake_chat(system, user, **kwargs):
+        return json.dumps(
+            {
+                "hard_filter_violations": [],
+                "missing_evidence": [],
+                "fabrication_risks": [],
+                "needs_reretrieval": False,
+                "needs_repair": False,
+            }
+        )
+
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s-resume-repair",
+        user_id="u1",
+        resume_state=ResumeState(
+            original_evidence_spans=[{"span_id": "R001", "text": "Built a dashboard."}]
+        ),
+        strategy_state=StrategyState(
+            resume_revision_plan=[
+                {
+                    "section": "projects",
+                    "suggestion": "Keep supported advice.",
+                    "evidence_span_ids": ["R001"],
+                },
+                {
+                    "section": "experience",
+                    "suggestion": "Drop unsupported advice.",
+                    "evidence_span_ids": ["missing"],
+                },
+            ]
+        ),
+    )
+
+    result = await supervisor.final_verification(state)
+
+    assert result["repair_loop_used"] == 1
+    assert result["repaired_resume_advice"] == 1
+    repair_event = next(
+        entry
+        for entry in state.supervisor_log
+        if entry.get("stage") == "repair_loop"
+    )
+    assert repair_event["reason"] == "unsupported_resume_advice"
+    assert repair_event["repaired_resume_advice"] == 1
 
 
 @pytest.mark.asyncio
@@ -1577,3 +1680,84 @@ async def test_orchestrator_executes_one_reretrieval_when_supervisor_requests_it
         if entry.get("stage") == "final_verification"
     ]
     assert final_verification_logs[-1]["reretrieval_loop_used"] == 1
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_allows_only_one_repair_across_reretrieval(
+    monkeypatch,
+):
+    from app.agents import orchestrator, supervisor
+    from app.agents.orchestrator import run_agentic_match_from_state
+    from app.state.schema import SharedState
+
+    async def fake_intent(state, user_goal_text):
+        return state
+
+    async def fake_plan(
+        state,
+        *,
+        user_goal_text,
+        default_top_k,
+        include_raptor,
+    ):
+        return {
+            "hard_constraints": {},
+            "soft_prefs": {},
+            "top_k": default_top_k,
+            "include_raptor": include_raptor,
+        }
+
+    async def fake_matching(state, *, retrieval_plan, search_fn):
+        return state
+
+    strategy_calls = 0
+
+    async def fake_strategy(state):
+        nonlocal strategy_calls
+        strategy_calls += 1
+        state.strategy_state.resume_revision_plan = [
+            {
+                "section": "experience",
+                "suggestion": f"Unsupported advice from attempt {strategy_calls}.",
+                "evidence_span_ids": ["missing"],
+            }
+        ]
+        return state
+
+    final_calls = 0
+
+    async def fake_chat(system, user, **kwargs):
+        nonlocal final_calls
+        assert "PHASE_C_SUPERVISOR_FINAL" in system
+        final_calls += 1
+        return json.dumps(
+            {
+                "hard_filter_violations": [],
+                "missing_evidence": [],
+                "fabrication_risks": [],
+                "needs_reretrieval": final_calls == 1,
+                "needs_repair": True,
+            }
+        )
+
+    monkeypatch.setattr(orchestrator, "run_intent_agent", fake_intent)
+    monkeypatch.setattr(orchestrator, "plan_retrieval", fake_plan)
+    monkeypatch.setattr(orchestrator, "run_matching_agent", fake_matching)
+    monkeypatch.setattr(orchestrator, "run_strategy_agent", fake_strategy)
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    state = SharedState(session_id="s-bounded-repair", user_id="u1")
+
+    result = await run_agentic_match_from_state(
+        state,
+        user_goal_text="Find analyst roles",
+        top_k=1,
+    )
+
+    repair_events = [
+        entry
+        for entry in result.state.supervisor_log
+        if entry.get("stage") == "repair_loop"
+    ]
+    assert final_calls == 2
+    assert len(repair_events) == 1
+    assert repair_events[0]["repaired_resume_advice"] == 1

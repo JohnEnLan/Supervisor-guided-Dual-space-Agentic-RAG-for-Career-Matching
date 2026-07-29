@@ -25,8 +25,7 @@ Return strict JSON:
   "retrieval_plan": {
     "hard_constraints": object,
     "soft_preferences": object,
-    "top_k": integer,
-    "include_raptor": boolean
+    "top_k": integer
   }
 }
 """
@@ -127,7 +126,8 @@ async def plan_retrieval(
         or _as_dict(llm_plan.get("hard_constraints")),
         "soft_prefs": explicit_soft_prefs,
         "top_k": int(llm_plan.get("top_k") or default_top_k),
-        "include_raptor": bool(llm_plan.get("include_raptor", include_raptor)),
+        # 确定性开关：以调用方参数为准，LLM 计划不可覆盖。
+        "include_raptor": include_raptor,
     }
     state.supervisor_log.append(
         {
@@ -145,7 +145,11 @@ async def plan_retrieval(
     return plan
 
 
-async def final_verification(state: SharedState) -> dict[str, Any]:
+async def final_verification(
+    state: SharedState,
+    *,
+    allow_repair: bool = True,
+) -> dict[str, Any]:
     raw = await deepseek.chat(
         FINAL_PROMPT,
         _final_payload(state),
@@ -161,12 +165,37 @@ async def final_verification(state: SharedState) -> dict[str, Any]:
         "needs_reretrieval": bool(parsed.get("needs_reretrieval")),
         "needs_repair": bool(parsed.get("needs_repair")),
     }
-    _add_deterministic_verification(state, result)
+    repair_enabled = allow_repair and settings.max_repair_loops > 0
+    repaired_implicit_claims = _add_deterministic_verification(
+        state,
+        result,
+        apply_repair=repair_enabled,
+    )
 
-    if result["needs_repair"] and settings.max_repair_loops > 0:
-        repaired = _repair_unsupported_resume_advice(state)
+    repaired_resume_advice = 0
+    if result["needs_repair"] and repair_enabled:
+        repaired_resume_advice = _repair_unsupported_resume_advice(state)
+
+    result["repaired_resume_advice"] = repaired_resume_advice
+    result["repaired_implicit_claims"] = repaired_implicit_claims
+    if repaired_resume_advice or repaired_implicit_claims:
         result["repair_loop_used"] = 1
-        result["repaired_resume_advice"] = repaired
+        reason = (
+            "unsupported_resume_advice"
+            if repaired_resume_advice
+            else "unsupported_implicit_claim"
+        )
+        state.supervisor_log.append(
+            {
+                "stage": "repair_loop",
+                "trigger": "final_verification",
+                "reason": reason,
+                "max_loops": settings.max_repair_loops,
+                "loop_used": 1,
+                "repaired_resume_advice": repaired_resume_advice,
+                "repaired_implicit_claims": repaired_implicit_claims,
+            }
+        )
     else:
         result["repair_loop_used"] = 0
 
@@ -229,8 +258,11 @@ def build_anonymous_case_from_feedback(
 
 
 def _add_deterministic_verification(
-    state: SharedState, result: dict[str, Any]
-) -> None:
+    state: SharedState,
+    result: dict[str, Any],
+    *,
+    apply_repair: bool,
+) -> int:
     hard_violations = list(result["hard_filter_violations"])
     hard = state.career_state.hard_constraints
     allowed_locations = set(hard.get("locations") or [])
@@ -267,7 +299,11 @@ def _add_deterministic_verification(
                     "evidence_span_ids": sorted(evidence_ids),
                 }
             )
-    _drop_unsupported_implicit_claims(state, fabrication_risks)
+    repaired_implicit_claims = _drop_unsupported_implicit_claims(
+        state,
+        fabrication_risks,
+        apply_repair=apply_repair,
+    )
 
     too_few_results = _as_dict(result.get("too_few_results"))
     planned_top_k = _latest_planned_top_k(state)
@@ -292,11 +328,15 @@ def _add_deterministic_verification(
     result["needs_repair"] = bool(
         result["needs_repair"] or missing_evidence or fabrication_risks
     )
+    return repaired_implicit_claims
 
 
 def _drop_unsupported_implicit_claims(
-    state: SharedState, fabrication_risks: list[dict[str, Any]]
-) -> None:
+    state: SharedState,
+    fabrication_risks: list[dict[str, Any]],
+    *,
+    apply_repair: bool,
+) -> int:
     forbidden = (
         "guaranteed",
         "will pass",
@@ -307,6 +347,7 @@ def _drop_unsupported_implicit_claims(
         "保证",
         "必然",
     )
+    repaired = 0
     for role in state.strategy_state.recommended_roles:
         explanation = str(role.get("implicit_explanation") or "").strip()
         if not explanation:
@@ -332,7 +373,9 @@ def _drop_unsupported_implicit_claims(
             reason = "guaranteed_outcome_language"
         if not reason:
             continue
-        role["implicit_explanation"] = None
+        if apply_repair:
+            role["implicit_explanation"] = None
+            repaired += 1
         fabrication_risks.append(
             {
                 "type": "unsupported_implicit_claim",
@@ -341,6 +384,7 @@ def _drop_unsupported_implicit_claims(
                 "case_ids": case_ids,
             }
         )
+    return repaired
 
 
 def _find_recommended_role(
@@ -442,7 +486,7 @@ def _planning_payload(
             "career_state": state.career_state.model_dump(),
             "resume_summary": state.resume_state.normalized_base_resume[:1500],
             "default_top_k": default_top_k,
-            "include_raptor": include_raptor,
+            "read_only_context": {"include_raptor": include_raptor},
         },
         ensure_ascii=False,
     )

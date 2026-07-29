@@ -77,6 +77,29 @@ def test_explain_contains_allow_list_trace_without_prompt_or_state() -> None:
     assert "normalized_base_resume" not in serialized
 
 
+def test_explain_projects_repair_loop_recovery_event() -> None:
+    state = _state()
+    state.supervisor_log.append(
+        {
+            "stage": "repair_loop",
+            "trigger": "final_verification",
+            "reason": "unsupported_resume_advice",
+            "max_loops": 1,
+            "loop_used": 1,
+            "repaired_resume_advice": 2,
+        }
+    )
+
+    payload = build_public_explain(state, evaluation_enabled=True)
+
+    assert {
+        "stage": "repair_loop",
+        "reason": "unsupported_resume_advice",
+        "attempt": 1,
+        "max_attempts": 1,
+    } in payload["recovery_events"]
+
+
 def test_explain_derives_missing_space_ranks_and_public_durations() -> None:
     state = _state()
     state.retrieval_state.ranking_scores = [
