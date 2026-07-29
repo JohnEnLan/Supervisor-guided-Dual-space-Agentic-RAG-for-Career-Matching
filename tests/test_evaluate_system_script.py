@@ -6,6 +6,166 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.asyncio
+async def test_live_report_uses_dual_space_with_same_raptor_setting(monkeypatch):
+    from scripts import evaluate_system
+
+    calls = []
+
+    async def fake_run_retrieval(
+        rows,
+        *,
+        k,
+        include_raptor,
+        use_dual_space,
+        include_latent_hint=False,
+    ):
+        calls.append((include_raptor, use_dual_space, include_latent_hint))
+        return {"eval-1": []}, {"eval-1": []}
+
+    monkeypatch.setattr(evaluate_system, "_run_retrieval", fake_run_retrieval)
+    report = await evaluate_system.build_live_report(
+        [
+            {
+                "case_id": "eval-1",
+                "query": "analyst",
+                "relevant_job_ids": [],
+                "hard_constraints": {},
+            }
+        ],
+        k=5,
+        include_latent_hint=True,
+    )
+
+    assert calls == [
+        (False, False, False),
+        (True, False, False),
+        (True, True, True),
+    ]
+    assert report["explanation_faithfulness"]["status"] == "not_evaluated"
+
+
+@pytest.mark.asyncio
+async def test_dual_space_retrieval_calls_real_dual_search(monkeypatch):
+    from scripts import evaluate_system
+    from app.retrieval.hybrid_search import JobCandidate
+
+    calls = []
+
+    async def forbidden_hybrid(**kwargs):
+        raise AssertionError("latent group must not call hybrid_search directly")
+
+    async def fake_dual(**kwargs):
+        calls.append(kwargs)
+        return [
+            JobCandidate(
+                job_id="job-1",
+                score=0.9,
+                evidence_span_ids=[],
+            )
+        ]
+
+    monkeypatch.setattr(evaluate_system, "hybrid_search", forbidden_hybrid)
+    monkeypatch.setattr(evaluate_system, "dual_space_search", fake_dual)
+    rankings, _candidates = await evaluate_system._run_retrieval(
+        [
+            {
+                "case_id": "eval-1",
+                "query": "analyst",
+                "resume_state": {
+                    "normalized_base_resume": "SQL analyst",
+                    "skills": ["SQL"],
+                },
+                "hard_constraints": {},
+                "soft_preferences": {},
+                "latent_profile": {"growth": "analytics"},
+            }
+        ],
+        k=5,
+        include_raptor=True,
+        use_dual_space=True,
+        include_latent_hint=True,
+    )
+
+    assert rankings == {"eval-1": ["job-1"]}
+    assert calls[0]["include_raptor"] is True
+    assert calls[0]["implicit_enabled"] is True
+    assert "SQL" in calls[0]["anonymized_resume_text"]
+    assert "analytics" in calls[0]["anonymized_resume_text"]
+
+
+def test_run_result_faithfulness_uses_real_agent_explanation_and_citations():
+    from scripts.evaluate_system import _evaluate_run_result_faithfulness
+    from app.retrieval.hybrid_search import JobCandidate
+
+    result = _evaluate_run_result_faithfulness(
+        rows=[{"case_id": "eval-1"}],
+        candidates_by_case={
+            "eval-1": [
+                JobCandidate(
+                    job_id="job-1",
+                    score=0.9,
+                    evidence_span_ids=["job-1:skills:1"],
+                )
+            ]
+        },
+        run_results={
+            "eval-1": {
+                "recommended_roles": [
+                    {
+                        "job_id": "job-1",
+                        "concise_explanation": "SQL evidence matches.",
+                        "evidence": [
+                            {
+                                "evidence_span_id": "job-1:skills:1",
+                                "content": "SQL required",
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    assert result == {
+        "checked_explanations": 1,
+        "faithful_explanations": 1,
+        "explanation_faithfulness": 1.0,
+    }
+
+
+def test_candidate_metadata_exposes_every_hard_filter_column():
+    from scripts.evaluate_system import _candidate_metadata
+    from app.retrieval.hybrid_search import JobCandidate
+
+    metadata = _candidate_metadata(
+        JobCandidate(
+            job_id="job-1",
+            score=0.9,
+            evidence_span_ids=[],
+            company="Example",
+            location="London",
+            visa_sponsor=True,
+            degree_required="bachelor",
+            min_years_exp=1,
+            role_cluster="data_ai",
+            is_open=True,
+        )
+    )
+
+    assert metadata == {
+        "job_id": "job-1",
+        "title": None,
+        "company": "Example",
+        "location": "London",
+        "visa_sponsor": True,
+        "degree_required": "bachelor",
+        "min_years_exp": 1,
+        "role_cluster": "data_ai",
+        "is_open": True,
+    }
+
+
 def test_load_eval_inputs_joins_queries_and_labels(tmp_path):
     from scripts.evaluate_system import load_eval_inputs
 

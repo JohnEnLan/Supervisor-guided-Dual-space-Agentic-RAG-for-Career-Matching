@@ -1,5 +1,8 @@
 import os
+import sys
 from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +63,64 @@ class FakeConn:
 
 def _fail_direct_connect(*args, **kwargs):
     raise AssertionError("scripts.load_jobs must use get_pool(), not asyncpg.connect()")
+
+
+def test_main_uses_one_asyncio_run_for_all_stages(monkeypatch):
+    from scripts import load_jobs
+
+    run_calls = []
+
+    def fake_run(coroutine):
+        run_calls.append(coroutine)
+        coroutine.close()
+
+    monkeypatch.setattr(load_jobs.asyncio, "run", fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["load_jobs.py", "--stage", "all"],
+    )
+
+    load_jobs.main()
+
+    assert len(run_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_main_async_runs_both_stages_in_order_and_closes_pool(monkeypatch):
+    from scripts import load_jobs
+
+    calls = []
+
+    async def fake_load_jobs(path, limit):
+        calls.append(("jobs", path, limit))
+        return 2
+
+    async def fake_build_chunks(limit, batch_size):
+        calls.append(("chunks", limit, batch_size))
+        return 7
+
+    async def fake_close_pool():
+        calls.append(("close_pool",))
+
+    monkeypatch.setattr(load_jobs, "load_jobs", fake_load_jobs)
+    monkeypatch.setattr(load_jobs, "build_job_chunks", fake_build_chunks)
+    monkeypatch.setattr(load_jobs, "close_pool", fake_close_pool, raising=False)
+
+    await load_jobs._main_async(
+        SimpleNamespace(
+            stage="all",
+            input=Path("jobs.csv"),
+            limit=2,
+            embed_batch_size=3,
+        )
+    )
+
+    assert calls == [
+        ("jobs", Path("jobs.csv"), 2),
+        ("chunks", 2, 3),
+        ("close_pool",),
+    ]
 
 
 @pytest.mark.asyncio

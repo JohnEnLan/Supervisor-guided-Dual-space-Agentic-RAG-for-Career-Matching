@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.config import settings
+from app.db.vector import to_pgvector
 from app.llm.qwen_embed import embed_one, embed_texts
 
 
@@ -363,7 +364,7 @@ async def search_raptor_nodes(
             f"expected {settings.embed_dim}"
         )
 
-    query_vector = _to_vector_literal(query_emb)
+    query_vector = to_pgvector(query_emb)
     async with pool.acquire() as conn:
         node_rows = await conn.fetch(
             """
@@ -528,7 +529,7 @@ async def _upsert_nodes(
             node.title,
             node.content,
             node.source_job_ids,
-            _to_vector_literal(list(embedding)),
+            to_pgvector(list(embedding)),
         )
         for node, embedding in zip(nodes, embeddings, strict=True)
     ]
@@ -671,7 +672,3 @@ def _value(row: Mapping[str, Any], key: str) -> Any:
         if get is not None:
             return get(key)
     return None
-
-
-def _to_vector_literal(values: list[float]) -> str:
-    return "[" + ",".join(f"{float(value):.10g}" for value in values) + "]"

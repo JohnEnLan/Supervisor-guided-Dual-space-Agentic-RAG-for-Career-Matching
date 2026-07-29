@@ -13,10 +13,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
@@ -30,8 +33,8 @@ SYSTEM_PROMPT = """You normalize resumes for an evidence-grounded career RAG sys
 Return only valid JSON. Do not invent facts.
 
 You will receive evidence spans extracted from the original resume. Use only
-those spans. Every education, experience, project, and resume issue item should
-include evidence_span_ids when possible.
+those spans. Every education, experience, project, skill, and resume issue item
+must include evidence_span_ids. Omit any fact that cannot cite a supplied span.
 
 Return this JSON shape:
 {
@@ -68,7 +71,12 @@ Return this JSON shape:
       "evidence_span_ids": [string]
     }
   ],
-  "skills": [string],
+  "skills": [
+    {
+      "skill": string,
+      "evidence_span_ids": [string]
+    }
+  ],
   "resume_quality_issues": [
     {
       "issue": string,
@@ -104,7 +112,7 @@ class LLMResumePayload(BaseModel):
     education: list[dict[str, Any]] = Field(default_factory=list)
     experience: list[dict[str, Any]] = Field(default_factory=list)
     projects: list[dict[str, Any]] = Field(default_factory=list)
-    skills: list[str] = Field(default_factory=list)
+    skills: list[dict[str, Any] | str] = Field(default_factory=list)
     resume_quality_issues: list[dict[str, Any] | str] = Field(default_factory=list)
     normalized_base_resume: str = ""
 
@@ -137,8 +145,21 @@ def _read_pdf(path: Path) -> tuple[str, int]:
 
 def _read_docx(path: Path) -> tuple[str, int]:
     doc = Document(str(path))
-    paragraphs = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
-    return _compact_text("\n".join(paragraphs)), 1
+    parts: list[str] = []
+    for block in doc.iter_inner_content():
+        if isinstance(block, Paragraph):
+            if block.text.strip():
+                parts.append(block.text)
+            continue
+        if isinstance(block, Table):
+            for row in block.rows:
+                for cell in row.cells:
+                    parts.extend(
+                        paragraph.text
+                        for paragraph in cell.paragraphs
+                        if paragraph.text.strip()
+                    )
+    return _compact_text("\n".join(parts)), 1
 
 
 def _read_text(path: Path) -> tuple[str, int]:
@@ -251,16 +272,159 @@ def _normalize_quality_issues(values: list[dict[str, Any] | str]) -> list[str]:
             issue = str(value.get("issue", "")).strip()
             spans = value.get("evidence_span_ids") or []
             span_suffix = f" evidence={spans}" if spans else ""
-            text = f"{severity}: {issue}{span_suffix}".strip()
+            verification = str(value.get("verification_status") or "").strip()
+            verification_prefix = (
+                f"{verification}: " if verification == "unverified" else ""
+            )
+            text = (
+                f"{verification_prefix}{severity}: {issue}{span_suffix}"
+            ).strip()
         if text:
             issues.append(text)
     return issues
 
 
+def _validated_span_ids(values: Any, valid_ids: set[str]) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    for value in values:
+        span_id = str(value).strip()
+        if span_id in valid_ids and span_id not in result:
+            result.append(span_id)
+    return result
+
+
+def _validated_fact_items(
+    values: Any,
+    valid_ids: set[str],
+    evidence_text_by_id: dict[str, str],
+    *,
+    reject_unsupported: bool = True,
+) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        evidence_span_ids = _validated_span_ids(
+            value.get("evidence_span_ids"),
+            valid_ids,
+        )
+        if not evidence_span_ids:
+            continue
+        supported = _fact_is_supported(
+            value,
+            evidence_span_ids,
+            evidence_text_by_id,
+        )
+        if reject_unsupported and not supported:
+            continue
+        result.append(
+            {
+                **value,
+                "evidence_span_ids": evidence_span_ids,
+                **(
+                    {"verification_status": "unverified"}
+                    if not supported
+                    else {}
+                ),
+            }
+        )
+    return result
+
+
+def _validated_skills(
+    values: Any,
+    valid_ids: set[str],
+    evidence_text_by_id: dict[str, str],
+) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    verified: list[str] = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        evidence_span_ids = _validated_span_ids(
+            value.get("evidence_span_ids"),
+            valid_ids,
+        )
+        if not evidence_span_ids:
+            continue
+        skill = str(value.get("skill") or value.get("name") or "").strip()
+        if skill and _claim_is_supported(
+            skill,
+            evidence_span_ids,
+            evidence_text_by_id,
+        ):
+            verified.append(skill)
+    return _clean_string_list(verified)
+
+
+def _fact_is_supported(
+    value: dict[str, Any],
+    evidence_span_ids: list[str],
+    evidence_text_by_id: dict[str, str],
+) -> bool:
+    claims = _claim_strings(value)
+    return bool(claims) and all(
+        _claim_is_supported(
+            claim,
+            evidence_span_ids,
+            evidence_text_by_id,
+        )
+        for claim in claims
+    )
+
+
+def _claim_strings(value: Any, *, field_name: str | None = None) -> list[str]:
+    if field_name in {"evidence_span_ids", "severity", "verification_status"}:
+        return []
+    if isinstance(value, dict):
+        return [
+            claim
+            for key, item in value.items()
+            for claim in _claim_strings(item, field_name=key)
+        ]
+    if isinstance(value, list):
+        return [
+            claim
+            for item in value
+            for claim in _claim_strings(item, field_name=field_name)
+        ]
+    if isinstance(value, (str, int, float)):
+        text = str(value).strip()
+        return [text] if text else []
+    return []
+
+
+def _claim_is_supported(
+    claim: str,
+    evidence_span_ids: list[str],
+    evidence_text_by_id: dict[str, str],
+) -> bool:
+    normalized_claim = _normalize_for_evidence_match(claim)
+    source = _normalize_for_evidence_match(
+        " ".join(
+            evidence_text_by_id[span_id]
+            for span_id in evidence_span_ids
+            if span_id in evidence_text_by_id
+        )
+    )
+    return bool(normalized_claim) and normalized_claim in source
+
+
+def _normalize_for_evidence_match(value: str) -> str:
+    return " ".join(re.findall(r"\w+", value.casefold()))
+
+
 def _build_user_prompt(raw_text: str, evidence_spans: list[EvidenceSpan]) -> str:
     payload = {
+        "retained_resume_text": "\n\n".join(
+            f"[{span.span_id}] {span.text}" for span in evidence_spans
+        ),
         "evidence_spans": [span.model_dump() for span in evidence_spans],
-        "raw_resume_text": raw_text[:14000],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -273,14 +437,46 @@ async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan
         json_mode=True,
     )
     parsed = LLMResumePayload.model_validate(_extract_json(raw))
+    valid_ids = {span.span_id for span in evidence_spans}
+    evidence_text_by_id = {
+        span.span_id: span.text
+        for span in evidence_spans
+    }
+    education = _validated_fact_items(
+        parsed.education,
+        valid_ids,
+        evidence_text_by_id,
+    )
+    experience = _validated_fact_items(
+        parsed.experience,
+        valid_ids,
+        evidence_text_by_id,
+    )
+    projects = _validated_fact_items(
+        parsed.projects,
+        valid_ids,
+        evidence_text_by_id,
+    )
+    quality_issues = _validated_fact_items(
+        parsed.resume_quality_issues,
+        valid_ids,
+        evidence_text_by_id,
+        reject_unsupported=False,
+    )
     return ResumeState(
-        education=parsed.education,
-        experience=parsed.experience,
-        projects=parsed.projects,
-        skills=_clean_string_list(parsed.skills),
-        resume_quality_issues=_normalize_quality_issues(parsed.resume_quality_issues),
+        education=education,
+        experience=experience,
+        projects=projects,
+        skills=_validated_skills(
+            parsed.skills,
+            valid_ids,
+            evidence_text_by_id,
+        ),
+        resume_quality_issues=_normalize_quality_issues(quality_issues),
         original_evidence_spans=[span.model_dump() for span in evidence_spans],
-        normalized_base_resume=parsed.normalized_base_resume.strip(),
+        normalized_base_resume=_compact_text(
+            "\n".join(span.text for span in evidence_spans)
+        ),
     )
 
 

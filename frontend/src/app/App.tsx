@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Activity, BriefcaseBusiness, Gauge, ShieldCheck } from "lucide-react";
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { api } from "../api/queries";
@@ -92,8 +92,4 @@ export function RouteError() {
       <NavLink className="button primary" to="/">返回首页</NavLink>
     </section>
   );
-}
-
-export function PlaceholderPage({ title, children }: { title: string; children?: ReactNode }) {
-  return <section><p className="eyebrow">Career RAG</p><h1>{title}</h1>{children}</section>;
 }

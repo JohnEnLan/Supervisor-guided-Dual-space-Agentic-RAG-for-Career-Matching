@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from copy import deepcopy
 from pathlib import Path
 import re
 
@@ -29,7 +30,8 @@ from app.db.state_store import (
     confirm_resume,
     get_resume_metadata,
     load_state,
-    mark_resume_normalized,
+    mutate_state_atomically,
+    save_normalized_resume,
     save_state,
 )
 from app.domain.match_brief import create_match_brief
@@ -39,6 +41,20 @@ from app.state.schema import SharedState
 
 
 router = APIRouter()
+_INTENT_CAREER_FIELDS = (
+    "current_goal",
+    "long_term_goal",
+    "hard_constraints",
+    "soft_preferences",
+    "avoid_roles",
+    "intent_mode",
+    "intent_consulted",
+    "intent_assistant_message",
+    "intent_directions",
+    "intent_needs_clarification",
+    "intent_clarification_question",
+    "intent_clarification_used",
+)
 
 
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
@@ -158,6 +174,7 @@ async def consult_intent(
     state = await load_state(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="session_id not found")
+    supervisor_log_start = len(state.supervisor_log)
     try:
         updated = await run_visible_intent_consultation(
             state,
@@ -174,8 +191,26 @@ async def consult_intent(
         if updated.career_state.intent_needs_clarification
         else "intent_consulted"
     )
-    await save_state(updated, status=status)
-    projection = project_intent_consultation(updated)
+    new_supervisor_entries = updated.supervisor_log[supervisor_log_start:]
+
+    def persist_intent(latest: SharedState) -> SharedState:
+        for field_name in _INTENT_CAREER_FIELDS:
+            setattr(
+                latest.career_state,
+                field_name,
+                deepcopy(getattr(updated.career_state, field_name)),
+            )
+        for entry in new_supervisor_entries:
+            if entry not in latest.supervisor_log:
+                latest.supervisor_log.append(deepcopy(entry))
+        return latest.model_copy(deep=True)
+
+    persisted = await mutate_state_atomically(
+        session_id=session_id,
+        mutator=persist_intent,
+        status=status,
+    )
+    projection = project_intent_consultation(persisted)
     return IntentConsultResponse.model_validate(projection.model_dump())
 
 
@@ -205,14 +240,20 @@ async def build_match_brief(
         clarification_question=request.clarification_question,
         plan_version=1,
     )
-    state = await load_state(session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="session_id not found")
-    state.career_state.current_goal = [request.career_goal]
-    state.career_state.hard_constraints = dict(request.hard_constraints)
-    state.career_state.soft_preferences = dict(request.soft_preferences)
-    state.career_state.avoid_roles = list(request.avoid_roles)
-    await save_state(state, status="match_brief_approved")
+    def persist_match_brief(state: SharedState) -> None:
+        state.career_state.current_goal = [request.career_goal]
+        state.career_state.hard_constraints = dict(request.hard_constraints)
+        state.career_state.soft_preferences = dict(request.soft_preferences)
+        state.career_state.avoid_roles = list(request.avoid_roles)
+
+    try:
+        await mutate_state_atomically(
+            session_id=session_id,
+            mutator=persist_match_brief,
+            status="match_brief_approved",
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session_id not found") from None
     try:
         run = await create_run(session_id=session_id)
     except RunConflict as exc:
@@ -235,15 +276,25 @@ async def _normalize_resume(
             user_id=user_id,
             save_to_db=False,
         )
-        await save_state(result.state, status="resume_normalized")
         digest = hashlib.sha256(
             result.raw_text.encode("utf-8", errors="ignore")
         ).hexdigest()
-        await mark_resume_normalized(session_id=session_id, content_hash=digest)
+        await save_normalized_resume(
+            session_id=session_id,
+            resume_state=result.state.resume_state,
+            content_hash=digest,
+        )
     except Exception:
-        state = await load_state(session_id)
-        if state is not None:
-            await save_state(state, status="resume_error")
+        try:
+            await mutate_state_atomically(
+                session_id=session_id,
+                mutator=lambda _state: None,
+                status="resume_error",
+            )
+        except KeyError:
+            pass
+    finally:
+        resume_path.unlink(missing_ok=True)
 
 
 def _education_preview(item: dict) -> ResumeEducationPreview:
@@ -322,4 +373,18 @@ def _redact_contact_text(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    return re.sub(r"(?<!\w)(?:\+?\d[\d ()-]{7,}\d)(?!\w)", "[phone hidden]", text)
+
+    def redact_phone(match: re.Match[str]) -> str:
+        candidate = match.group(0)
+        if re.fullmatch(
+            r"(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}",
+            candidate.strip(),
+        ):
+            return candidate
+        return "[phone hidden]"
+
+    return re.sub(
+        r"(?<!\w)(?:\+?\d[\d ()-]{7,}\d)(?!\w)",
+        redact_phone,
+        text,
+    )

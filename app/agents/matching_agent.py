@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, Awaitable, Callable
 
 from app.agents.base import BaseAgent
@@ -124,6 +125,11 @@ async def run_matching_agent(
     candidates = await selected_search(
         **search_kwargs,
     )
+    candidates, avoid_filter_log = _filter_avoided_roles(
+        candidates,
+        state.career_state.avoid_roles,
+    )
+    state.retrieval_state.filter_log.extend(avoid_filter_log)
     _write_retrieval_state(state, candidates)
     state = await MatchingAgent(candidates).run(state)
     if retrieval_plan.get("parallel_explanations", True):
@@ -137,6 +143,52 @@ async def run_matching_agent(
 
 def _resolve_search_fn(search_fn: SearchFn | None) -> SearchFn:
     return search_fn or dual_space_search
+
+
+def _filter_avoided_roles(
+    candidates: list[JobCandidate],
+    avoid_roles: list[str],
+) -> tuple[list[JobCandidate], list[str]]:
+    avoided_token_sequences = [
+        (str(role).strip().casefold(), _role_tokens(str(role)))
+        for role in avoid_roles
+        if _role_tokens(str(role))
+    ]
+    if not avoided_token_sequences:
+        return candidates, []
+
+    kept: list[JobCandidate] = []
+    filter_log: list[str] = []
+    for candidate in candidates:
+        title_tokens = _role_tokens(candidate.title or "")
+        matched_role = next(
+            (
+                label
+                for label, avoided_tokens in avoided_token_sequences
+                if _contains_token_sequence(title_tokens, avoided_tokens)
+            ),
+            None,
+        )
+        if matched_role is None:
+            kept.append(candidate)
+            continue
+        filter_log.append(f"avoid_role:{candidate.job_id}:{matched_role}")
+    return kept, filter_log
+
+
+def _role_tokens(value: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"\w+", value.casefold()))
+
+
+def _contains_token_sequence(
+    title_tokens: tuple[str, ...],
+    avoided_tokens: tuple[str, ...],
+) -> bool:
+    size = len(avoided_tokens)
+    return any(
+        title_tokens[index : index + size] == avoided_tokens
+        for index in range(len(title_tokens) - size + 1)
+    )
 
 
 async def enrich_top_match_explanations(

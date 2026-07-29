@@ -298,13 +298,29 @@ def test_intent_consult_route_persists_and_returns_safe_projection(
         current.career_state.current_goal = ["Data analyst"]
         return current
 
-    async def save(current: SharedState, status: str):
-        saved.append((current.model_copy(deep=True), status))
+    async def mutate(*, session_id: str, mutator, status: str):
+        assert session_id == "session-1"
+        latest = state.model_copy(deep=True)
+        latest.feedback_state.user_feedback.append(
+            {"feedback_id": 9, "job_id": "job-9", "outcome": "offer"}
+        )
+        result = mutator(latest)
+        saved.append((latest.model_copy(deep=True), status))
+        return result
+
+    async def forbidden_save(*_args, **_kwargs):
+        raise AssertionError("intent consultation must not whole-save stale state")
 
     monkeypatch.setattr(sessions, "get_resume_metadata", metadata)
     monkeypatch.setattr(sessions, "load_state", load)
     monkeypatch.setattr(sessions, "run_visible_intent_consultation", consult, raising=False)
-    monkeypatch.setattr(sessions, "save_state", save)
+    monkeypatch.setattr(
+        sessions,
+        "mutate_state_atomically",
+        mutate,
+        raising=False,
+    )
+    monkeypatch.setattr(sessions, "save_state", forbidden_save)
 
     with _client() as client:
         response = client.post(
@@ -320,6 +336,7 @@ def test_intent_consult_route_persists_and_returns_safe_projection(
     assert response.status_code == 200
     assert response.json()["current_goal"] == ["Data analyst"]
     assert saved[0][1] == "intent_consulted"
+    assert saved[0][0].feedback_state.user_feedback[0]["feedback_id"] == 9
     assert "private-user" not in response.text
 
 

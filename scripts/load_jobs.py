@@ -24,7 +24,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import settings
-from app.db.pool import get_pool
+from app.db.pool import close_pool, get_pool
+from app.db.vector import to_pgvector
 from app.llm.deepseek import chat
 from app.llm.qwen_embed import embed_texts
 
@@ -70,15 +71,6 @@ class ParsedJob:
     required_skills: list[str]
     nice_to_have: list[str]
     raw_jd: str
-
-
-@dataclass(frozen=True)
-class JobChunk:
-    chunk_id: str
-    job_id: str
-    field: str
-    content: str
-    embedding: list[float]
 
 
 def _nonempty(value: Any) -> str | None:
@@ -307,10 +299,6 @@ def _read_rows(path: Path, limit: int) -> list[dict[str, str]]:
     return rows[:limit]
 
 
-def _vector_literal(vector: list[float]) -> str:
-    return "[" + ",".join(f"{value:.8f}" for value in vector) + "]"
-
-
 def _compact_text(value: Any) -> str | None:
     text = _nonempty(value)
     if text is None:
@@ -438,7 +426,7 @@ async def build_job_chunks(limit: int, batch_size: int) -> int:
             job_id,
             field,
             content,
-            _vector_literal(embedding),
+            to_pgvector(embedding),
         )
         for (chunk_id, job_id, field, content), embedding in zip(chunk_inputs, embeddings, strict=True)
     ]
@@ -485,6 +473,18 @@ async def load_jobs(path: Path, limit: int) -> int:
     return len(parsed_jobs)
 
 
+async def _main_async(args: argparse.Namespace) -> None:
+    try:
+        if args.stage in {"jobs", "all"}:
+            count = await load_jobs(args.input, args.limit)
+            print(f"Inserted/updated {count} jobs into jobs table.")
+        if args.stage in {"chunks", "all"}:
+            count = await build_job_chunks(args.limit, args.embed_batch_size)
+            print(f"Inserted/updated {count} chunks into job_chunks table.")
+    finally:
+        await close_pool()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Load LinkedIn JD sample into jobs table.")
     parser.add_argument(
@@ -503,12 +503,7 @@ def main() -> None:
     parser.add_argument("--embed-batch-size", default=10, type=int, help="Qwen embedding batch size.")
     args = parser.parse_args()
 
-    if args.stage in {"jobs", "all"}:
-        count = asyncio.run(load_jobs(args.input, args.limit))
-        print(f"Inserted/updated {count} jobs into jobs table.")
-    if args.stage in {"chunks", "all"}:
-        count = asyncio.run(build_job_chunks(args.limit, args.embed_batch_size))
-        print(f"Inserted/updated {count} chunks into job_chunks table.")
+    asyncio.run(_main_async(args))
 
 
 if __name__ == "__main__":

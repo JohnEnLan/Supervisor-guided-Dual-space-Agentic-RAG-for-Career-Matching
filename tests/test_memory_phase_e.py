@@ -530,6 +530,111 @@ async def test_mutate_state_atomically_locks_and_updates_state_without_status(
 
 
 @pytest.mark.asyncio
+async def test_mutate_state_atomically_can_update_status_in_same_transaction(
+    monkeypatch,
+):
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    calls = []
+    persisted = SharedState(session_id="s1", user_id="u1")
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def fetchrow(self, sql, *_args):
+            calls.append(("fetchrow", sql))
+            return {"state": persisted.model_dump_json()}
+
+        async def execute(self, sql, *args):
+            calls.append(("execute", sql, args))
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    await state_store.mutate_state_atomically(
+        session_id="s1",
+        mutator=lambda state: state.career_state.current_goal.append("new"),
+        status="intent_consulted",
+    )
+
+    update_sql, update_args = calls[2][1:]
+    assert "status = $2" in update_sql
+    assert update_args[1:] == ("intent_consulted", "s1")
+    assert calls[-1] == "transaction_exit"
+
+
+@pytest.mark.asyncio
+async def test_save_normalized_resume_updates_state_and_version_under_one_lock(
+    monkeypatch,
+):
+    from app.db import state_store
+    from app.state.schema import ResumeState, SharedState
+
+    calls = []
+    persisted = SharedState(session_id="s1", user_id="u1")
+    persisted.career_state.current_goal = ["keep concurrent goal"]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            calls.append("transaction_enter")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            calls.append("transaction_exit")
+            return False
+
+    class FakeConn:
+        def transaction(self):
+            return FakeTransaction()
+
+        async def fetchrow(self, sql, *args):
+            calls.append(("fetchrow", sql, args))
+            if "FOR UPDATE" in sql:
+                return {"state": persisted.model_dump_json()}
+            written = json.loads(args[0])
+            assert written["career_state"]["current_goal"] == [
+                "keep concurrent goal"
+            ]
+            assert written["resume_state"]["skills"] == ["Python"]
+            assert "resume_version = resume_version + 1" in sql
+            assert "status = 'resume_ready'" in sql
+            return {
+                "resume_version": 2,
+                "confirmed_resume_version": None,
+                "resume_content_hash": "sha256",
+                "resume_confirmed_at": None,
+            }
+
+    async def fake_get_pool():
+        return FakePool(FakeConn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    metadata = await state_store.save_normalized_resume(
+        session_id="s1",
+        resume_state=ResumeState(skills=["Python"]),
+        content_hash="sha256",
+    )
+
+    assert calls[0] == "transaction_enter"
+    assert "FOR UPDATE" in calls[1][1]
+    assert "UPDATE session_state" in calls[2][1]
+    assert calls[3] == "transaction_exit"
+    assert metadata["resume_version"] == 2
+
+
+@pytest.mark.asyncio
 async def test_stale_stage_save_preserves_concurrently_committed_feedback_state(
     monkeypatch,
 ):

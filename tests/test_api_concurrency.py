@@ -59,6 +59,17 @@ async def test_concurrent_match_sessions_keep_state_and_status_isolated(monkeypa
             statuses[state.session_id] = status
             save_events.append((state.session_id, status))
 
+    async def fake_mutate_state_atomically(*, session_id, mutator, status=None):
+        await asyncio.sleep(0)
+        async with lock:
+            state = store[session_id].model_copy(deep=True)
+            result = mutator(state)
+            store[session_id] = state
+            if status is not None:
+                statuses[session_id] = status
+                save_events.append((session_id, status))
+            return result
+
     async def fake_run_persisted_agentic_match_from_session(**kwargs):
         session_id = kwargs["session_id"]
         await asyncio.sleep(0)
@@ -97,6 +108,11 @@ async def test_concurrent_match_sessions_keep_state_and_status_isolated(monkeypa
     monkeypatch.setattr(routes, "load_state_with_status", fake_load_state_with_status)
     monkeypatch.setattr(routes, "load_state", fake_load_state)
     monkeypatch.setattr(routes, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
     monkeypatch.setattr(
         routes,
         "run_persisted_agentic_match_from_session",
@@ -260,7 +276,12 @@ async def test_twenty_v1_runs_keep_snapshots_and_results_isolated(
     monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
     monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
     monkeypatch.setattr(orchestrator, "final_verification", verify)
-    monkeypatch.setattr(orchestrator, "save_state", fail_shared_session_save)
+    monkeypatch.setattr(
+        orchestrator,
+        "save_state",
+        fail_shared_session_save,
+        raising=False,
+    )
     monkeypatch.setattr(orchestrator, "save_state_snapshot", save_snapshot)
     monkeypatch.setattr(orchestrator, "save_run_result", save_result)
     monkeypatch.setattr(orchestrator, "save_run_metrics", no_op)

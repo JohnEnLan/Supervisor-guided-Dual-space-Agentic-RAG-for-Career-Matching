@@ -8,6 +8,50 @@ from app.state.schema import CareerState, ResumeState, SharedState
 
 
 @pytest.mark.asyncio
+async def test_persist_stage_state_atomically_updates_only_owned_fields(monkeypatch):
+    from app.agents import orchestrator
+
+    latest = SharedState(session_id="session-1", user_id="user-1")
+    latest.retrieval_state.candidate_job_ids = ["concurrent-job"]
+    latest.feedback_state.user_feedback = [
+        {"feedback_id": 5, "job_id": "job-5", "outcome": "offer"}
+    ]
+    latest.supervisor_log = [{"stage": "feedback_closure", "feedback_id": 5}]
+
+    incoming = SharedState(session_id="session-1", user_id="user-1")
+    incoming.career_state.current_goal = ["Data analyst"]
+    incoming.retrieval_state.candidate_job_ids = ["stale-job"]
+    incoming.supervisor_log = [{"stage": "intent_agent"}]
+    calls = []
+
+    async def mutate(*, session_id: str, mutator, status: str):
+        calls.append((session_id, status))
+        return mutator(latest)
+
+    monkeypatch.setattr(
+        orchestrator,
+        "mutate_state_atomically",
+        mutate,
+        raising=False,
+    )
+
+    persisted = await orchestrator._persist_stage_state(
+        incoming,
+        status="intent_done",
+        owned_fields=("career_state",),
+    )
+
+    assert calls == [("session-1", "intent_done")]
+    assert persisted.career_state.current_goal == ["Data analyst"]
+    assert persisted.retrieval_state.candidate_job_ids == ["concurrent-job"]
+    assert persisted.feedback_state.user_feedback[0]["feedback_id"] == 5
+    assert persisted.supervisor_log == [
+        {"stage": "feedback_closure", "feedback_id": 5},
+        {"stage": "intent_agent"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_supervisor_harness_surrounds_all_agents_and_publication(monkeypatch) -> None:
     from app.agents import orchestrator
 
@@ -186,7 +230,7 @@ async def test_run_orchestrator_keeps_approved_hard_constraints_locked(monkeypat
     monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
     monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
     monkeypatch.setattr(orchestrator, "final_verification", verify)
-    monkeypatch.setattr(orchestrator, "save_state", no_op)
+    monkeypatch.setattr(orchestrator, "save_state", no_op, raising=False)
     monkeypatch.setattr(orchestrator, "save_state_snapshot", snapshot)
     monkeypatch.setattr(orchestrator, "save_run_result", no_op)
     monkeypatch.setattr(orchestrator, "save_run_metrics", no_op)
@@ -269,7 +313,7 @@ async def test_consulted_run_skips_duplicate_intent_agent(monkeypatch) -> None:
     monkeypatch.setattr(orchestrator, "run_matching_agent", same_state)
     monkeypatch.setattr(orchestrator, "run_strategy_agent", same_state)
     monkeypatch.setattr(orchestrator, "final_verification", verify)
-    monkeypatch.setattr(orchestrator, "save_state", no_op)
+    monkeypatch.setattr(orchestrator, "save_state", no_op, raising=False)
     monkeypatch.setattr(orchestrator, "save_state_snapshot", no_op)
     monkeypatch.setattr(orchestrator, "save_run_result", no_op)
     monkeypatch.setattr(

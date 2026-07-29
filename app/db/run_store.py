@@ -14,6 +14,26 @@ class RunConflict(ValueError):
     """The stored run no longer satisfies the requested state transition."""
 
 
+async def recover_stale_runs(*, stale_after_seconds: int) -> int:
+    if stale_after_seconds < 1:
+        raise ValueError("stale_after_seconds must be positive")
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        command_tag = await connection.execute(
+            """
+            UPDATE match_runs
+            SET status = 'stale',
+                error_code = 'process_restarted',
+                finished_at = COALESCE(finished_at, now()),
+                updated_at = now()
+            WHERE status IN ('queued', 'running')
+              AND updated_at < now() - ($1 * interval '1 second')
+            """,
+            stale_after_seconds,
+        )
+    return int(str(command_tag).rsplit(" ", 1)[-1])
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)

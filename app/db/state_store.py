@@ -12,7 +12,7 @@ from app.memory.case_base import (
     normalize_case_soft_preferences,
 )
 from app.memory.feedback import normalize_application_outcome
-from app.state.schema import SharedState
+from app.state.schema import ResumeState, SharedState
 
 
 MutationResult = TypeVar("MutationResult")
@@ -130,6 +130,41 @@ async def mark_resume_normalized(
     return {"exists": True, **dict(row)}
 
 
+async def save_normalized_resume(
+    *,
+    session_id: str,
+    resume_state: ResumeState,
+    content_hash: str,
+) -> dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            state = await _load_locked_state(conn, session_id)
+            state.resume_state = resume_state.model_copy(deep=True)
+            row = await conn.fetchrow(
+                """
+                UPDATE session_state
+                SET state = $1::jsonb,
+                    resume_version = resume_version + 1,
+                    confirmed_resume_version = NULL,
+                    resume_content_hash = $2,
+                    resume_confirmed_at = NULL,
+                    status = 'resume_ready',
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = $3
+                RETURNING resume_version, confirmed_resume_version,
+                          resume_content_hash, resume_confirmed_at
+                """,
+                state.model_dump_json(),
+                content_hash,
+                session_id,
+            )
+    if row is None:
+        raise KeyError(session_id)
+    return {"exists": True, **dict(row)}
+
+
 async def confirm_resume(*, session_id: str) -> dict[str, Any]:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -152,14 +187,17 @@ async def confirm_resume(*, session_id: str) -> dict[str, Any]:
 
 
 async def mutate_state_atomically(
-    *, session_id: str, mutator: Callable[[SharedState], MutationResult]
+    *,
+    session_id: str,
+    mutator: Callable[[SharedState], MutationResult],
+    status: str | None = None,
 ) -> MutationResult:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             state = await _load_locked_state(conn, session_id)
             result = mutator(state)
-            await _write_locked_state(conn, state)
+            await _write_locked_state(conn, state, status=status)
             return result
 
 
@@ -339,7 +377,26 @@ def _merge_case_preferences(latest: dict, incoming: dict) -> dict:
     return merge_case_soft_preferences(merged, normalize_case_soft_preferences(incoming))
 
 
-async def _write_locked_state(conn: Any, state: SharedState) -> None:
+async def _write_locked_state(
+    conn: Any,
+    state: SharedState,
+    *,
+    status: str | None = None,
+) -> None:
+    if status is not None:
+        await conn.execute(
+            """
+            UPDATE session_state
+            SET state = $1::jsonb,
+                status = $2,
+                updated_at = now()
+            WHERE session_id = $3
+            """,
+            state.model_dump_json(),
+            status,
+            state.session_id,
+        )
+        return
     await conn.execute(
         """
         UPDATE session_state
