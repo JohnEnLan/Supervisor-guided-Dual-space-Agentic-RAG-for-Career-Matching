@@ -161,6 +161,32 @@ class RunStatusResponse(PublicDTO):
     updated_at: datetime
 
 
+class ConversationMessageResponse(PublicDTO):
+    seq: int = Field(ge=1)
+    persona: Literal["intent_consultant", "job_scout", "strategist", "pm"]
+    display_name: str
+    kind: Literal[
+        "intro",
+        "brief",
+        "progress",
+        "checkpoint",
+        "recovery",
+        "result",
+        "warning",
+        "error",
+    ]
+    text: str
+    stage: str
+
+
+class RunConversationResponse(PublicDTO):
+    run_id: str
+    status: str
+    stage: str | None = None
+    next_poll_ms: int | None = None
+    messages: list[ConversationMessageResponse] = Field(default_factory=list)
+
+
 class RunResultResponse(PublicDTO):
     run_id: str
     status: str

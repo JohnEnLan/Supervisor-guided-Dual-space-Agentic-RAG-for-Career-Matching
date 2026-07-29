@@ -153,6 +153,62 @@
         "title": "CaseEvidenceResponse",
         "type": "object"
       },
+      "ConversationMessageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "intro",
+              "brief",
+              "progress",
+              "checkpoint",
+              "recovery",
+              "result",
+              "warning",
+              "error"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "persona": {
+            "enum": [
+              "intent_consultant",
+              "job_scout",
+              "strategist",
+              "pm"
+            ],
+            "title": "Persona",
+            "type": "string"
+          },
+          "seq": {
+            "minimum": 1.0,
+            "title": "Seq",
+            "type": "integer"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "persona",
+          "display_name",
+          "kind",
+          "text",
+          "stage"
+        ],
+        "title": "ConversationMessageResponse",
+        "type": "object"
+      },
       "EvidenceItem": {
         "additionalProperties": false,
         "properties": {
@@ -1437,6 +1493,54 @@
         "title": "ResumeProjectPreview",
         "type": "object"
       },
+      "RunConversationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationMessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "next_poll_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Poll Ms"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunConversationResponse",
+        "type": "object"
+      },
       "RunExplainResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1875,6 +1979,45 @@
           }
         },
         "summary": "Monitoring Runs"
+      }
+    },
+    "/api/v1/runs/{run_id}/conversation": {
+      "get": {
+        "operationId": "run_conversation_api_v1_runs__run_id__conversation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Conversation"
       }
     },
     "/api/v1/runs/{run_id}/execute": {

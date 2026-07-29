@@ -22,6 +22,7 @@ PUBLIC_PATHS = {
     "/api/v1/sessions/{session_id}/match-brief",
     "/api/v1/runs/{run_id}/execute",
     "/api/v1/runs/{run_id}/status",
+    "/api/v1/runs/{run_id}/conversation",
     "/api/v1/runs/{run_id}/result",
     "/api/v1/runs/{run_id}/explain",
     "/api/v1/runs/{run_id}/reaction",
