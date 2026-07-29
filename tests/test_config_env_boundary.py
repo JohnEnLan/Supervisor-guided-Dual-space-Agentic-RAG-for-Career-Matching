@@ -48,3 +48,14 @@ def test_empty_env_file_override_disables_dotenv_loading() -> None:
 def test_provider_concurrency_must_be_positive(field_name: str) -> None:
     with pytest.raises(ValidationError):
         Settings(**{field_name: 0})
+
+
+def test_langgraph_defaults_enabled_with_documented_rollback() -> None:
+    settings = Settings()
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert settings.langgraph_orchestrator_enabled is True
+    assert "LANGGRAPH_ORCHESTRATOR_ENABLED=true" in example
+    assert "LANGGRAPH_STRICT_MSGPACK=true" in example
+    assert "false" in example.lower()
+    assert "旧" in example or "legacy" in example.lower()

@@ -93,6 +93,43 @@ async def test_recover_stale_runs_marks_old_queued_and_running_rows(monkeypatch)
     assert recovered == 3
 
 
+@pytest.mark.asyncio
+async def test_lists_only_terminal_run_ids_that_still_have_checkpoints(
+    monkeypatch,
+) -> None:
+    from app.db import run_store
+
+    connection = Connection(
+        fetch_results=[
+            [
+                {"run_id": "terminal-1"},
+                {"run_id": "terminal-2"},
+            ]
+        ]
+    )
+
+    async def get_pool():
+        return Pool(connection)
+
+    monkeypatch.setattr(run_store, "get_pool", get_pool)
+
+    run_ids = await run_store.list_terminal_checkpoint_thread_ids()
+
+    assert run_ids == ["terminal-1", "terminal-2"]
+    sql, args = connection.calls[0]
+    assert "checkpoints" in sql
+    assert "checkpoint_blobs" in sql
+    assert "checkpoint_writes" in sql
+    assert "status = ANY" in sql
+    assert set(args[0]) == {
+        "completed",
+        "completed_with_warnings",
+        "failed",
+        "cancelled",
+        "stale",
+    }
+
+
 def test_run_lifecycle_migration_is_additive_and_snapshot_based() -> None:
     sql = (
         ROOT / "app/db/migrations/0002_run_lifecycle.sql"

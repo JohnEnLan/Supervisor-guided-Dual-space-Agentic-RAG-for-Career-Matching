@@ -7,7 +7,13 @@ from typing import Any
 
 from app.db.pool import get_pool
 from app.domain.match_brief import MatchBrief, compute_plan_hash
-from app.domain.run import MatchRun, RunStage, RunStatus, can_transition
+from app.domain.run import (
+    TERMINAL_STATUSES,
+    MatchRun,
+    RunStage,
+    RunStatus,
+    can_transition,
+)
 
 
 class RunConflict(ValueError):
@@ -32,6 +38,31 @@ async def recover_stale_runs(*, stale_after_seconds: int) -> int:
             stale_after_seconds,
         )
     return int(str(command_tag).rsplit(" ", 1)[-1])
+
+
+async def list_terminal_checkpoint_thread_ids() -> list[str]:
+    pool = await get_pool()
+    terminal_statuses = sorted(status.value for status in TERMINAL_STATUSES)
+    async with pool.acquire() as connection:
+        rows = await connection.fetch(
+            """
+            WITH checkpoint_threads AS (
+                SELECT thread_id FROM public.checkpoints
+                UNION
+                SELECT thread_id FROM public.checkpoint_blobs
+                UNION
+                SELECT thread_id FROM public.checkpoint_writes
+            )
+            SELECT DISTINCT runs.run_id
+            FROM match_runs AS runs
+            INNER JOIN checkpoint_threads AS checkpoint
+                ON checkpoint.thread_id = runs.run_id
+            WHERE runs.status = ANY($1::text[])
+            ORDER BY runs.run_id
+            """,
+            terminal_statuses,
+        )
+    return [str(row["run_id"]) for row in rows]
 
 
 def _json_value(value: Any) -> Any:

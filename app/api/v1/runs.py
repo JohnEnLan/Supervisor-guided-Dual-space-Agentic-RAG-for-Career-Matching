@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from app.agents.orchestrator import run_persisted_agentic_match_run
 from app.agents.trace import (
@@ -50,6 +50,7 @@ async def execute_run(
     run_id: str,
     request: ExecuteRunRequest,
     background_tasks: BackgroundTasks,
+    http_request: Request,
 ) -> RunStatusResponse:
     try:
         run = await queue_run(
@@ -59,7 +60,13 @@ async def execute_run(
         )
     except RunConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    background_tasks.add_task(_select_run_executor(), run_id=run_id)
+    executor = _select_run_executor()
+    execution_kwargs = {"run_id": run_id}
+    if settings.langgraph_orchestrator_enabled:
+        execution_kwargs["checkpointer"] = (
+            http_request.app.state.langgraph_checkpointer
+        )
+    background_tasks.add_task(executor, **execution_kwargs)
     return _status_response(run)
 
 

@@ -269,6 +269,58 @@ def test_execute_rejects_stale_plan(monkeypatch) -> None:
     assert response.status_code == 409
 
 
+@pytest.mark.asyncio
+async def test_execute_graph_path_passes_lifespan_checkpointer_to_runner(
+    monkeypatch,
+) -> None:
+    from fastapi import BackgroundTasks
+
+    from app.api.v1 import runs
+    from app.api.v1.schemas import ExecuteRunRequest
+
+    queued = _run(status=RunStatus.QUEUED)
+    checkpointer = object()
+
+    async def queue(**_kwargs):
+        return queued
+
+    async def graph_executor(*, run_id: str, checkpointer):
+        del run_id, checkpointer
+
+    monkeypatch.setattr(runs, "queue_run", queue)
+    monkeypatch.setattr(runs, "run_graph_match", graph_executor)
+    monkeypatch.setattr(
+        runs.settings,
+        "langgraph_orchestrator_enabled",
+        True,
+    )
+    background_tasks = BackgroundTasks()
+    http_request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(langgraph_checkpointer=checkpointer)
+        )
+    )
+
+    response = await runs.execute_run(
+        run_id="run-1",
+        request=ExecuteRunRequest(
+            plan_version=1,
+            plan_hash="a" * 64,
+        ),
+        background_tasks=background_tasks,
+        http_request=http_request,
+    )
+
+    assert response.status == RunStatus.QUEUED.value
+    assert len(background_tasks.tasks) == 1
+    task = background_tasks.tasks[0]
+    assert task.func is graph_executor
+    assert task.kwargs == {
+        "run_id": "run-1",
+        "checkpointer": checkpointer,
+    }
+
+
 def test_resume_confirm_distinguishes_missing_session(monkeypatch) -> None:
     from app.api.v1 import sessions
 

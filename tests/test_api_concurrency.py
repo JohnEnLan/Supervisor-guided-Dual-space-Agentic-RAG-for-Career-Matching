@@ -417,6 +417,11 @@ async def test_twenty_competing_executes_queue_a_run_once(monkeypatch):
     queue_lock = asyncio.Lock()
     queued = False
     queue_successes = 0
+    monkeypatch.setattr(
+        run_routes.settings,
+        "langgraph_orchestrator_enabled",
+        False,
+    )
 
     async def queue_run(*, run_id: str, plan_version: int, plan_hash: str):
         nonlocal queued, queue_successes
