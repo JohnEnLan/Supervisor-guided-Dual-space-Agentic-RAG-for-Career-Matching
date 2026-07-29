@@ -79,7 +79,10 @@ export function RunPage() {
       <CheckCircle2 size={48} />
       <p className="eyebrow">运行已完成</p><h1>推荐与证据已经准备好</h1>
       {data.warning_codes?.length ? <div className="notice warning"><AlertTriangle /><span>结果可查看，但包含提醒：{data.warning_codes.join("、")}</span></div> : null}
-      <Link className="button primary" to={`/runs/${runId}/results`}>查看完整结果<ArrowRight size={18} /></Link>
+      <div className="button-row">
+        <Link className="button primary" to={`/runs/${runId}/results`}>查看完整结果<ArrowRight size={18} /></Link>
+        <Link className="button secondary" to={`/runs/${runId}/chat`}>回看服务群对话</Link>
+      </div>
     </section>
   );
   if (isFailed) return (
@@ -92,6 +95,7 @@ export function RunPage() {
       <p className="eyebrow">Run {runId.slice(0, 8)}</p>
       <h1>{copy.title}</h1><p className="lead">{copy.description}</p>
       <dl className="run-facts"><div><dt>当前阶段</dt><dd>{data.stage ?? data.status}</dd></div><div><dt>已完成阶段</dt><dd>{data.completed_stages?.length ?? 0} / {data.total_stages}</dd></div><div><dt>状态恢复</dt><dd>可安全刷新</dd></div></dl>
+      <Link className="button secondary" to={`/runs/${runId}/chat`}>以服务群对话视角查看</Link>
       {execute.isError && !(execute.error instanceof ApiError && execute.error.status === 409) ? <div className="notice error"><AlertTriangle /><div><strong>执行请求暂时失败</strong><p>运行仍保留在计划就绪状态，可以安全重试同一个运行。</p><button className="secondary" type="button" onClick={() => { if (data.plan_hash) executeRun({ plan_version: data.plan_version, plan_hash: data.plan_hash }); }}><RefreshCw size={17} />重试执行</button></div></div> : null}
     </section>
   );
