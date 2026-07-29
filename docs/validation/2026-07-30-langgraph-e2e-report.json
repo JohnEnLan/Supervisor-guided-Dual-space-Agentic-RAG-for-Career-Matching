@@ -1,0 +1,136 @@
+{
+  "steps": [
+    {
+      "step": "capabilities",
+      "caps": {
+        "api_version": "v1",
+        "dual_space_enabled": true,
+        "explain_enabled": false,
+        "monitoring_enabled": false,
+        "execution_durability": "process_local"
+      }
+    },
+    {
+      "step": "session_created",
+      "session_id": "a420a369-699a-425d-9436-5c9ed981bf5a"
+    },
+    {
+      "step": "resume_uploaded",
+      "status": {
+        "session_id": "a420a369-699a-425d-9436-5c9ed981bf5a",
+        "status": "resume_queued"
+      }
+    },
+    {
+      "step": "resume_preview",
+      "education": 1,
+      "experience": 2,
+      "skills": 19,
+      "evidence_spans": 0
+    },
+    {
+      "step": "resume_confirmed",
+      "resp": {
+        "session_id": "a420a369-699a-425d-9436-5c9ed981bf5a",
+        "resume_version": 1,
+        "confirmed": true,
+        "confirmed_at": "2026-07-29T18:44:04.969171Z"
+      }
+    },
+    {
+      "step": "intent_consult",
+      "keys": [
+        "session_id",
+        "mode",
+        "assistant_message",
+        "current_goal",
+        "long_term_goal",
+        "hard_constraints",
+        "soft_preferences",
+        "avoid_roles",
+        "directions",
+        "needs_clarification",
+        "clarification_question",
+        "clarification_used"
+      ],
+      "needs_clarification": true,
+      "question": "Are you open to bridge roles such as Software Support Specialist or DevOps Engineer if direct backend roles are scarce?"
+    },
+    {
+      "step": "clarification_answered",
+      "needs_clarification": false
+    },
+    {
+      "step": "brief_created",
+      "run_id": "e883e957-1f8b-4978-9af5-cb2a4c6bbeb0",
+      "plan_version": 1
+    },
+    {
+      "step": "run_executing"
+    },
+    {
+      "step": "run_terminal",
+      "status": "completed",
+      "stage": "finalization",
+      "warnings": [],
+      "error": null
+    },
+    {
+      "step": "conversation",
+      "n_messages": 8,
+      "personas": [
+        "intent_consultant",
+        "job_scout",
+        "pm",
+        "strategist"
+      ],
+      "sample": [
+        "项目经理·PM: 欢迎来到职业规划服务群。我是项目经理 PM，本次由需求顾问小意、岗位顾问小检和规划师小策协作，依次完成需求确认、岗位检索",
+        "需求顾问·小意: 我已复核本次 Match Brief：目标是“Find software engineer / backend deve",
+        "岗位顾问·小检: 岗位检索正在执行：SQL 硬过滤 → BM25/Dense 并行 → job_id 级 RRF 融合。硬约束由数据库严格"
+      ]
+    },
+    {
+      "step": "result",
+      "n_roles": 5,
+      "tiers": [
+        "stretch_fit",
+        "now_fit",
+        "bridge_role",
+        "bridge_role",
+        "stretch_fit"
+      ],
+      "titles": [
+        "Software Engineer",
+        "Software Support Specialist",
+        "Inside Customer Service Associate",
+        "General Laborer",
+        "Software Engineer"
+      ],
+      "first_evidence": [
+        {
+          "evidence_span_id": "175485704:responsibilities:2",
+          "field": "responsibilities",
+          "content": "Responsibilities: Develop and maintain high-quality PHP code for web-based application; collaborate on design and implementation of new features; troubleshoot and debug issues; contribute to technical roadmap; stay updated on industry trends."
+        }
+      ],
+      "n_resume_strategy": 4,
+      "n_skill_gaps": 4,
+      "n_career_path": 3,
+      "warnings": []
+    },
+    {
+      "step": "verdict",
+      "retrieval_returned_jobs": true,
+      "all_roles_have_jd_evidence": true,
+      "conversation_has_all_personas": true,
+      "terminal_status": "completed"
+    }
+  ],
+  "verdict": {
+    "retrieval_returned_jobs": true,
+    "all_roles_have_jd_evidence": true,
+    "conversation_has_all_personas": true,
+    "terminal_status": "completed"
+  }
+}

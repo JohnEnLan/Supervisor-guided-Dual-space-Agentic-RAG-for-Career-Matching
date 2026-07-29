@@ -133,7 +133,7 @@ $escapedPythonPath = $PythonPath.Replace("'", "''")
 $backendCommand = @"
 `$Host.UI.RawUI.WindowTitle = 'Career-RAG Backend'
 Set-Location -LiteralPath '$escapedProjectRoot'
-& '$escapedPythonPath' -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000 --reload
+& '$escapedPythonPath' -m app.serve --host 127.0.0.1 --port 8000 --reload
 "@
 
 $frontendCommand = @"

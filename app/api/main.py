@@ -1,5 +1,12 @@
 """FastAPI 入口。startup 建连接池，shutdown 关闭。无状态服务。"""
+import asyncio
+import sys
 from contextlib import asynccontextmanager
+
+# Windows 下 psycopg 异步模式无法运行在 ProactorEventLoop（uvicorn 默认），
+# 必须在事件循环创建前切换到 SelectorEventLoop；asyncpg 两种循环均兼容。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
