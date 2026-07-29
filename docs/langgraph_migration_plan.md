@@ -1,7 +1,11 @@
-# LangGraph 迁移计划书（v1 草案 · 待 Codex 对审）
+# LangGraph 迁移计划书（v2 定稿 · 已经 Codex 对审修订）
 
-> 状态：草案。流程：Claude 起草 → Codex 对审 → 修订定稿 → 在 `langgraph` 分支实施。
-> 配套宪法：`CLAUDE_LANGGRAPH.md`（langgraph 分支）。本文是"为什么与怎么做"，宪法是"红线"。
+> 状态：定稿。流程：Claude 起草 v1 → Codex 对审（判定：修订后执行）→ Claude 采纳修订 → 本 v2 为实施依据。
+> 配套宪法：`CLAUDE_LANGGRAPH.md`（langgraph 分支，随本次修订同步更新）。
+>
+> **本轮范围决断（指挥方裁定）**：实现"手动 checkpoint 续跑能力"（用测试证明进程重启后可从 checkpoint 续跑），
+> **不**实现自动恢复 worker/lease/启动重调度——那属于 Release-1 工程化（见 known_issues #10）。
+> 因此现有 279 项测试语义（含 `execution_durability="process_local"` 能力声明与启动 stale 回收）**零例外保留**。
 
 ---
 
@@ -22,9 +26,13 @@
 - **可解释性**：答辩时"自己写的每一行都能讲"优于"框架黑盒"。→ 缓解：主线不动，答辩以主线为准。
 - **约束表达**：我们的"每类恢复最多 1 次"在 LangGraph 里要用条件边 + 计数器显式表达，写错反而更隐蔽。→ 缓解：240 项既有测试作为行为不变量，图版必须全绿。
 
-### 1.3 结论
+### 1.3 结论（对审后降调）
 
-在"主线不动、分支迁移、测试为锚"的前提下，迁移的期望收益（产品化路径、恢复语义、生态）显著大于风险。**建议执行。**
+诚实定位：**这是一次论文/工程化可行性对照实验，附带验证 checkpoint 恢复能力；不是当前 P0 的必要重构。**
+"崩溃恢复/time travel 免费获得"是夸大——checkpoint 只给恢复原材料，自动续跑还需恢复扫描/worker/lease（本轮不做）；
+代码量未必显著下降（orchestrator 大量代码是业务审计与投影，框架不消除）；"人才兑换率"是推测性收益不作工程论据。
+对审补充的反方成本一并承认：第二套 PG 驱动与连接池、checkpoint 含 PII 副本（需保留期与删除联动）、
+sync durability 延迟、节点重放的 LLM 成本、跨版本恢复兼容。在"主线不动、分支迁移、279 测试为锚"前提下仍**值得执行**。
 
 ## 2. 目标与不变量
 
@@ -32,37 +40,64 @@
 |---|---|
 | 目标 | `langgraph` 分支上，run 执行路径由 LangGraph `StateGraph` 驱动，接入 `PostgresSaver` checkpoint，行为与主线一致 |
 | 不变量 1 | `/api/v1` 全部契约不变，OpenAPI 快照零漂移（`tests/snapshots/openapi_v1.json`） |
-| 不变量 2 | 全部 247 项测试语义不变（编排测试允许改写为图版等价断言，断言结论不变） |
+| 不变量 2 | 全部 **279** 项测试原样冻结（不许删改旧断言）；图等价性由新增特征测试与黑盒等价测试证明 |
 | 不变量 3 | CLAUDE.md 其余硬约束全部保留：SharedState 单一事实来源、SQL 硬过滤、evidence 边界、Semaphore 限流、有界恢复各 ≤1 次 |
 | 不变量 4 | Agent 本体（intent/matching/strategy 的 prompt + LLM 调用）零改动，LangGraph 只接管编排 |
 | 明确不做 | 不引入 LangChain 全家桶/LangSmith/LangServe；意图咨询（Brief 确认前的图外交互）不进图 |
 
-## 3. 现状 → 目标映射
+## 3. 现状 → 目标映射（对审修订版）
+
+### 3.1 技术选型（对审确定）
+
+- Checkpointer：官方 `AsyncPostgresSaver`（`langgraph.checkpoint.postgres.aio`），接受第二套驱动
+  （psycopg3 + psycopg-pool，独立异步池，lifespan 管理，首次部署 `await checkpointer.setup()`）。
+  "复用同一个 PostgreSQL" 指同库同 DSN，**不是**复用 asyncpg 池。禁同步 PostgresSaver 于异步路径。
+- 调用形态：`await graph.ainvoke(state, config={"configurable": {"thread_id": run_id}, "recursion_limit": 12}, durability="sync")`
+  （sync durability 兑现"节点完成即可恢复"）。
+- 版本锁定：`langgraph==1.2.9`（1.2.10 发布仅一天，观察期不足）、`langgraph-checkpoint-postgres==3.1.0`、
+  `psycopg[binary]==3.3.4`、`psycopg-pool==3.3.1`；生成完整 constraints，干净环境 `pip check` + 全量测试。
+  如实承认传递依赖含 `langchain-core`（宪法"不引入 LangChain 全家桶"指不主动使用其应用层栈）。
+- checkpoint 表含完整 SharedState（PII 副本）：登记表与清理策略，设 `LANGGRAPH_STRICT_MSGPACK=true`。
+
+### 3.2 图结构（补全对审指出的遗漏）
 
 ```
-run_persisted_agentic_match_run (orchestrator.py)   →  graph.ainvoke(GraphState, config={thread_id: run_id})
-  Stage intent      → 节点 intent          （包 run_intent_agent，前后确定性检查做进节点包装器）
-  Stage retrieval   → 节点 retrieve_match  （包 matching_agent + hybrid_search）
-  Stage strategy    → 节点 strategy        （包 strategy_agent）
-  Stage verification→ 节点 verify          （final_verification，allow_repair 语义不变）
-  re-retrieval ≤1   → verify 条件边：needs_reretrieval ∧ loops.reretrieval==0 → retrieve_match；否则 → publish
-  publication gate  → 节点 publish         （harness publication_gate + result_projector）
-  run_store 阶段推进 → 各节点内沿用 update_run_stage / save_state_snapshot（群聊投影与监控不受影响）
-  checkpoint        → PostgresSaver，复用同一 PostgreSQL；禁 MemorySaver 出现在生产代码
-GraphState = TypedDict{ shared: SharedState, brief: MatchBrief, loops: {reretrieval:int, repair:int}, run_id: str }
+lock_brief(plan gate：批准 Brief 回写 + approved_match_brief/planning 日志)
+→ intent（含 intent_consulted=True 时跳过 LLM 但仍写 checkpoint 与 reused 日志的分支）
+→ retrieve_match → strategy → verify
+   verify 条件边：needs_reretrieval ∧ loops.reretrieval==0
+     → prepare_reretrieval → retrieve_match(attempt=2) → strategy(attempt=2) → verify(attempt=2, allow_repair=第一次未用)
+     → publish
+   否则 → publish
+publish：harness publication_gate + result_projector，只生成结果；
+run 终态保存（save_run_result 幂等约束）放在图完成后的外围包装器，不进可重放节点。
 ```
 
-## 4. 分步实施（每步全量测试绿灯后才进下一步）
+保序契约（全部为群聊/Explain/监控的产品依赖，逐条 characterization test 锚定）：
+7 个确定性 checkpoint 顺序；stage 在节点执行前推进；公开 `state_snapshot` 只在原有五个时机保存
+（planning/首次 retrieval/首次 strategy/最终 verification/finalization），重检索中段不加新公开快照；
+第二遍 matching/strategy 时长按现状计入 `verification`，`public_stage_duration` 只写一次；
+`supervisor_log` 的 `reretrieval_loop/repair_loop/hard_filter_violations` 写入点不变。
+
+### 3.3 事实边界（五层，checkpoint 不是业务状态源但确含状态副本）
+
+`approved_plan`=不可变执行输入；LangGraph checkpoint=内部恢复状态（含 GraphState 副本）；
+`match_runs.state_snapshot`=公开读模型；`result_snapshot/status`=终态产品事实；`session_state`=会话级事实。
+
+GraphState = { shared: SharedState, brief: MatchBrief, retrieval_plan, verification, product_result,
+attempt: int, loops: {reretrieval, repair}, run_id: str, stage_timing 累计 }
+
+## 4. 分步实施（对审重排：spike 前移、特征测试先行、每步全量绿灯后才进下一步）
 
 | 步骤 | 内容 | 验收 |
 |---|---|---|
-| S0 | `git merge codex/v1-complete` 进 langgraph 分支；`pip install langgraph==<锁定版>` 写入 requirements.txt | 247 基线全绿 |
-| S1 | 新建 `app/graph/`（state.py + nodes.py + build.py），纯定义不接管任何入口；节点单测 | 新增测试绿，基线不动 |
-| S2 | run API 路径切换到 `graph.ainvoke`；`test_run_orchestration.py` 改写为图版等价断言 | 全量绿 + OpenAPI 快照零漂移 |
-| S3 | 接入 PostgresSaver；新增断点恢复测试（模拟节点间崩溃 → 重新 invoke 续跑不重复执行已完成节点） | 恢复测试绿 |
-| S4 | 其余三个编排入口：仍被旧 API 使用的保留并标注 legacy；只剩测试引用的删除（结合第 1 轮冗余清单） | 全量绿 |
-| S5 | 对照文档：两版架构图、恢复语义对比、代码量/测试对比表（论文素材） | 文档完成 |
-| S6 | 端到端验收：生成虚拟简历 → 完整流程（上传→确认→意图→Brief→执行→群聊/结果页）→ 检索出岗位且证据可溯源 | E2E 通过 |
+| S0 | langgraph 分支合并 codex/v1-complete（merge-tree 预检无冲突）；宪法与本文基线统一为 **279**；按 §3.1 锁定四个依赖 + 完整 constraints；干净 .venv `pip check` | 279 基线全绿 |
+| S1 | **checkpointer spike（最大风险前移）**：真实 PostgreSQL 上 `asetup`、完整 SharedState round-trip、两个并发 thread_id 互不串、模拟进程重启后 `ainvoke(None, config)` 续跑 | spike 测试绿；PG 不可用则此步阻塞并上报 |
+| S2 | **特征测试先行**：为现行 orchestrator 的 stage/snapshot/log/event 顺序新增 characterization tests（§3.2 保序契约逐条锚定），旧 279 项原样冻结不许删改 | 特征测试对旧实现全绿 |
+| S3 | 实现 `app/graph/`（state/nodes/build）；图路径在 feature flag 下运行，与旧 orchestrator 跑同一特征测试集证明等价；不切 API | 双实现同测全绿 |
+| S4 | **最大验收门**：run API 切换到图路径（durability=sync + 外围幂等包装器）；OpenAPI 快照零漂移；故障注入（节点前/后/checkpoint 前后 kill）证明手动续跑；不删除任何旧编排入口 | 全量绿 + 恢复测试绿 |
+| S5 | E2E：虚拟简历完整流程（上传→确认→意图→Brief→执行→群聊/结果页），检索出岗位且证据可溯源；并发多 run 隔离 | E2E 通过 |
+| S6 | 论文对照文档（两版架构图、恢复语义对比、代码量/测试对比）+ 收尾清理 | 文档完成 |
 
 ## 5. 风险与回滚
 
