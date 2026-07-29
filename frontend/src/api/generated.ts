@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Conversation */
+        get: operations["run_conversation_api_v1_runs__run_id__conversation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/execute": {
         parameters: {
             query?: never;
@@ -314,6 +331,27 @@ export interface components {
             confidence?: number | null;
             /** Highest Stage */
             highest_stage: string;
+        };
+        /** ConversationMessageResponse */
+        ConversationMessageResponse: {
+            /** Display Name */
+            display_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "intro" | "brief" | "progress" | "checkpoint" | "recovery" | "result" | "warning" | "error";
+            /**
+             * Persona
+             * @enum {string}
+             */
+            persona: "intent_consultant" | "job_scout" | "strategist" | "pm";
+            /** Seq */
+            seq: number;
+            /** Stage */
+            stage: string;
+            /** Text */
+            text: string;
         };
         /** EvidenceItem */
         EvidenceItem: {
@@ -804,6 +842,19 @@ export interface components {
             /** Technologies */
             technologies?: string[];
         };
+        /** RunConversationResponse */
+        RunConversationResponse: {
+            /** Messages */
+            messages?: components["schemas"]["ConversationMessageResponse"][];
+            /** Next Poll Ms */
+            next_poll_ms?: number | null;
+            /** Run Id */
+            run_id: string;
+            /** Stage */
+            stage?: string | null;
+            /** Status */
+            status: string;
+        };
         /** RunExplainResponse */
         RunExplainResponse: {
             fusion: components["schemas"]["FusionResponse"];
@@ -994,6 +1045,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecentRunsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_conversation_api_v1_runs__run_id__conversation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunConversationResponse"];
                 };
             };
             /** @description Validation Error */

@@ -3,9 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.agents.orchestrator import run_persisted_agentic_match_run
-from app.agents.trace import build_public_explain
+from app.agents.trace import (
+    build_public_explain,
+    build_public_recovery_events,
+)
+from app.api.conversation_projector import project_run_conversation
 from app.api.v1.schemas import (
     ExecuteRunRequest,
+    RunConversationResponse,
     RunExplainResponse,
     RunResultResponse,
     RunStatusResponse,
@@ -63,6 +68,43 @@ async def run_status(run_id: str) -> RunStatusResponse:
     if run is None:
         raise HTTPException(status_code=404, detail="run_id not found")
     return _status_response(run)
+
+
+@router.get(
+    "/runs/{run_id}/conversation",
+    response_model=RunConversationResponse,
+)
+async def run_conversation(run_id: str) -> RunConversationResponse:
+    run = await get_run(run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run_id not found")
+
+    snapshot = await load_state_snapshot(run_id=run_id)
+    supervisor_log = (
+        snapshot.get("supervisor_log", [])
+        if isinstance(snapshot, dict)
+        else []
+    )
+    public_log = [
+        event for event in supervisor_log if isinstance(event, dict)
+    ]
+    recovery_events = build_public_recovery_events(public_log)
+    result = (
+        ProductResult.model_validate(run.result_snapshot)
+        if run.result_snapshot is not None
+        else None
+    )
+    return RunConversationResponse(
+        run_id=run.run_id,
+        status=run.status.value,
+        stage=run.stage.value if run.stage else None,
+        next_poll_ms=(None if run.status in TERMINAL_STATUSES else 1500),
+        messages=project_run_conversation(
+            run=run,
+            recovery_events=recovery_events,
+            result=result,
+        ),
+    )
 
 
 @router.get("/runs/{run_id}/result", response_model=RunResultResponse)

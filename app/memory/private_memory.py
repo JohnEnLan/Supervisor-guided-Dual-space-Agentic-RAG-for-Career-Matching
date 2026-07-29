@@ -106,24 +106,5 @@ async def list_private_resume_history(
     ]
 
 
-async def list_private_resume_versions(
-    *, user_id: str, limit: int = 20
-) -> list[dict[str, Any]]:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT resume_version_id, updated_at
-            FROM private_memory
-            WHERE user_id = $1
-            ORDER BY updated_at DESC
-            LIMIT $2
-            """,
-            user_id,
-            limit,
-        )
-    return [dict(row) for row in rows]
-
-
 def _decode_payload(payload: Any) -> dict[str, Any]:
     return json.loads(payload) if isinstance(payload, str) else dict(payload)

@@ -1,8 +1,12 @@
+import hashlib
+import io
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi import HTTPException, UploadFile
 
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test")
@@ -17,6 +21,186 @@ def feedback_write_result(
         created=created,
         feedback={"feedback_id": feedback_id, **feedback},
     )
+
+
+@pytest.mark.asyncio
+async def test_persist_upload_uses_full_session_hash_and_unique_upload_id(
+    monkeypatch,
+    tmp_path,
+):
+    from app.api import routes
+
+    monkeypatch.setattr(routes, "UPLOAD_DIR", tmp_path)
+
+    first = await routes._persist_upload(
+        "a/b",
+        UploadFile(file=io.BytesIO(b"first"), filename="resume.txt"),
+    )
+    collision = await routes._persist_upload(
+        "a_b",
+        UploadFile(file=io.BytesIO(b"second"), filename="resume.txt"),
+    )
+    retransmit = await routes._persist_upload(
+        "a/b",
+        UploadFile(file=io.BytesIO(b"third"), filename="resume.txt"),
+    )
+
+    first_hash = hashlib.sha256(b"a/b").hexdigest()
+    collision_hash = hashlib.sha256(b"a_b").hexdigest()
+    assert first.name.startswith(f"{first_hash}-")
+    assert collision.name.startswith(f"{collision_hash}-")
+    assert len({first.name, collision.name, retransmit.name}) == 3
+    assert first.read_bytes() == b"first"
+    assert collision.read_bytes() == b"second"
+    assert retransmit.read_bytes() == b"third"
+
+
+@pytest.mark.asyncio
+async def test_persist_upload_streams_and_removes_oversize_partial(
+    monkeypatch,
+    tmp_path,
+):
+    from app.api import routes
+
+    class TrackingUpload:
+        filename = "resume.pdf"
+
+        def __init__(self):
+            self.content = io.BytesIO(b"123456")
+            self.read_sizes = []
+            self.closed = False
+
+        async def read(self, size=-1):
+            self.read_sizes.append(size)
+            return self.content.read(size)
+
+        async def close(self):
+            self.closed = True
+
+    upload = TrackingUpload()
+    monkeypatch.setattr(routes, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(routes, "MAX_RESUME_UPLOAD_BYTES", 5, raising=False)
+    monkeypatch.setattr(routes, "UPLOAD_CHUNK_BYTES", 4, raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes._persist_upload("session-1", upload)
+
+    assert exc_info.value.status_code == 413
+    assert upload.read_sizes and set(upload.read_sizes) == {4}
+    assert upload.closed is True
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_resume_background_task_catches_initial_failure_and_deletes_upload(
+    monkeypatch,
+    tmp_path,
+):
+    from app.api import routes
+
+    resume_path = tmp_path / "resume.txt"
+    resume_path.write_text("resume", encoding="utf-8")
+    recorded = []
+
+    async def fail_initial_write(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(routes, "save_state", fail_initial_write)
+    monkeypatch.setattr(routes, "mutate_state_atomically", fail_initial_write)
+    monkeypatch.setattr(routes, "_record_background_error", record)
+
+    await routes._run_resume_task(
+        session_id="session-1",
+        user_id="user-1",
+        resume_path=resume_path,
+    )
+
+    assert recorded[0]["status"] == "resume_error"
+    assert not resume_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_resume_endpoint_deletes_upload_if_queue_write_fails(
+    monkeypatch,
+    tmp_path,
+):
+    from fastapi import BackgroundTasks
+    from app.api import routes
+
+    async def fail_queue_write(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(routes, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(routes, "save_state", fail_queue_write)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await routes.upload_resume(
+            background_tasks=BackgroundTasks(),
+            session_id="session-1",
+            user_id="user-1",
+            file=UploadFile(
+                file=io.BytesIO(b"resume"),
+                filename="resume.txt",
+            ),
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_match_background_task_catches_initial_load_failure(monkeypatch):
+    from app.api import routes
+
+    recorded = []
+
+    async def fail_load(_session_id):
+        raise RuntimeError("database unavailable")
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(routes, "load_state", fail_load)
+    monkeypatch.setattr(routes, "_record_background_error", record)
+
+    await routes._run_match_task(
+        session_id="session-1",
+        user_goal_text="Data analyst",
+        top_k=5,
+        include_raptor=False,
+    )
+
+    assert recorded[0]["status"] == "match_error"
+
+
+@pytest.mark.asyncio
+async def test_match_background_task_treats_missing_loaded_session_as_failure(
+    monkeypatch,
+):
+    from app.api import routes
+
+    recorded = []
+
+    async def missing_state(_session_id):
+        return None
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(routes, "load_state", missing_state)
+    monkeypatch.setattr(routes, "_record_background_error", record)
+
+    await routes._run_match_task(
+        session_id="session-1",
+        user_goal_text="Data analyst",
+        top_k=5,
+        include_raptor=False,
+    )
+
+    assert recorded[0]["status"] == "match_error"
+    assert isinstance(recorded[0]["error"], KeyError)
 
 
 @pytest.mark.asyncio
@@ -49,8 +233,12 @@ async def test_post_resume_persists_upload_and_queues_background_task(
     assert response.status_code == 202
     assert response.json() == {"session_id": "s1", "status": "resume_queued"}
     assert ("save_state", "s1", "u1", "resume_queued") in calls
-    assert ("resume_task", "s1", "u1", "s1.txt") in calls
-    assert (tmp_path / "s1.txt").read_bytes() == b"hello resume"
+    task_call = next(call for call in calls if call[0] == "resume_task")
+    expected_hash = hashlib.sha256(b"s1").hexdigest()
+    assert task_call[1:3] == ("s1", "u1")
+    assert task_call[3].startswith(f"{expected_hash}-")
+    assert task_call[3].endswith(".txt")
+    assert (tmp_path / task_call[3]).read_bytes() == b"hello resume"
 
 
 @pytest.mark.asyncio
@@ -73,14 +261,23 @@ async def test_post_match_requires_existing_session_and_queues_task(monkeypatch)
         calls.append(("load_state_with_status", session_id))
         return state, "resume_ready"
 
-    async def fake_save_state(saved_state, status):
-        calls.append(("save_state", saved_state.session_id, status))
+    async def fake_mutate_state_atomically(*, session_id, mutator, status):
+        calls.append(("mutate_state", session_id, status))
+        return mutator(state)
+
+    async def forbidden_save(*_args, **_kwargs):
+        raise AssertionError("match queueing must not whole-save stale state")
 
     async def fake_run_match_task(*, session_id, user_goal_text, top_k, include_raptor):
         calls.append(("match_task", session_id, user_goal_text, top_k, include_raptor))
 
     monkeypatch.setattr(routes, "load_state_with_status", fake_load_state_with_status)
-    monkeypatch.setattr(routes, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
+    monkeypatch.setattr(routes, "save_state", forbidden_save)
     monkeypatch.setattr(routes, "_run_match_task", fake_run_match_task)
 
     transport = httpx.ASGITransport(app=app)
@@ -98,7 +295,7 @@ async def test_post_match_requires_existing_session_and_queues_task(monkeypatch)
     assert response.status_code == 202
     assert response.json() == {"session_id": "s1", "status": "match_queued"}
     assert ("load_state_with_status", "s1") in calls
-    assert ("save_state", "s1", "match_queued") in calls
+    assert ("mutate_state", "s1", "match_queued") in calls
     assert (
         "match_task",
         "s1",
@@ -143,15 +340,20 @@ async def test_post_match_rejects_session_before_resume_is_ready(monkeypatch):
     async def fake_load_state_with_status(session_id):
         return state, "resume_running"
 
-    async def fake_save_state(saved_state, status):
-        calls.append(("save_state", saved_state.session_id, status))
+    async def fake_mutate_state_atomically(*, session_id, mutator, status):
+        calls.append(("mutate_state", session_id, status))
+        return mutator(state)
 
     async def fake_run_match_task(*, session_id, user_goal_text, top_k, include_raptor):
         calls.append(("match_task", session_id, user_goal_text, top_k, include_raptor))
 
     monkeypatch.setattr(routes, "load_state", fake_load_state)
     monkeypatch.setattr(routes, "load_state_with_status", fake_load_state_with_status)
-    monkeypatch.setattr(routes, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
     monkeypatch.setattr(routes, "_run_match_task", fake_run_match_task)
 
     transport = httpx.ASGITransport(app=app)
@@ -291,14 +493,19 @@ async def test_run_match_task_uses_persisted_session_orchestrator(monkeypatch):
         calls.append(("load_state", session_id))
         return state
 
-    async def fake_save_state(saved_state, status):
-        calls.append(("save_state", saved_state.session_id, status))
+    async def fake_mutate_state_atomically(*, session_id, mutator, status):
+        calls.append(("mutate_state", session_id, status))
+        return mutator(state)
 
     async def fake_run_persisted_agentic_match_from_session(**kwargs):
         calls.append(("persisted_orchestrator", kwargs))
 
     monkeypatch.setattr(routes, "load_state", fake_load_state)
-    monkeypatch.setattr(routes, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        routes,
+        "mutate_state_atomically",
+        fake_mutate_state_atomically,
+    )
     monkeypatch.setattr(
         routes,
         "run_persisted_agentic_match_from_session",
@@ -315,7 +522,7 @@ async def test_run_match_task_uses_persisted_session_orchestrator(monkeypatch):
 
     assert calls == [
         ("load_state", "s1"),
-        ("save_state", "s1", "match_running"),
+        ("mutate_state", "s1", "match_running"),
         (
             "persisted_orchestrator",
             {

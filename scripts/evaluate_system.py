@@ -6,7 +6,7 @@ import csv
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -24,7 +24,10 @@ from app.evaluation.metrics import (
     evaluate_rankings,
     format_metric_table_markdown,
 )
+from app.retrieval.dual_space_search import dual_space_search
 from app.retrieval.hybrid_search import JobCandidate, hybrid_search
+from app.retrieval.implicit_search import build_implicit_query_text
+from app.state.schema import ResumeState
 
 
 def load_eval_inputs(
@@ -277,37 +280,29 @@ async def build_live_report(
     *,
     k: int,
     include_latent_hint: bool,
+    run_results: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     labels = _labels_from_rows(rows)
     baseline_rankings, baseline_candidates = await _run_retrieval(
-        rows, k=k, include_raptor=False, include_latent_hint=False
+        rows,
+        k=k,
+        include_raptor=False,
+        use_dual_space=False,
     )
     raptor_rankings, _raptor_candidates = await _run_retrieval(
-        rows, k=k, include_raptor=True, include_latent_hint=False
+        rows,
+        k=k,
+        include_raptor=True,
+        use_dual_space=False,
     )
     latent_rankings, _latent_candidates = await _run_retrieval(
-        rows, k=k, include_raptor=True, include_latent_hint=include_latent_hint
+        rows,
+        k=k,
+        include_raptor=True,
+        use_dual_space=True,
+        include_latent_hint=include_latent_hint,
     )
 
-    explanation_rows = [
-        {
-            "case_id": case_id,
-            "available_evidence_span_ids": [
-                evidence_id
-                for candidate in candidates
-                for evidence_id in candidate.evidence_span_ids
-            ],
-            "recommended_roles": [
-                {
-                    "job_id": candidate.job_id,
-                    "match_explanation": "Retrieved evidence supports this candidate.",
-                    "evidence_span_ids": candidate.evidence_span_ids,
-                }
-                for candidate in candidates
-            ],
-        }
-        for case_id, candidates in baseline_candidates.items()
-    ]
     candidate_metadata = {
         case_id: [_candidate_metadata(candidate) for candidate in candidates]
         for case_id, candidates in baseline_candidates.items()
@@ -325,14 +320,16 @@ async def build_live_report(
         ),
         "latent_space_comparison": compare_latent_space_runs(
             labels,
-            baseline_rankings,
+            raptor_rankings,
             latent_rankings,
             k=k,
             case_notes=case_notes,
         ),
         "hard_filter_accuracy": evaluate_hard_filter_accuracy(rows, candidate_metadata),
-        "explanation_faithfulness": evaluate_explanation_faithfulness(
-            explanation_rows
+        "explanation_faithfulness": _evaluate_run_result_faithfulness(
+            rows=rows,
+            candidates_by_case=baseline_candidates,
+            run_results=run_results,
         ),
         "rankings": {
             "baseline": baseline_rankings,
@@ -347,23 +344,124 @@ async def _run_retrieval(
     *,
     k: int,
     include_raptor: bool,
-    include_latent_hint: bool,
+    use_dual_space: bool = False,
+    include_latent_hint: bool = False,
 ) -> tuple[dict[str, list[str]], dict[str, list[JobCandidate]]]:
     rankings: dict[str, list[str]] = {}
     candidates_by_case: dict[str, list[JobCandidate]] = {}
     for row in rows:
-        query = _query_for_row(row, include_latent_hint=include_latent_hint)
-        candidates = await hybrid_search(
-            query=query,
-            hard_constraints=row.get("hard_constraints") or {},
-            soft_prefs=row.get("soft_preferences") or {},
-            top_k=k,
-            include_raptor=include_raptor,
-        )
+        query = _query_for_row(row, include_latent_hint=False)
+        search_kwargs = {
+            "query": query,
+            "hard_constraints": row.get("hard_constraints") or {},
+            "soft_prefs": row.get("soft_preferences") or {},
+            "top_k": k,
+            "include_raptor": include_raptor,
+        }
+        if use_dual_space:
+            candidates = await dual_space_search(
+                **search_kwargs,
+                anonymized_resume_text=_implicit_text_for_row(
+                    row,
+                    include_latent_hint=include_latent_hint,
+                ),
+                implicit_enabled=True,
+            )
+        else:
+            candidates = await hybrid_search(**search_kwargs)
         case_id = str(row["case_id"])
         rankings[case_id] = [candidate.job_id for candidate in candidates]
         candidates_by_case[case_id] = candidates
     return rankings, candidates_by_case
+
+
+def _implicit_text_for_row(
+    row: Mapping[str, Any],
+    *,
+    include_latent_hint: bool,
+) -> str:
+    resume_payload = row.get("resume_state")
+    if isinstance(resume_payload, Mapping):
+        resume = ResumeState.model_validate(dict(resume_payload))
+        text = build_implicit_query_text(resume)
+    else:
+        text = str(row.get("query") or "")
+    if include_latent_hint:
+        latent = row.get("latent_profile")
+        if isinstance(latent, Mapping):
+            hint = " ".join(str(value) for value in latent.values() if value)
+            if hint:
+                text = f"{text}\nLatent career profile: {hint}"
+    return text
+
+
+def _evaluate_run_result_faithfulness(
+    *,
+    rows: list[dict[str, Any]],
+    candidates_by_case: Mapping[str, list[JobCandidate]],
+    run_results: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, float | int] | dict[str, str]:
+    resolved_results = dict(run_results or {})
+    for row in rows:
+        embedded_result = row.get("run_result")
+        if isinstance(embedded_result, Mapping):
+            resolved_results.setdefault(str(row["case_id"]), embedded_result)
+
+    explanation_rows = []
+    for row in rows:
+        case_id = str(row["case_id"])
+        run_result = resolved_results.get(case_id)
+        if not isinstance(run_result, Mapping):
+            continue
+        roles = run_result.get("recommended_roles")
+        if not isinstance(roles, list):
+            continue
+
+        available_by_job = {
+            candidate.job_id: list(candidate.evidence_span_ids)
+            for candidate in candidates_by_case.get(case_id, [])
+        }
+        evaluated_roles = []
+        for role in roles:
+            if not isinstance(role, Mapping):
+                continue
+            evidence = role.get("evidence")
+            evidence_ids = [
+                str(item.get("evidence_span_id"))
+                for item in evidence
+                if isinstance(item, Mapping) and item.get("evidence_span_id")
+            ] if isinstance(evidence, list) else []
+            if not evidence_ids:
+                evidence_ids = [
+                    str(item)
+                    for item in role.get("evidence_span_ids", [])
+                    if item
+                ]
+            evaluated_roles.append(
+                {
+                    "job_id": str(role.get("job_id") or ""),
+                    "match_explanation": str(
+                        role.get("concise_explanation")
+                        or role.get("match_explanation")
+                        or ""
+                    ),
+                    "evidence_span_ids": evidence_ids,
+                }
+            )
+        if evaluated_roles:
+            explanation_rows.append(
+                {
+                    "case_id": case_id,
+                    "available_evidence_span_ids_by_job": available_by_job,
+                    "recommended_roles": evaluated_roles,
+                }
+            )
+
+    if not explanation_rows:
+        return _not_evaluated(
+            "no completed Agent run results with recommended roles"
+        )
+    return evaluate_explanation_faithfulness(explanation_rows)
 
 
 def _query_for_row(row: dict[str, Any], *, include_latent_hint: bool) -> str:
@@ -382,6 +480,11 @@ def _candidate_metadata(candidate: JobCandidate) -> dict[str, Any]:
         "title": candidate.title,
         "company": candidate.company,
         "location": candidate.location,
+        "visa_sponsor": candidate.visa_sponsor,
+        "degree_required": candidate.degree_required,
+        "min_years_exp": candidate.min_years_exp,
+        "role_cluster": candidate.role_cluster,
+        "is_open": candidate.is_open,
     }
 
 

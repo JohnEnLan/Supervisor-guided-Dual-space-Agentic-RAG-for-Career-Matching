@@ -16,6 +16,8 @@ export type MatchBriefResponse = Schemas["MatchBriefResponse"];
 export type ExecuteRunRequest = Schemas["ExecuteRunRequest"];
 export type RunStatus = Schemas["RunStatusResponse"];
 export type RunResult = Schemas["RunResultResponse"];
+export type RunConversation = Schemas["RunConversationResponse"];
+export type ConversationMessage = Schemas["ConversationMessageResponse"];
 export type RunExplain = Schemas["RunExplainResponse"];
 export type ReactionRequest = Schemas["ReactionRequest"];
 export type ReactionResponse = Schemas["ReactionResponse"];
@@ -46,6 +48,8 @@ export const api = {
   executeRun: (runId: string, body: ExecuteRunRequest): Promise<RunStatus> =>
     jsonRequest(`/runs/${id(runId)}/execute`, "POST", body),
   runStatus: (runId: string): Promise<RunStatus> => apiRequest(`/runs/${id(runId)}/status`),
+  runConversation: (runId: string): Promise<RunConversation> =>
+    apiRequest(`/runs/${id(runId)}/conversation`),
   runResult: (runId: string): Promise<RunResult> => apiRequest(`/runs/${id(runId)}/result`),
   runExplain: (runId: string): Promise<RunExplain> => apiRequest(`/runs/${id(runId)}/explain`),
   addReaction: (runId: string, body: ReactionRequest): Promise<ReactionResponse> =>

@@ -11,6 +11,25 @@ os.environ.setdefault("QWEN_API_KEY", "sk-test")
 
 
 @pytest.mark.asyncio
+async def test_base_agent_rejects_valid_json_that_is_not_an_object(monkeypatch):
+    from app.agents import base
+    from app.agents.intent_agent import IntentAgent
+    from app.state.schema import SharedState
+
+    async def fake_chat(_system, _user, **_kwargs):
+        return "[]"
+
+    monkeypatch.setattr(base.deepseek, "chat", fake_chat)
+    state = SharedState(session_id="s-json", user_id="u-json")
+
+    updated = await IntentAgent(user_goal_text="data analyst").run(state)
+
+    assert updated is state
+    assert state.supervisor_log[-1]["agent"] == "intent_agent"
+    assert state.supervisor_log[-1]["error"] == "invalid_json_object"
+
+
+@pytest.mark.asyncio
 async def test_intent_agent_writes_hard_constraints_and_soft_preferences(monkeypatch):
     from app.agents import base
     from app.agents.intent_agent import run_intent_agent
@@ -303,6 +322,76 @@ async def test_matching_agent_writes_retrieval_state_and_recommended_roles(monke
     assert updated.retrieval_state.ranking_scores[0]["sources"] == ["bm25", "dense"]
     assert updated.strategy_state.recommended_roles[0]["tier"] == "now_fit"
     assert updated.strategy_state.recommended_roles[0]["job_id"] == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_matching_agent_deterministically_filters_avoided_role_titles(
+    monkeypatch,
+):
+    from app.agents import base
+    from app.agents.matching_agent import run_matching_agent
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import CareerState, ResumeState, SharedState
+
+    async def fake_chat(system, user, **kwargs):
+        assert "Sales Development Representative" not in user
+        return json.dumps(
+            {
+                "recommended_roles": [
+                    {
+                        "job_id": "job-data",
+                        "tier": "now_fit",
+                        "match_explanation": "Relevant analytics role.",
+                        "evidence_span_ids": ["job-data:title:1"],
+                    }
+                ]
+            }
+        )
+
+    async def fake_search(**kwargs):
+        return [
+            JobCandidate(
+                job_id="job-sales",
+                score=0.95,
+                title="Sales Development Representative",
+                evidence_span_ids=[],
+            ),
+            JobCandidate(
+                job_id="job-data",
+                score=0.9,
+                title="Data Analyst",
+                evidence_span_ids=["job-data:title:1"],
+            ),
+            JobCandidate(
+                job_id="job-wholesale",
+                score=0.8,
+                title="Wholesale Data Analyst",
+                evidence_span_ids=[],
+            ),
+        ]
+
+    monkeypatch.setattr(base.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s-avoid",
+        user_id="u-avoid",
+        resume_state=ResumeState(normalized_base_resume="Python SQL analyst"),
+        career_state=CareerState(avoid_roles=[" sales "]),
+    )
+
+    updated = await run_matching_agent(
+        state,
+        retrieval_plan={"top_k": 3, "parallel_explanations": False},
+        search_fn=fake_search,
+    )
+
+    assert updated.retrieval_state.candidate_job_ids == [
+        "job-data",
+        "job-wholesale",
+    ]
+    assert updated.strategy_state.recommended_roles[0]["job_id"] == "job-data"
+    assert updated.retrieval_state.filter_log == [
+        "avoid_role:job-sales:sales",
+    ]
 
 
 @pytest.mark.asyncio

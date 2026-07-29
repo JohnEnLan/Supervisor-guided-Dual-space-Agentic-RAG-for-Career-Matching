@@ -61,13 +61,3 @@ def compute_plan_hash(brief: MatchBrief | dict[str, Any]) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def plan_matches(
-    brief: MatchBrief, *, plan_version: int, plan_hash: str
-) -> bool:
-    return (
-        brief.plan_version == plan_version
-        and brief.plan_hash == plan_hash
-        and compute_plan_hash(brief) == plan_hash
-    )

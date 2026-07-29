@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import re
+import hashlib
+import uuid
+from copy import deepcopy
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
@@ -26,6 +28,8 @@ from app.state.schema import SharedState
 router = APIRouter()
 UPLOAD_DIR = Path("data/resumes/uploads")
 ALLOWED_RESUME_SUFFIXES = {".pdf", ".docx", ".txt"}
+MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 64 * 1024
 
 
 class MatchRequest(BaseModel):
@@ -57,10 +61,14 @@ async def upload_resume(
     file: UploadFile = File(...),
 ) -> dict[str, str]:
     resume_path = await _persist_upload(session_id, file)
-    await save_state(
-        SharedState(session_id=session_id, user_id=user_id),
-        status="resume_queued",
-    )
+    try:
+        await save_state(
+            SharedState(session_id=session_id, user_id=user_id),
+            status="resume_queued",
+        )
+    except Exception:
+        resume_path.unlink(missing_ok=True)
+        raise
     background_tasks.add_task(
         _run_resume_task,
         session_id=session_id,
@@ -85,7 +93,11 @@ async def submit_match(
             detail="resume is not ready for matching",
         )
 
-    await save_state(state, status="match_queued")
+    await mutate_state_atomically(
+        session_id=request.session_id,
+        mutator=lambda _state: None,
+        status="match_queued",
+    )
     background_tasks.add_task(
         _run_match_task,
         session_id=request.session_id,
@@ -221,36 +233,55 @@ def _build_feedback_response(
 
 
 async def _run_resume_task(*, session_id: str, user_id: str, resume_path: Path) -> None:
-    await save_state(
-        SharedState(session_id=session_id, user_id=user_id),
-        status="resume_running",
-    )
     try:
+        await mutate_state_atomically(
+            session_id=session_id,
+            mutator=lambda _state: None,
+            status="resume_running",
+        )
         result = await intake_resume(
             resume_path,
             session_id=session_id,
             user_id=user_id,
-            save_to_db=True,
+            save_to_db=False,
         )
-        await save_state(result.state, status="resume_ready")
-    except Exception as exc:  # pragma: no cover - defensive background safety
-        await _record_background_error(
+        resume_state = result.state.resume_state.model_copy(deep=True)
+        await mutate_state_atomically(
             session_id=session_id,
-            user_id=user_id,
-            status="resume_error",
-            error=exc,
+            mutator=lambda state: setattr(
+                state,
+                "resume_state",
+                resume_state.model_copy(deep=True),
+            ),
+            status="resume_ready",
         )
+    except Exception as exc:  # pragma: no cover - defensive background safety
+        try:
+            await _record_background_error(
+                session_id=session_id,
+                user_id=user_id,
+                status="resume_error",
+                error=exc,
+            )
+        except Exception:
+            pass
+    finally:
+        resume_path.unlink(missing_ok=True)
 
 
 async def _run_match_task(
     *, session_id: str, user_goal_text: str, top_k: int, include_raptor: bool
 ) -> None:
-    state = await load_state(session_id)
-    if state is None:
-        return
-
-    await save_state(state, status="match_running")
+    state: SharedState | None = None
     try:
+        state = await load_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        await mutate_state_atomically(
+            session_id=session_id,
+            mutator=lambda _state: None,
+            status="match_running",
+        )
         await run_persisted_agentic_match_from_session(
             session_id=session_id,
             user_goal_text=user_goal_text,
@@ -258,30 +289,40 @@ async def _run_match_task(
             include_raptor=include_raptor,
         )
     except Exception as exc:  # pragma: no cover - defensive background safety
-        await _record_background_error(
-            session_id=session_id,
-            user_id=state.user_id,
-            status="match_error",
-            error=exc,
-        )
+        try:
+            await _record_background_error(
+                session_id=session_id,
+                user_id=state.user_id if state is not None else "unknown",
+                status="match_error",
+                error=exc,
+            )
+        except Exception:
+            pass
 
 
 async def _record_background_error(
     *, session_id: str, user_id: str, status: str, error: Exception
 ) -> None:
-    state = await load_state(session_id) or SharedState(
-        session_id=session_id,
-        user_id=user_id,
-    )
-    state.supervisor_log.append(
-        {
+    entry = {
             "stage": "api_background_task",
             "status": status,
             "error_type": type(error).__name__,
             "error_code": "background_task_failed",
         }
-    )
-    await save_state(state, status=status)
+
+    def append_error(state: SharedState) -> None:
+        state.supervisor_log.append(deepcopy(entry))
+
+    try:
+        await mutate_state_atomically(
+            session_id=session_id,
+            mutator=append_error,
+            status=status,
+        )
+    except KeyError:
+        state = SharedState(session_id=session_id, user_id=user_id)
+        state.supervisor_log.append(entry)
+        await save_state(state, status=status)
 
 
 async def _record_feedback_closure_error(
@@ -358,16 +399,28 @@ async def _persist_upload(session_id: str, file: UploadFile) -> Path:
     if suffix not in ALLOWED_RESUME_SUFFIXES:
         suffix = ".txt"
 
-    path = UPLOAD_DIR / f"{_safe_id(session_id)}{suffix}"
-    content = await file.read()
-    path.write_bytes(content)
-    await file.close()
-    return path
-
-
-def _safe_id(raw: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
-    return safe[:120] or "session"
+    session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    # Keep enough entropy for unique immutable upload paths without pushing
+    # deeply nested Windows workspaces over the legacy MAX_PATH boundary.
+    upload_id = uuid.uuid4().hex[:16]
+    path = UPLOAD_DIR / f"{session_hash}-{upload_id}{suffix}"
+    total_bytes = 0
+    try:
+        with path.open("xb") as destination:
+            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_RESUME_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="resume file exceeds upload size limit",
+                    )
+                destination.write(chunk)
+        return path
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
 
 
 def _resume_ready_for_matching(state: SharedState) -> bool:

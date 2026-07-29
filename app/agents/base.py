@@ -38,4 +38,13 @@ class BaseAgent(ABC):
                 {"agent": self.name, "error": "invalid_json", "raw": raw[:500]}
             )
             return state
+        if not isinstance(parsed, dict):
+            state.supervisor_log.append(
+                {
+                    "agent": self.name,
+                    "error": "invalid_json_object",
+                    "raw": raw[:500],
+                }
+            )
+            return state
         return self.apply(state, parsed)

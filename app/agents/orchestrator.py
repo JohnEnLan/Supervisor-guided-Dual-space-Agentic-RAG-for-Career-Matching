@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -24,11 +24,10 @@ from app.db.run_store import (
     transition_run,
     update_run_stage,
 )
-from app.db.state_store import load_state, save_state
+from app.db.state_store import load_state, mutate_state_atomically
 from app.domain.match_brief import MatchBrief
 from app.domain.monitoring import build_run_metrics
 from app.domain.run import RunStage, RunStatus
-from app.normalization.resume_intake import intake_resume
 from app.state.schema import SharedState
 
 
@@ -299,78 +298,21 @@ async def run_agentic_match_from_state(
     )
 
     if persist_state:
-        await save_state(state, status="agentic_done")
+        state = await _persist_stage_state(
+            state,
+            status="agentic_done",
+            owned_fields=(
+                "resume_state",
+                "career_state",
+                "retrieval_state",
+                "strategy_state",
+            ),
+        )
 
     return AgenticMatchResult(
         state=state,
         retrieval_plan=retrieval_plan,
         final_verification=verification,
-    )
-
-
-async def run_agentic_match_from_resume(
-    resume_path: Path,
-    *,
-    session_id: str,
-    user_id: str,
-    user_goal_text: str,
-    top_k: int = 5,
-    include_raptor: bool = False,
-    persist_state: bool = True,
-    search_fn: SearchFn | None = None,
-) -> AgenticMatchResult:
-    if persist_state:
-        return await run_persisted_agentic_match_from_resume(
-            resume_path,
-            session_id=session_id,
-            user_id=user_id,
-            user_goal_text=user_goal_text,
-            top_k=top_k,
-            include_raptor=include_raptor,
-            search_fn=search_fn,
-        )
-
-    resume_result = await intake_resume(
-        resume_path,
-        session_id=session_id,
-        user_id=user_id,
-        save_to_db=False,
-    )
-    return await run_agentic_match_from_state(
-        resume_result.state,
-        user_goal_text=user_goal_text,
-        top_k=top_k,
-        include_raptor=include_raptor,
-        persist_state=False,
-        search_fn=search_fn,
-    )
-
-
-async def run_persisted_agentic_match_from_resume(
-    resume_path: Path,
-    *,
-    session_id: str,
-    user_id: str,
-    user_goal_text: str,
-    top_k: int = 5,
-    include_raptor: bool = False,
-    search_fn: SearchFn | None = None,
-) -> AgenticMatchResult:
-    resume_result = await intake_resume(
-        resume_path,
-        session_id=session_id,
-        user_id=user_id,
-        save_to_db=False,
-    )
-    state = resume_result.state
-    await save_state(state, status="resume_normalized")
-
-    return await run_persisted_agentic_match_from_session(
-        session_id=session_id,
-        user_goal_text=user_goal_text,
-        top_k=top_k,
-        include_raptor=include_raptor,
-        search_fn=search_fn,
     )
 
 
@@ -385,7 +327,11 @@ async def run_persisted_agentic_match_from_session(
     state = await _load_required_state(session_id)
 
     state = await _run_intent_under_supervision(state, user_goal_text)
-    await save_state(state, status="intent_done")
+    state = await _persist_stage_state(
+        state,
+        status="intent_done",
+        owned_fields=("career_state",),
+    )
 
     state = await _load_required_state(session_id)
     retrieval_plan = await plan_retrieval(
@@ -394,7 +340,11 @@ async def run_persisted_agentic_match_from_session(
         default_top_k=top_k,
         include_raptor=include_raptor,
     )
-    await save_state(state, status="supervisor_planning_done")
+    state = await _persist_stage_state(
+        state,
+        status="supervisor_planning_done",
+        owned_fields=(),
+    )
 
     state = await _load_required_state(session_id)
     state = await _run_matching_under_supervision(
@@ -402,11 +352,19 @@ async def run_persisted_agentic_match_from_session(
         retrieval_plan=retrieval_plan,
         search_fn=search_fn or _default_search_fn,
     )
-    await save_state(state, status="retrieval_done")
+    state = await _persist_stage_state(
+        state,
+        status="retrieval_done",
+        owned_fields=("retrieval_state", "strategy_state"),
+    )
 
     state = await _load_required_state(session_id)
     state = await _run_strategy_under_supervision(state)
-    await save_state(state, status="strategy_done")
+    state = await _persist_stage_state(
+        state,
+        status="strategy_done",
+        owned_fields=("strategy_state",),
+    )
 
     state = await _load_required_state(session_id)
     verification = await final_verification(state)
@@ -415,7 +373,11 @@ async def run_persisted_agentic_match_from_session(
             retrieval_plan, verification
         )
         state.supervisor_log.append(reretrieval_log)
-        await save_state(state, status="reretrieval_planned")
+        state = await _persist_stage_state(
+            state,
+            status="reretrieval_planned",
+            owned_fields=(),
+        )
 
         state = await _load_required_state(session_id)
         state = await _run_matching_under_supervision(
@@ -424,11 +386,19 @@ async def run_persisted_agentic_match_from_session(
             search_fn=search_fn or _default_search_fn,
             attempt=2,
         )
-        await save_state(state, status="reretrieval_done")
+        state = await _persist_stage_state(
+            state,
+            status="reretrieval_done",
+            owned_fields=("retrieval_state", "strategy_state"),
+        )
 
         state = await _load_required_state(session_id)
         state = await _run_strategy_under_supervision(state, attempt=2)
-        await save_state(state, status="strategy_rerun_done")
+        state = await _persist_stage_state(
+            state,
+            status="strategy_rerun_done",
+            owned_fields=("strategy_state",),
+        )
 
         state = await _load_required_state(session_id)
         verification = await final_verification(
@@ -443,7 +413,11 @@ async def run_persisted_agentic_match_from_session(
         verification=verification,
         attempt=2 if verification.get("reretrieval_loop_used") else 1,
     )
-    await save_state(state, status="agentic_done")
+    state = await _persist_stage_state(
+        state,
+        status="agentic_done",
+        owned_fields=("strategy_state",),
+    )
     return AgenticMatchResult(
         state=state,
         retrieval_plan=retrieval_plan,
@@ -539,6 +513,27 @@ async def _load_required_state(session_id: str) -> SharedState:
     if state is None:
         raise KeyError(f"session_id not found in state_store: {session_id}")
     return state
+
+
+async def _persist_stage_state(
+    state: SharedState,
+    *,
+    status: str,
+    owned_fields: tuple[str, ...],
+) -> SharedState:
+    def merge_stage(latest: SharedState) -> SharedState:
+        for field_name in owned_fields:
+            setattr(latest, field_name, deepcopy(getattr(state, field_name)))
+        for entry in state.supervisor_log:
+            if entry not in latest.supervisor_log:
+                latest.supervisor_log.append(deepcopy(entry))
+        return latest.model_copy(deep=True)
+
+    return await mutate_state_atomically(
+        session_id=state.session_id,
+        mutator=merge_stage,
+        status=status,
+    )
 
 
 def _build_reretrieval_plan(

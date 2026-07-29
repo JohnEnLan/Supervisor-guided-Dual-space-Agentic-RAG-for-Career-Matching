@@ -39,6 +39,122 @@ def test_company_exclusive_filter_is_parameterized_and_case_insensitive():
     assert params == [["openai", "deepmind"]]
 
 
+def test_hard_filter_rejects_string_for_list_field():
+    with pytest.raises(TypeError, match="locations must be a list"):
+        hs._build_hard_filter_query({"locations": "London"})
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_clamps_negative_top_k(monkeypatch):
+    async def get_pool():
+        return object()
+
+    async def hard_filter(_pool, _constraints):
+        return ["job-1"]
+
+    async def one_hit(*_args, **_kwargs):
+        return [
+            hs.ChunkHit(
+                job_id="job-1",
+                chunk_id="job-1:skills:1",
+                score=1.0,
+                field="required_skills",
+            )
+        ]
+
+    async def metadata(_pool, job_ids):
+        return {
+            job_id: {
+                "title": "Data Analyst",
+                "company": "Example",
+                "location": "London",
+                "role_cluster": "data",
+            }
+            for job_id in job_ids
+        }
+
+    async def evidence(_pool, evidence_by_job):
+        return {job_id: [] for job_id in evidence_by_job}
+
+    monkeypatch.setattr(hs, "get_pool", get_pool)
+    monkeypatch.setattr(hs, "_hard_filter_ids", hard_filter)
+    monkeypatch.setattr(hs, "_bm25", one_hit)
+    monkeypatch.setattr(hs, "_dense", one_hit)
+    monkeypatch.setattr(hs, "_fetch_job_metadata", metadata)
+    monkeypatch.setattr(hs, "_fetch_evidence_payloads", evidence)
+
+    candidates = await hs.hybrid_search(query="data analyst", top_k=-3)
+
+    assert [candidate.job_id for candidate in candidates] == ["job-1"]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_reranks_only_hydrated_fused_subset(monkeypatch):
+    async def get_pool():
+        return object()
+
+    async def hard_filter(_pool, _constraints):
+        return [f"job-{index}" for index in range(1, 5)]
+
+    async def bm25(*_args, **_kwargs):
+        return [
+            hs.ChunkHit(
+                job_id=f"job-{index}",
+                chunk_id=f"job-{index}:skills:1",
+                score=1.0,
+                field="required_skills",
+            )
+            for index in range(1, 5)
+        ]
+
+    async def dense(*_args, **_kwargs):
+        return [
+            hs.ChunkHit(
+                job_id=f"job-{index}",
+                chunk_id=f"job-{index}:skills:1",
+                score=10.0 if index == 4 else 0.0,
+                field="required_skills",
+            )
+            for index in range(1, 5)
+        ]
+
+    async def metadata(_pool, job_ids):
+        return {
+            job_id: {
+                "title": f"Hydrated {job_id}",
+                "company": "Example",
+                "location": "London",
+                "role_cluster": "data",
+            }
+            for job_id in job_ids
+        }
+
+    async def evidence(_pool, evidence_by_job):
+        return {job_id: [] for job_id in evidence_by_job}
+
+    monkeypatch.setattr(hs, "get_pool", get_pool)
+    monkeypatch.setattr(hs, "_hard_filter_ids", hard_filter)
+    monkeypatch.setattr(hs, "_bm25", bm25)
+    monkeypatch.setattr(hs, "_dense", dense)
+    monkeypatch.setattr(
+        hs,
+        "rrf_fuse",
+        lambda _rank_lists: [
+            ("job-1", 0.04),
+            ("job-2", 0.03),
+            ("job-3", 0.02),
+            ("job-4", 0.01),
+        ],
+    )
+    monkeypatch.setattr(hs, "_fetch_job_metadata", metadata)
+    monkeypatch.setattr(hs, "_fetch_evidence_payloads", evidence)
+
+    candidates = await hs.hybrid_search(query="data analyst", top_k=1)
+
+    assert candidates[0].job_id != "job-4"
+    assert candidates[0].title is not None
+
+
 def test_preferred_company_is_a_soft_ranking_bonus():
     candidates = hs._rerank_candidates(
         fused=[("job-other", 0.03), ("job-target", 0.03)],

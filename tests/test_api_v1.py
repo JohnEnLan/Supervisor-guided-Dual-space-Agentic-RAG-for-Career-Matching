@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.domain.match_brief import create_match_brief
 from app.domain.run import MatchRun, RunStatus
@@ -22,12 +24,96 @@ PUBLIC_PATHS = {
     "/api/v1/sessions/{session_id}/match-brief",
     "/api/v1/runs/{run_id}/execute",
     "/api/v1/runs/{run_id}/status",
+    "/api/v1/runs/{run_id}/conversation",
     "/api/v1/runs/{run_id}/result",
     "/api/v1/runs/{run_id}/explain",
     "/api/v1/runs/{run_id}/reaction",
     "/api/v1/monitoring/overview",
     "/api/v1/monitoring/runs",
 }
+
+
+@pytest.mark.asyncio
+async def test_normalize_resume_persists_resume_and_version_atomically(
+    monkeypatch,
+    tmp_path,
+):
+    from app.api.v1 import sessions
+    from app.state.schema import ResumeState, SharedState
+
+    calls = []
+    normalized = SharedState(
+        session_id="session-1",
+        user_id="user-1",
+        resume_state=ResumeState(skills=["Python"]),
+    )
+
+    async def intake(*_args, **_kwargs):
+        return SimpleNamespace(state=normalized, raw_text="Python resume")
+
+    async def save_normalized_resume(**kwargs):
+        calls.append(kwargs)
+        return {"resume_version": 1}
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("normalization must use the compound atomic write")
+
+    async def missing(_session_id):
+        return None
+
+    monkeypatch.setattr(sessions, "intake_resume", intake)
+    monkeypatch.setattr(
+        sessions,
+        "save_normalized_resume",
+        save_normalized_resume,
+        raising=False,
+    )
+    monkeypatch.setattr(sessions, "save_state", forbidden)
+    monkeypatch.setattr(sessions, "load_state", missing)
+
+    resume_path = tmp_path / "resume.txt"
+    resume_path.write_text("Python resume", encoding="utf-8")
+
+    await sessions._normalize_resume(
+        session_id="session-1",
+        user_id="user-1",
+        resume_path=resume_path,
+    )
+
+    assert calls[0]["session_id"] == "session-1"
+    assert calls[0]["resume_state"].skills == ["Python"]
+    assert len(calls[0]["content_hash"]) == 64
+    assert not resume_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_normalize_resume_failure_updates_only_status_atomically(monkeypatch):
+    from app.api.v1 import sessions
+
+    calls = []
+
+    async def intake(*_args, **_kwargs):
+        raise ValueError("bad resume")
+
+    async def mutate(*, session_id: str, mutator, status: str):
+        calls.append((session_id, status))
+        return None
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("failure fallback must not whole-save stale state")
+
+    monkeypatch.setattr(sessions, "intake_resume", intake)
+    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
+    monkeypatch.setattr(sessions, "load_state", forbidden)
+    monkeypatch.setattr(sessions, "save_state", forbidden)
+
+    await sessions._normalize_resume(
+        session_id="session-1",
+        user_id="user-1",
+        resume_path=Path("resume.txt"),
+    )
+
+    assert calls == [("session-1", "resume_error")]
 
 
 def _app() -> FastAPI:
@@ -108,11 +194,14 @@ def test_match_brief_persists_approved_career_state_before_run_snapshot(
             "confirmed_resume_version": 1,
         }
 
-    async def load(_session_id: str):
-        return state
-
-    async def save(current: SharedState, status: str):
-        call_order.append("save_state")
+    async def mutate(*, session_id: str, mutator, status: str):
+        assert session_id == "session-1"
+        current = state.model_copy(deep=True)
+        current.feedback_state.user_feedback.append(
+            {"feedback_id": 7, "job_id": "job-7", "outcome": "offer"}
+        )
+        result = mutator(current)
+        call_order.append("mutate_state")
         assert status == "match_brief_approved"
         assert current.career_state.current_goal == [
             "Find evidence-grounded platform engineering roles"
@@ -124,19 +213,25 @@ def test_match_brief_persists_approved_career_state_before_run_snapshot(
             "preferred_companies": ["DeepMind"]
         }
         assert current.career_state.avoid_roles == ["sales"]
+        assert current.feedback_state.user_feedback[0]["feedback_id"] == 7
+        return result
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("match brief must not whole-save stale state")
 
     async def create(*, session_id: str):
         call_order.append("create_run")
         assert session_id == "session-1"
-        assert call_order == ["save_state", "create_run"]
+        assert call_order == ["mutate_state", "create_run"]
         return _run(status=RunStatus.DRAFT)
 
     async def save_brief(**_kwargs):
         return _run(status=RunStatus.PLAN_READY)
 
     monkeypatch.setattr(sessions, "get_resume_metadata", confirmed)
-    monkeypatch.setattr(sessions, "load_state", load)
-    monkeypatch.setattr(sessions, "save_state", save)
+    monkeypatch.setattr(sessions, "load_state", forbidden)
+    monkeypatch.setattr(sessions, "save_state", forbidden)
+    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "create_run", create)
     monkeypatch.setattr(sessions, "save_match_brief", save_brief)
 
@@ -153,7 +248,7 @@ def test_match_brief_persists_approved_career_state_before_run_snapshot(
         )
 
     assert response.status_code == 201
-    assert call_order == ["save_state", "create_run"]
+    assert call_order == ["mutate_state", "create_run"]
 
 
 def test_execute_rejects_stale_plan(monkeypatch) -> None:
@@ -304,6 +399,18 @@ def test_explain_is_hidden_when_evaluation_capability_is_disabled(monkeypatch) -
         response = client.get("/api/v1/runs/run-1/explain")
 
     assert response.status_code == 404
+
+
+def test_contact_redaction_preserves_year_ranges_but_hides_phone_numbers() -> None:
+    from app.api.v1.sessions import _redact_contact_text
+
+    redacted = _redact_contact_text(
+        "Experience: 2019-2023. Phone: +44 7700 900123."
+    )
+
+    assert "2019-2023" in redacted
+    assert "+44 7700 900123" not in redacted
+    assert "[phone hidden]" in redacted
 
 
 def test_openapi_v1_snapshot_is_current() -> None:

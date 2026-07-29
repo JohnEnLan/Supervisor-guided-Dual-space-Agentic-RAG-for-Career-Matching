@@ -64,6 +64,35 @@ class Connection:
         return self.fetch_results.pop(0) if self.fetch_results else []
 
 
+@pytest.mark.asyncio
+async def test_recover_stale_runs_marks_old_queued_and_running_rows(monkeypatch):
+    from app.db import run_store
+
+    class RecoveryConnection:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, sql: str, *args: object):
+            self.calls.append((sql, args))
+            return "UPDATE 3"
+
+    connection = RecoveryConnection()
+
+    async def get_pool():
+        return Pool(connection)
+
+    monkeypatch.setattr(run_store, "get_pool", get_pool)
+
+    recovered = await run_store.recover_stale_runs(stale_after_seconds=900)
+
+    sql, args = connection.calls[0]
+    assert "status IN ('queued', 'running')" in sql
+    assert "status = 'stale'" in sql
+    assert "updated_at <" in sql
+    assert args == (900,)
+    assert recovered == 3
+
+
 def test_run_lifecycle_migration_is_additive_and_snapshot_based() -> None:
     sql = (
         ROOT / "app/db/migrations/0002_run_lifecycle.sql"

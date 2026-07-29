@@ -5,6 +5,11 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+from pydantic import ValidationError
+
+from app.config import Settings
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,3 +42,9 @@ def test_empty_env_file_override_disables_dotenv_loading() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize("field_name", ["llm_max_concurrency", "embed_max_concurrency"])
+def test_provider_concurrency_must_be_positive(field_name: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field_name: 0})

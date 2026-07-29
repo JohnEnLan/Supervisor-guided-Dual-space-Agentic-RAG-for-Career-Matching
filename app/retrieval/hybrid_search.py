@@ -10,6 +10,7 @@ from typing import Any
 from app.config import settings
 from app.db.pool import close_pool, get_pool
 from app.db.state_store import load_state
+from app.db.vector import to_pgvector
 from app.llm.qwen_embed import embed_one
 from app.retrieval.query_builder import build_resume_retrieval_query
 from app.retrieval.raptor import search_raptor_nodes
@@ -84,6 +85,14 @@ FIELD_AWARE_BONUS = {
     "metadata": 0.02,
 }
 MAX_FIELD_BONUS = 0.08
+MAX_TOP_K = 50
+_HARD_LIST_FIELDS = ("locations", "role_clusters", "companies")
+_SOFT_LIST_FIELDS = (
+    "preferred_locations",
+    "preferred_role_clusters",
+    "preferred_companies",
+    "title_keywords",
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +121,10 @@ class JobCandidate:
     company: str | None = None
     location: str | None = None
     role_cluster: str | None = None
+    visa_sponsor: bool | None = None
+    degree_required: str | None = None
+    min_years_exp: int | None = None
+    is_open: bool | None = None
     rrf_score: float = 0.0
     bm25_score: float = 0.0
     dense_score: float = 0.0
@@ -124,7 +137,60 @@ class JobCandidate:
     implicit_evidence: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
 
+def _validate_string_list_fields(
+    values: dict[str, Any],
+    field_names: tuple[str, ...],
+) -> None:
+    for field_name in field_names:
+        value = values.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise TypeError(f"{field_name} must be a list")
+        if any(not isinstance(item, str) for item in value):
+            raise TypeError(f"{field_name} must contain only strings")
+
+
+def _validated_hard_constraints(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError("hard_constraints must be an object")
+    _validate_string_list_fields(value, _HARD_LIST_FIELDS)
+    for field_name in ("location", "role_cluster", "degree_required"):
+        field_value = value.get(field_name)
+        if field_value is not None and not isinstance(field_value, str):
+            raise TypeError(f"{field_name} must be a string")
+    if "need_visa_sponsor" in value and not isinstance(
+        value["need_visa_sponsor"],
+        bool,
+    ):
+        raise TypeError("need_visa_sponsor must be a boolean")
+    if "max_years_exp" in value and (
+        isinstance(value["max_years_exp"], bool)
+        or not isinstance(value["max_years_exp"], int)
+    ):
+        raise TypeError("max_years_exp must be an integer")
+    return dict(value)
+
+
+def _validated_soft_preferences(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError("soft_prefs must be an object")
+    _validate_string_list_fields(value, _SOFT_LIST_FIELDS)
+    return dict(value)
+
+
+def _bounded_top_k(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("top_k must be an integer")
+    return min(max(value, 1), MAX_TOP_K)
+
+
 def _build_hard_filter_query(hard_constraints: dict[str, Any]) -> tuple[str, list[Any]]:
+    hard_constraints = _validated_hard_constraints(hard_constraints)
     clauses = ["is_open = TRUE"]
     params: list[Any] = []
 
@@ -237,10 +303,6 @@ def _prepare_bm25_tsquery(query: str, *, max_terms: int = 32) -> str:
     return " | ".join(f"{term}:*" for term in terms)
 
 
-def _to_vector_literal(values: list[float]) -> str:
-    return "[" + ",".join(f"{float(value):.10g}" for value in values) + "]"
-
-
 async def _dense(pool, query: str, allow_ids: list[str], k: int) -> list[ChunkHit]:
     if not allow_ids:
         return []
@@ -252,7 +314,7 @@ async def _dense(pool, query: str, allow_ids: list[str], k: int) -> list[ChunkHi
             f"expected {settings.embed_dim}"
         )
 
-    query_vector = _to_vector_literal(query_emb)
+    query_vector = to_pgvector(query_emb)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -424,6 +486,10 @@ def _rerank_candidates(
                 company=metadata.get("company"),
                 location=metadata.get("location"),
                 role_cluster=metadata.get("role_cluster"),
+                visa_sponsor=metadata.get("visa_sponsor"),
+                degree_required=metadata.get("degree_required"),
+                min_years_exp=metadata.get("min_years_exp"),
+                is_open=metadata.get("is_open"),
                 rrf_score=round(rrf_by_job.get(job_id, 0.0), 6),
                 bm25_score=round(bm25_by_job.get(job_id, 0.0), 6),
                 dense_score=round(dense_by_job.get(job_id, 0.0), 6),
@@ -542,7 +608,8 @@ async def _fetch_job_metadata(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT job_id, title, company, location, role_cluster
+            SELECT job_id, title, company, location, visa_sponsor,
+                   degree_required, min_years_exp, role_cluster, is_open
             FROM jobs
             WHERE job_id = ANY($1::text[])
             """,
@@ -601,11 +668,14 @@ async def hybrid_search(
     top_k: int = 20,
     include_raptor: bool = False,
 ) -> list[JobCandidate]:
+    if not isinstance(query, str):
+        raise TypeError("query must be a string")
     if not query.strip():
         return []
 
-    hard_constraints = hard_constraints or {}
-    soft_prefs = soft_prefs or {}
+    hard_constraints = _validated_hard_constraints(hard_constraints)
+    soft_prefs = _validated_soft_preferences(soft_prefs)
+    top_k = _bounded_top_k(top_k)
     recall_k = max(top_k * 4, top_k, 10)
     pool = await get_pool()
 
@@ -651,14 +721,19 @@ async def hybrid_search(
     if not fused:
         return []
 
-    candidate_ids = [job_id for job_id, _score in fused[: max(top_k * 3, top_k)]]
+    candidate_fused = fused[: max(top_k * 3, top_k)]
+    candidate_ids = [job_id for job_id, _score in candidate_fused]
     metadata_by_job = await _fetch_job_metadata(pool, candidate_ids)
+    hydrated_fused = [
+        item for item in candidate_fused if item[0] in metadata_by_job
+    ]
+    hydrated_ids = [job_id for job_id, _score in hydrated_fused]
     evidence_by_job = _merge_evidence(
-        candidate_ids, dense_ranks, bm25_ranks, raptor_ranks
+        hydrated_ids, dense_ranks, bm25_ranks, raptor_ranks
     )
     evidence_payloads_by_job = await _fetch_evidence_payloads(pool, evidence_by_job)
     evidence_fields_by_job = _merge_evidence_fields(
-        candidate_ids, dense_ranks, bm25_ranks, raptor_ranks
+        hydrated_ids, dense_ranks, bm25_ranks, raptor_ranks
     )
     field_bonus_by_job = {
         job_id: _field_bonus_from_evidence_fields(fields)
@@ -666,7 +741,7 @@ async def hybrid_search(
     }
 
     return _rerank_candidates(
-        fused=fused,
+        fused=hydrated_fused,
         bm25_by_job=_score_by_job(bm25_ranks),
         dense_by_job=_score_by_job(dense_ranks),
         evidence_by_job=evidence_by_job,

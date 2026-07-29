@@ -31,9 +31,9 @@ class Settings(BaseSettings):
     qwen_embed_model: str = "text-embedding-v3"
     embed_dim: int = 1024  # 必须与 schema.sql 里的 vector(N) 一致
 
-    llm_max_concurrency: int = 5
+    llm_max_concurrency: int = Field(default=5, ge=1)
     llm_user_prompt_max_chars: int = Field(default=60_000, ge=1_000)
-    embed_max_concurrency: int = 8
+    embed_max_concurrency: int = Field(default=8, ge=1)
 
     dual_space_enabled: bool = True
     implicit_min_cases: int = 3
@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     evaluation_capability_enabled: bool = False
     monitoring_enabled: bool = False
+    run_stale_after_seconds: int = Field(default=900, ge=1)
 
     max_clarification_loops: int = 1
     max_reretrieval_loops: int = 1

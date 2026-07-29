@@ -63,22 +63,7 @@ def build_public_explain(
             }
         )
 
-    recovery_events = []
-    for event in state.supervisor_log:
-        if event.get("stage") not in {
-            "clarification_loop",
-            "reretrieval_loop",
-            "repair_loop",
-        }:
-            continue
-        recovery_events.append(
-            {
-                "stage": str(event["stage"]),
-                "reason": str(event.get("reason") or "bounded_recovery"),
-                "attempt": int(event.get("loop_used") or 1),
-                "max_attempts": int(event.get("max_loops") or 1),
-            }
-        )
+    recovery_events = build_public_recovery_events(state.supervisor_log)
 
     durations = dict(stage_durations_ms or {})
     if not durations:
@@ -96,6 +81,29 @@ def build_public_explain(
         "stage_durations_ms": durations,
         "recovery_events": recovery_events,
     }
+
+
+def build_public_recovery_events(
+    supervisor_log: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project bounded recovery events through an explicit public allow-list."""
+    recovery_events: list[dict[str, Any]] = []
+    for event in supervisor_log:
+        if event.get("stage") not in {
+            "clarification_loop",
+            "reretrieval_loop",
+            "repair_loop",
+        }:
+            continue
+        recovery_events.append(
+            {
+                "stage": str(event["stage"]),
+                "reason": str(event.get("reason") or "bounded_recovery"),
+                "attempt": int(event.get("loop_used") or 1),
+                "max_attempts": int(event.get("max_loops") or 1),
+            }
+        )
+    return recovery_events
 
 
 def _optional_int(value: Any) -> int | None:

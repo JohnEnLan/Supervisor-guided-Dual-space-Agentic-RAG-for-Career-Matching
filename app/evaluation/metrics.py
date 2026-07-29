@@ -143,18 +143,25 @@ def evaluate_hard_filter_accuracy(
 ) -> dict[str, float | int]:
     checked = 0
     passed = 0
+    failed = 0
+    unknown = 0
     for case in cases:
         case_id = str(case["case_id"])
         hard_constraints = _as_dict(case.get("hard_constraints"))
-        if not hard_constraints:
-            continue
         for candidate in candidates_by_case.get(case_id, []):
             checked += 1
-            if _candidate_satisfies_hard_constraints(candidate, hard_constraints):
+            status = _candidate_hard_filter_status(candidate, hard_constraints)
+            if status == "passed":
                 passed += 1
+            elif status == "failed":
+                failed += 1
+            else:
+                unknown += 1
     return {
         "checked_candidates": checked,
         "hard_filter_passed": passed,
+        "hard_filter_failed": failed,
+        "hard_filter_unknown": unknown,
         "hard_filter_accuracy": round(passed / checked, 6) if checked else 1.0,
     }
 
@@ -165,11 +172,18 @@ def evaluate_explanation_faithfulness(
     checked = 0
     faithful = 0
     for row in rows:
-        available = {str(item) for item in row.get("available_evidence_span_ids", [])}
+        available_by_job = _as_dict(
+            row.get("available_evidence_span_ids_by_job")
+        )
         for role in row.get("recommended_roles", []):
             if not isinstance(role, Mapping):
                 continue
             checked += 1
+            job_id = str(role.get("job_id") or "")
+            available = {
+                str(item)
+                for item in available_by_job.get(job_id, [])
+            }
             evidence_ids = {str(item) for item in role.get("evidence_span_ids", [])}
             explanation = str(role.get("match_explanation") or "").strip()
             if explanation and evidence_ids and evidence_ids <= available:
@@ -231,36 +245,82 @@ def _format_table_cell(value: object) -> str:
     return str(value)
 
 
-def _candidate_satisfies_hard_constraints(
+def _candidate_hard_filter_status(
     candidate: Mapping[str, object], hard_constraints: Mapping[str, object]
-) -> bool:
+) -> str:
+    unknown = False
+
+    is_open = candidate.get("is_open")
+    if is_open is False:
+        return "failed"
+    if is_open is not True:
+        unknown = True
+
     locations = {str(item) for item in hard_constraints.get("locations", [])}
     if hard_constraints.get("location"):
         locations.add(str(hard_constraints["location"]))
-    if locations and str(candidate.get("location")) not in locations:
-        return False
+    if locations:
+        location = candidate.get("location")
+        if _is_unknown(location):
+            unknown = True
+        elif str(location) not in locations:
+            return "failed"
 
     if hard_constraints.get("need_visa_sponsor") is True:
-        if candidate.get("visa_sponsor") is not True:
-            return False
+        visa_sponsor = candidate.get("visa_sponsor")
+        if visa_sponsor is False:
+            return "failed"
+        if visa_sponsor is not True:
+            unknown = True
 
     max_years = hard_constraints.get("max_years_exp")
     if max_years is not None:
         candidate_years = candidate.get("min_years_exp")
-        if candidate_years is not None and int(candidate_years) > int(max_years):
-            return False
+        if _is_unknown(candidate_years):
+            unknown = True
+        elif int(candidate_years) > int(max_years):
+            return "failed"
 
     role_clusters = {str(item) for item in hard_constraints.get("role_clusters", [])}
     if hard_constraints.get("role_cluster"):
         role_clusters.add(str(hard_constraints["role_cluster"]))
-    if role_clusters and str(candidate.get("role_cluster")) not in role_clusters:
-        return False
+    if role_clusters:
+        role_cluster = candidate.get("role_cluster")
+        if _is_unknown(role_cluster):
+            unknown = True
+        elif str(role_cluster) not in role_clusters:
+            return "failed"
 
     degree_required = hard_constraints.get("degree_required")
-    if degree_required and str(candidate.get("degree_required")) != str(degree_required):
-        return False
+    if degree_required:
+        candidate_degree = candidate.get("degree_required")
+        if _is_unknown(candidate_degree):
+            unknown = True
+        elif str(candidate_degree) != str(degree_required):
+            return "failed"
 
-    return True
+    companies = {
+        str(item).strip().casefold()
+        for item in hard_constraints.get("companies", [])
+        if str(item).strip()
+    }
+    if companies:
+        company = candidate.get("company")
+        if _is_unknown(company):
+            unknown = True
+        elif str(company).strip().casefold() not in companies:
+            return "failed"
+
+    return "unknown" if unknown else "passed"
+
+
+def _is_unknown(value: object) -> bool:
+    return value is None or str(value).strip().casefold() in {
+        "",
+        "unknown",
+        "unspecified",
+        "not_specified",
+    }
 
 
 def _first_relevant_rank(predicted: Sequence[str], relevant: set[str]) -> int:

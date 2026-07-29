@@ -77,12 +77,22 @@ def test_evaluate_hard_filter_accuracy_checks_candidate_metadata():
     ]
     candidates = {
         "eval-1": [
-            {"job_id": "a", "location": "London", "min_years_exp": 1},
-            {"job_id": "b", "location": "Paris", "min_years_exp": 1},
+            {
+                "job_id": "a",
+                "location": "London",
+                "min_years_exp": 1,
+                "is_open": True,
+            },
+            {
+                "job_id": "b",
+                "location": "Paris",
+                "min_years_exp": 1,
+                "is_open": True,
+            },
         ],
         "eval-2": [
-            {"job_id": "c", "visa_sponsor": True},
-            {"job_id": "d", "visa_sponsor": False},
+            {"job_id": "c", "visa_sponsor": True, "is_open": True},
+            {"job_id": "d", "visa_sponsor": False, "is_open": True},
         ],
     }
 
@@ -91,7 +101,59 @@ def test_evaluate_hard_filter_accuracy_checks_candidate_metadata():
     assert metrics == {
         "checked_candidates": 4,
         "hard_filter_passed": 2,
+        "hard_filter_failed": 2,
+        "hard_filter_unknown": 0,
         "hard_filter_accuracy": 0.5,
+    }
+
+
+def test_evaluate_hard_filter_accuracy_counts_unknown_metadata_separately():
+    cases = [
+        {
+            "case_id": "eval-1",
+            "hard_constraints": {
+                "locations": ["London"],
+                "need_visa_sponsor": True,
+                "max_years_exp": 2,
+                "role_clusters": ["data_ai"],
+                "degree_required": "bachelor",
+                "companies": ["Example Ltd"],
+            },
+        }
+    ]
+    candidates = {
+        "eval-1": [
+            {
+                "job_id": "unknown",
+                "location": "London",
+                "visa_sponsor": None,
+                "min_years_exp": None,
+                "role_cluster": None,
+                "degree_required": None,
+                "company": None,
+                "is_open": True,
+            },
+            {
+                "job_id": "closed",
+                "location": "London",
+                "visa_sponsor": True,
+                "min_years_exp": 1,
+                "role_cluster": "data_ai",
+                "degree_required": "bachelor",
+                "company": "Example Ltd",
+                "is_open": False,
+            },
+        ]
+    }
+
+    metrics = evaluate_hard_filter_accuracy(cases, candidates)
+
+    assert metrics == {
+        "checked_candidates": 2,
+        "hard_filter_passed": 0,
+        "hard_filter_failed": 1,
+        "hard_filter_unknown": 1,
+        "hard_filter_accuracy": 0.0,
     }
 
 
@@ -99,7 +161,9 @@ def test_evaluate_explanation_faithfulness_requires_known_evidence_ids():
     rows = [
         {
             "case_id": "eval-1",
-            "available_evidence_span_ids": ["job-1:skills:1", "job-1:resp:2"],
+            "available_evidence_span_ids_by_job": {
+                "job-1": ["job-1:skills:1", "job-1:resp:2"],
+            },
             "recommended_roles": [
                 {
                     "job_id": "job-1",
@@ -110,7 +174,9 @@ def test_evaluate_explanation_faithfulness_requires_known_evidence_ids():
         },
         {
             "case_id": "eval-2",
-            "available_evidence_span_ids": ["job-2:skills:1"],
+            "available_evidence_span_ids_by_job": {
+                "job-2": ["job-2:skills:1"],
+            },
             "recommended_roles": [
                 {
                     "job_id": "job-2",
@@ -128,6 +194,31 @@ def test_evaluate_explanation_faithfulness_requires_known_evidence_ids():
         "faithful_explanations": 1,
         "explanation_faithfulness": 0.5,
     }
+
+
+def test_explanation_faithfulness_rejects_cross_job_evidence_references():
+    rows = [
+        {
+            "case_id": "eval-1",
+            "available_evidence_span_ids_by_job": {
+                "job-a": ["job-a:skills:1"],
+                "job-b": ["job-b:skills:1"],
+            },
+            "recommended_roles": [
+                {
+                    "job_id": "job-a",
+                    "match_explanation": "Claim cites another job.",
+                    "evidence_span_ids": ["job-b:skills:1"],
+                }
+            ],
+        }
+    ]
+
+    metrics = evaluate_explanation_faithfulness(rows)
+
+    assert metrics["checked_explanations"] == 1
+    assert metrics["faithful_explanations"] == 0
+    assert metrics["explanation_faithfulness"] == 0.0
 
 
 def test_compare_latent_space_runs_reports_metric_delta_and_qualitative_counts():

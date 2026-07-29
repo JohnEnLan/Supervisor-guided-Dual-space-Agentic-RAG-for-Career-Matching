@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.db.pool import get_pool
+from app.db.vector import to_pgvector
 from app.llm.qwen_embed import embed_one
 
 
@@ -151,7 +152,7 @@ async def upsert_career_case(
             case.missing_skills_before,
             case.application_outcome,
             case.recommended_bridge_roles,
-            _to_vector_literal(embedding) if embedding is not None else None,
+            to_pgvector(embedding) if embedding is not None else None,
         )
 
 
@@ -183,7 +184,7 @@ async def search_similar_cases(query: str, *, top_k: int = 5) -> list[dict[str, 
             ORDER BY embedding <=> $1::vector
             LIMIT $2
             """,
-            _to_vector_literal(query_embedding),
+            to_pgvector(query_embedding),
             top_k,
         )
     return [_case_row_to_dict(row) for row in rows]
@@ -222,26 +223,10 @@ async def search_similar_resume_cases_by_embedding(
             ORDER BY c.embedding <=> $1::vector
             LIMIT $2
             """,
-            _to_vector_literal(query_embedding),
+            to_pgvector(query_embedding),
             top_k,
         )
     return [_anonymous_case_row_to_dict(row) for row in rows]
-
-
-async def list_career_cases(*, limit: int = 20) -> list[dict[str, Any]]:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT case_id, background_type, target_role, successful_resume_features,
-                   missing_skills_before, application_outcome, recommended_bridge_roles
-            FROM career_cases
-            ORDER BY case_id
-            LIMIT $1
-            """,
-            limit,
-        )
-    return [_case_row_to_dict(row) for row in rows]
 
 
 def _case_row_to_dict(row: Any) -> dict[str, Any]:
@@ -271,7 +256,3 @@ def _anonymous_case_row_to_dict(row: Any) -> dict[str, Any]:
         "final_status": str(row["final_status"]),
         "source_confidence": float(row["source_confidence"]),
     }
-
-
-def _to_vector_literal(values: list[float]) -> str:
-    return "[" + ",".join(f"{float(value):.10g}" for value in values) + "]"
