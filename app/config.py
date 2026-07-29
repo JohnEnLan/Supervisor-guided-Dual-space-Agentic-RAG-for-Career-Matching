@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     evaluation_capability_enabled: bool = False
     monitoring_enabled: bool = False
+    langgraph_orchestrator_enabled: bool = False
     run_stale_after_seconds: int = Field(default=900, ge=1)
 
     max_clarification_loops: int = 1

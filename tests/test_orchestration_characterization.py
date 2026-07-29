@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import UTC, datetime
 import json
@@ -21,6 +22,44 @@ CHECKPOINT_ORDER = [
     "strategy_output",
     "publication_gate",
 ]
+
+
+@pytest.fixture(params=["legacy", "langgraph"], ids=["legacy", "langgraph"])
+def orchestration_implementation(request) -> str:
+    return str(request.param)
+
+
+async def _run_characterized_implementation(
+    implementation: str,
+    monkeypatch,
+    *,
+    run_id: str,
+):
+    from app.agents import orchestrator
+
+    if implementation == "legacy":
+        return await orchestrator.run_persisted_agentic_match_run(run_id=run_id)
+
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from app.api.v1 import runs
+    from app.graph.runner import run_graph_match
+
+    async def graph_with_memory(*, run_id: str):
+        return await run_graph_match(
+            run_id=run_id,
+            checkpointer=MemorySaver(),
+        )
+
+    monkeypatch.setattr(runs, "run_graph_match", graph_with_memory)
+    monkeypatch.setattr(
+        runs.settings,
+        "langgraph_orchestrator_enabled",
+        True,
+    )
+    executor = runs._select_run_executor()
+    assert executor is graph_with_memory
+    return await executor(run_id=run_id)
 
 
 def _brief(*, soft_preferences: dict[str, Any] | None = None) -> MatchBrief:
@@ -166,6 +205,7 @@ class PersistedRunRecorder:
         self.snapshots: list[dict[str, Any]] = []
         self.save_result_statuses: list[RunStatus] = []
         self.saved_metrics = []
+        self.transition_error_codes: list[str | None] = []
 
     def install(self, monkeypatch, orchestrator) -> None:
         monkeypatch.setattr(orchestrator, "get_run", self.get_run)
@@ -198,9 +238,9 @@ class PersistedRunRecorder:
         stage: RunStage | None = None,
         error_code: str | None = None,
     ) -> MatchRun:
-        del error_code
         assert run_id == self.run.run_id
         assert self.status is current_status
+        self.transition_error_codes.append(error_code)
         self.timeline.append(
             f"transition:{current_status.value}->{target_status.value}"
         )
@@ -270,6 +310,7 @@ class PersistedRunRecorder:
 @pytest.mark.asyncio
 async def test_persisted_run_preserves_checkpoint_stage_snapshot_and_terminal_order(
     monkeypatch,
+    orchestration_implementation,
 ) -> None:
     from app.agents import orchestrator
     from app.agents import supervisor
@@ -306,8 +347,10 @@ async def test_persisted_run_preserves_checkpoint_stage_snapshot_and_terminal_or
     monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
     monkeypatch.setattr(supervisor.deepseek, "chat", chat)
 
-    result = await orchestrator.run_persisted_agentic_match_run(
-        run_id=recorder.run.run_id
+    result = await _run_characterized_implementation(
+        orchestration_implementation,
+        monkeypatch,
+        run_id=recorder.run.run_id,
     )
 
     checkpoints = _checkpoint_entries(result.state)
@@ -417,6 +460,7 @@ class FakeClock:
 @pytest.mark.asyncio
 async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered(
     monkeypatch,
+    orchestration_implementation,
 ) -> None:
     from app.agents import orchestrator
     from app.agents import supervisor
@@ -452,14 +496,13 @@ async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered
         strategy_calls += 1
         clock.advance(3 if strategy_calls == 1 else 11)
         _populate_strategy_state(state)
-        if strategy_calls == 1:
-            state.strategy_state.resume_revision_plan = [
-                {
-                    "section": "experience",
-                    "suggestion": "Invent an unsupported achievement.",
-                    "evidence_span_ids": ["R-missing"],
-                }
-            ]
+        state.strategy_state.resume_revision_plan = [
+            {
+                "section": "experience",
+                "suggestion": "Invent an unsupported achievement.",
+                "evidence_span_ids": ["R-missing"],
+            }
+        ]
         return state
 
     async def chat(*_args, **_kwargs) -> str:
@@ -485,8 +528,10 @@ async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered
     monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
     monkeypatch.setattr(supervisor.deepseek, "chat", chat)
 
-    result = await orchestrator.run_persisted_agentic_match_run(
-        run_id=recorder.run.run_id
+    result = await _run_characterized_implementation(
+        orchestration_implementation,
+        monkeypatch,
+        run_id=recorder.run.run_id,
     )
 
     assert matching_calls == 2
@@ -607,6 +652,7 @@ async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered
 @pytest.mark.asyncio
 async def test_consulted_intent_skips_llm_but_keeps_checkpoint_and_reuse_log(
     monkeypatch,
+    orchestration_implementation,
 ) -> None:
     from app.agents import orchestrator
     from app.agents import supervisor
@@ -641,8 +687,10 @@ async def test_consulted_intent_skips_llm_but_keeps_checkpoint_and_reuse_log(
     monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
     monkeypatch.setattr(supervisor.deepseek, "chat", chat)
 
-    result = await orchestrator.run_persisted_agentic_match_run(
-        run_id=recorder.run.run_id
+    result = await _run_characterized_implementation(
+        orchestration_implementation,
+        monkeypatch,
+        run_id=recorder.run.run_id,
     )
 
     assert [
@@ -667,3 +715,149 @@ async def test_consulted_intent_skips_llm_but_keeps_checkpoint_and_reuse_log(
     }
     assert recorder.save_result_statuses == [RunStatus.RUNNING]
     assert recorder.timeline.count("save_result") == 1
+
+
+@pytest.mark.asyncio
+async def test_graph_reretrieval_condition_caps_loop_after_second_verify(
+    monkeypatch,
+) -> None:
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from app.agents import orchestrator
+    from app.agents import supervisor
+    from app.graph.build import build_graph
+
+    brief = _brief()
+    initial_state = _state()
+    recorder = PersistedRunRecorder(_run(brief), initial_state)
+    recorder.status = RunStatus.RUNNING
+    recorder.install(monkeypatch, orchestrator)
+    matching_calls = 0
+    strategy_calls = 0
+    verification_calls = 0
+
+    async def intent(state: SharedState, goal: str) -> SharedState:
+        state.career_state.current_goal = [goal]
+        return state
+
+    async def matching(
+        state: SharedState,
+        *,
+        retrieval_plan,
+        search_fn,
+    ) -> SharedState:
+        nonlocal matching_calls
+        del retrieval_plan, search_fn
+        matching_calls += 1
+        return _populate_matching_state(state, candidate_count=3)
+
+    async def strategy(state: SharedState) -> SharedState:
+        nonlocal strategy_calls
+        strategy_calls += 1
+        return _populate_strategy_state(state)
+
+    async def chat(*_args, **_kwargs) -> str:
+        nonlocal verification_calls
+        verification_calls += 1
+        return _verification_payload(needs_reretrieval=True)
+
+    monkeypatch.setattr(orchestrator, "run_intent_agent", intent)
+    monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
+    monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
+    monkeypatch.setattr(supervisor.deepseek, "chat", chat)
+
+    graph = build_graph(checkpointer=MemorySaver())
+    output = await graph.ainvoke(
+        {
+            "shared": initial_state,
+            "brief": brief,
+            "retrieval_plan": {},
+            "verification": {},
+            "product_result": None,
+            "attempt": 1,
+            "loops": {"reretrieval": 0, "repair": 0},
+            "run_id": recorder.run.run_id,
+            "stage_timing": {},
+        },
+        config={
+            "configurable": {"thread_id": recorder.run.run_id},
+            "recursion_limit": 12,
+        },
+        durability="sync",
+    )
+
+    assert matching_calls == 2
+    assert strategy_calls == 2
+    assert verification_calls == 2
+    assert output["attempt"] == 2
+    assert output["loops"]["reretrieval"] == 1
+    assert output["verification"]["reretrieval_loop_requested"] is True
+    assert output["verification"]["reretrieval_loop_used"] == 1
+    assert recorder.timeline.count("save_result") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("outcome", "terminal_status", "error_code", "expected_events"),
+    [
+        (
+            "failure",
+            RunStatus.FAILED,
+            "run_execution_failed",
+            ["event:run_started", "event:run_failed"],
+        ),
+        (
+            "cancelled",
+            RunStatus.CANCELLED,
+            "run_cancelled",
+            ["event:run_started"],
+        ),
+    ],
+)
+async def test_graph_runner_maps_failure_and_cancellation_like_legacy(
+    monkeypatch,
+    outcome,
+    terminal_status,
+    error_code,
+    expected_events,
+) -> None:
+    from app.agents import orchestrator
+    from app.graph import runner
+
+    brief = _brief()
+    recorder = PersistedRunRecorder(_run(brief), _state())
+    recorder.install(monkeypatch, orchestrator)
+
+    class InterruptingGraph:
+        async def ainvoke(self, _state, config, *, durability):
+            assert config == {
+                "configurable": {"thread_id": recorder.run.run_id},
+                "recursion_limit": 12,
+            }
+            assert durability == "sync"
+            if outcome == "cancelled":
+                raise asyncio.CancelledError
+            raise RuntimeError("injected graph failure")
+
+    monkeypatch.setattr(
+        runner,
+        "build_graph",
+        lambda **_kwargs: InterruptingGraph(),
+    )
+
+    expected_error = (
+        asyncio.CancelledError if outcome == "cancelled" else RuntimeError
+    )
+    with pytest.raises(expected_error):
+        await runner.run_graph_match(run_id=recorder.run.run_id)
+
+    assert recorder.status_history == [
+        RunStatus.QUEUED,
+        RunStatus.RUNNING,
+        terminal_status,
+    ]
+    assert recorder.transition_error_codes == [None, error_code]
+    assert [
+        event for event in recorder.timeline if event.startswith("event:")
+    ] == expected_events
+    assert recorder.timeline.count("save_result") == 0

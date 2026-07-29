@@ -24,6 +24,7 @@ from app.db.run_store import (
 )
 from app.domain.run import RunStage, RunStatus, TERMINAL_STATUSES
 from app.domain.results import ProductResult
+from app.graph.runner import run_graph_match
 from app.state.schema import SharedState
 
 
@@ -58,7 +59,7 @@ async def execute_run(
         )
     except RunConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    background_tasks.add_task(run_persisted_agentic_match_run, run_id=run_id)
+    background_tasks.add_task(_select_run_executor(), run_id=run_id)
     return _status_response(run)
 
 
@@ -178,6 +179,12 @@ def _status_response(run) -> RunStatusResponse:
         plan_hash=run.plan_hash,
         updated_at=run.updated_at,
     )
+
+
+def _select_run_executor():
+    if settings.langgraph_orchestrator_enabled:
+        return run_graph_match
+    return run_persisted_agentic_match_run
 
 
 def public_progress(

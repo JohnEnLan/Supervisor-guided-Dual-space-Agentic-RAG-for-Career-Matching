@@ -70,38 +70,10 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
         )
         _record_stage_duration(state, "intent", stage_started)
 
-        # The confirmed brief is the execution authority. Later agents may not
-        # rewrite these constraints.
-        state.career_state.current_goal = [brief.career_goal]
-        state.career_state.hard_constraints = dict(brief.hard_constraints)
-        state.career_state.soft_preferences = dict(brief.soft_preferences)
-        state.career_state.avoid_roles = list(brief.avoid_roles)
-        retrieval_plan = {
-            "hard_constraints": dict(brief.hard_constraints),
-            "soft_prefs": dict(brief.soft_preferences),
-            "top_k": brief.result_count,
-            "include_raptor": False,
-        }
-        state.supervisor_log.append(
-            {
-                "stage": "approved_match_brief",
-                "plan_version": brief.plan_version,
-                "plan_hash": brief.plan_hash,
-                "hard_constraints_locked": True,
-            }
-        )
-        state.supervisor_log.append(
-            {
-                "stage": "planning",
-                "source": "approved_match_brief",
-                "needs_clarification": False,
-                "clarification_loop_used": 0,
-                "retrieval_plan": _public_retrieval_plan(retrieval_plan),
-            }
-        )
-        await save_state_snapshot(
+        state, retrieval_plan = await _lock_approved_brief(
+            state,
+            brief,
             run_id=run_id,
-            state_snapshot=state.model_dump(mode="json"),
         )
 
         await update_run_stage(run_id=run_id, stage=RunStage.RETRIEVAL)
@@ -151,27 +123,13 @@ async def run_persisted_agentic_match_run(*, run_id: str) -> AgenticMatchResult:
                 allow_repair=verification.get("repair_loop_used", 0) == 0,
             )
             verification = _mark_reretrieval_loop_used(state, verification)
-        _record_stage_duration(state, "verification", stage_started)
-
-        # Reassert the immutable contract before snapshots are published.
-        state.career_state.hard_constraints = dict(brief.hard_constraints)
-        record_supervisor_checkpoint(
+        state, product_result = await _publish_verified_result(
             state,
-            checkpoint="publication_gate",
-            verification=verification,
+            brief,
+            verification,
+            run_id=run_id,
             attempt=2 if verification.get("reretrieval_loop_used") else 1,
-        )
-        await save_state_snapshot(
-            run_id=run_id,
-            state_snapshot=state.model_dump(mode="json"),
-        )
-        await update_run_stage(run_id=run_id, stage=RunStage.FINALIZATION)
-        stage_started = perf_counter()
-        product_result = project_product_result(state)
-        _record_stage_duration(state, "finalization", stage_started)
-        await save_state_snapshot(
-            run_id=run_id,
-            state_snapshot=state.model_dump(mode="json"),
+            verification_started_at=stage_started,
         )
         warning_codes = list(product_result.warnings)
         await save_run_result(
@@ -575,6 +533,84 @@ def _mark_reretrieval_loop_used(
             entry["reretrieval_loop_used"] = 1
             break
     return verification
+
+
+async def _lock_approved_brief(
+    state: SharedState,
+    brief: MatchBrief,
+    *,
+    run_id: str,
+) -> tuple[SharedState, dict[str, Any]]:
+    """Apply the immutable brief and publish the planning snapshot."""
+    state.career_state.current_goal = [brief.career_goal]
+    state.career_state.hard_constraints = dict(brief.hard_constraints)
+    state.career_state.soft_preferences = dict(brief.soft_preferences)
+    state.career_state.avoid_roles = list(brief.avoid_roles)
+    retrieval_plan = {
+        "hard_constraints": dict(brief.hard_constraints),
+        "soft_prefs": dict(brief.soft_preferences),
+        "top_k": brief.result_count,
+        "include_raptor": False,
+    }
+    state.supervisor_log.append(
+        {
+            "stage": "approved_match_brief",
+            "plan_version": brief.plan_version,
+            "plan_hash": brief.plan_hash,
+            "hard_constraints_locked": True,
+        }
+    )
+    state.supervisor_log.append(
+        {
+            "stage": "planning",
+            "source": "approved_match_brief",
+            "needs_clarification": False,
+            "clarification_loop_used": 0,
+            "retrieval_plan": _public_retrieval_plan(retrieval_plan),
+        }
+    )
+    await save_state_snapshot(
+        run_id=run_id,
+        state_snapshot=state.model_dump(mode="json"),
+    )
+    return state, retrieval_plan
+
+
+async def _publish_verified_result(
+    state: SharedState,
+    brief: MatchBrief,
+    verification: dict[str, Any],
+    *,
+    run_id: str,
+    attempt: int,
+    verification_started_at: float,
+):
+    """Publish final public snapshots without saving the terminal run."""
+    _record_stage_duration(
+        state,
+        "verification",
+        verification_started_at,
+    )
+    state.career_state.hard_constraints = dict(brief.hard_constraints)
+    record_supervisor_checkpoint(
+        state,
+        checkpoint="publication_gate",
+        verification=verification,
+        attempt=attempt,
+    )
+    await save_state_snapshot(
+        run_id=run_id,
+        state_snapshot=state.model_dump(mode="json"),
+    )
+    await update_run_stage(run_id=run_id, stage=RunStage.FINALIZATION)
+    started_at = perf_counter()
+    product_result = project_product_result(state)
+    _record_stage_duration(state, "finalization", started_at)
+    await save_state_snapshot(
+        run_id=run_id,
+        state_snapshot=state.model_dump(mode="json"),
+    )
+    return state, product_result
 
 
 def _public_retrieval_plan(plan: dict[str, Any]) -> dict[str, Any]:
