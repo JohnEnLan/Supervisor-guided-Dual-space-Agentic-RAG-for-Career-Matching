@@ -470,6 +470,10 @@ async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered
     recorder.install(monkeypatch, orchestrator)
     clock = FakeClock()
     monkeypatch.setattr(orchestrator, "perf_counter", clock)
+    # 图路径的 verify/publish 用墙钟做跨进程换算，两个时钟必须同源推进。
+    from app.graph import nodes as graph_nodes
+
+    monkeypatch.setattr(graph_nodes.time, "time", clock)
     matching_calls = 0
     strategy_calls = 0
     verification_calls = 0

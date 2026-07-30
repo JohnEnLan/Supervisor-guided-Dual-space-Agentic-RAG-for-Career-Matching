@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Literal
 
 from app.agents import orchestrator
@@ -9,7 +10,9 @@ from app.graph.state import GraphState, LoopCounters
 from app.state.schema import SharedState
 
 
-VERIFICATION_STARTED_AT = "verification_started_at"
+# 存墙钟时间而不是 perf_counter：GraphState 会随 checkpoint 持久化，
+# perf_counter 是进程相对时钟，跨进程续跑后直接使用会产生错误耗时。
+VERIFICATION_STARTED_WALL = "verification_started_wall"
 
 
 async def intent(state: GraphState) -> dict[str, Any]:
@@ -108,7 +111,7 @@ async def verify(state: GraphState) -> dict[str, Any]:
             run_id=state["run_id"],
             stage=RunStage.VERIFICATION,
         )
-        stage_timing[VERIFICATION_STARTED_AT] = orchestrator.perf_counter()
+        stage_timing[VERIFICATION_STARTED_WALL] = time.time()
         verification = await orchestrator.final_verification(shared)
     else:
         verification = await orchestrator.final_verification(
@@ -159,11 +162,15 @@ async def publish(state: GraphState) -> dict[str, Any]:
     shared = SharedState.model_validate(state["shared"])
     brief = MatchBrief.model_validate(state["brief"])
     loops = _loop_counters(state)
-    verification_started_at = state["stage_timing"].get(
-        VERIFICATION_STARTED_AT
-    )
-    if verification_started_at is None:
-        verification_started_at = orchestrator.perf_counter()
+    started_wall = state["stage_timing"].get(VERIFICATION_STARTED_WALL)
+    now_perf = orchestrator.perf_counter()
+    if started_wall is None:
+        verification_started_at = now_perf
+    else:
+        # 换算成当前进程的 perf_counter 基准，跨进程续跑后耗时仍然正确。
+        verification_started_at = now_perf - max(
+            0.0, time.time() - float(started_wall)
+        )
     shared, product_result = await orchestrator._publish_verified_result(
         shared,
         brief,
