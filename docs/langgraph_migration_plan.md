@@ -57,7 +57,7 @@ sync durability 延迟、节点重放的 LLM 成本、跨版本恢复兼容。�
 - 版本锁定：`langgraph==1.2.9`（1.2.10 发布仅一天，观察期不足）、`langgraph-checkpoint-postgres==3.1.0`、
   `psycopg[binary]==3.3.4`、`psycopg-pool==3.3.1`；生成完整 constraints，干净环境 `pip check` + 全量测试。
   如实承认传递依赖含 `langchain-core`（宪法"不引入 LangChain 全家桶"指不主动使用其应用层栈）。
-- checkpoint 表含完整 SharedState（PII 副本）：登记表与清理策略，设 `LANGGRAPH_STRICT_MSGPACK=true`。
+- checkpoint 表含完整 SharedState（PII 副本）：登记表与清理策略；反序列化安全由 `app/api/main.py` 的显式类型 allowlist 控制（环境开关方案已废弃）。
 
 ### 3.2 图结构（补全对审指出的遗漏）
 

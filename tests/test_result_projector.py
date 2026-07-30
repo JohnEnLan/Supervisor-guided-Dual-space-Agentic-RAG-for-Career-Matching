@@ -85,6 +85,18 @@ def _state() -> SharedState:
                 }
             ],
         ),
+        supervisor_log=[
+            {
+                "stage": "final_verification",
+                "hard_filter_violations": [
+                    {
+                        "job_id": "job-hard-fail",
+                        "field": "location",
+                        "source": "deterministic",
+                    }
+                ],
+            }
+        ],
     )
 
 
@@ -107,6 +119,29 @@ def test_projector_never_exposes_shared_state_or_private_user_id() -> None:
     assert "private-user" not in serialized
     assert "supervisor_log" not in payload
     assert "retrieval_state" not in payload
+
+
+def test_projector_ignores_llm_authored_role_level_hard_constraint_flags() -> None:
+    """角色对象上的 hard_constraint_* 字段是 LLM 可透传内容，无确定性来源，
+    不得作为剔岗依据（CLAUDE.md：硬过滤不交给 LLM 判断）。"""
+    state = _state()
+    state.supervisor_log = [
+        {"stage": "final_verification", "hard_filter_violations": []}
+    ]
+    state.strategy_state.recommended_roles[0]["hard_constraint_passed"] = False
+    state.strategy_state.recommended_roles[0]["hard_constraint_violations"] = [
+        {"field": "location", "reason": "hallucinated"}
+    ]
+
+    result = project_product_result(state)
+
+    published = [role.job_id for role in result.recommended_roles]
+    assert "job-good" in published
+    assert "job-hard-fail" in published
+    assert not any(
+        warning.startswith("hard_constraint_failed:")
+        for warning in result.warnings
+    )
 
 
 def test_projector_honors_latest_deterministic_hard_filter_violations() -> None:

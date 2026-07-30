@@ -30,11 +30,10 @@ def project_product_result(state: SharedState) -> ProductResult:
         if not job_id:
             warnings.append("recommendation_missing_job_id")
             continue
-        if (
-            job_id in verified_hard_failures
-            or role.get("hard_constraint_passed") is False
-            or role.get("hard_constraint_violations")
-        ):
+        # 硬约束剔岗只信确定性来源（最新核查的 deterministic 违规集合）。
+        # 角色对象上的 hard_constraint_* 字段无生产端确定性写入方（LLM 可透传），
+        # 依据 CLAUDE.md「硬过滤不交给 LLM 判断」不得作为剔岗依据。
+        if job_id in verified_hard_failures:
             warnings.append(f"hard_constraint_failed:{job_id}")
             continue
 

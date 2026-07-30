@@ -38,7 +38,15 @@ async def _sweep_stale_and_terminal_checkpoints(checkpointer) -> None:
         return
     terminal_thread_ids = await list_terminal_checkpoint_thread_ids()
     for thread_id in terminal_thread_ids:
-        await checkpointer.adelete_thread(thread_id)
+        # 逐条隔离：单个 thread 删除失败不得饿死其后线程的 PII 清理。
+        try:
+            await checkpointer.adelete_thread(thread_id)
+        except Exception:
+            logger.warning(
+                "checkpoint_thread_delete_failed run_id=%s",
+                thread_id,
+                exc_info=True,
+            )
 
 
 async def _run_checkpoint_sweeper(

@@ -313,3 +313,43 @@ async def test_lifespan_disables_periodic_sweep_when_interval_is_zero(
 
     async with main.lifespan(main.app):
         assert main.app.state.langgraph_checkpointer is not None
+
+
+@pytest.mark.asyncio
+async def test_sweep_isolates_per_thread_delete_failures(monkeypatch, caplog):
+    """单个 thread 删除失败不得饿死其后线程的 PII checkpoint 清理。"""
+    import logging
+
+    from app.api import main
+
+    deleted: list[str] = []
+
+    class FlakySaver:
+        async def adelete_thread(self, thread_id):
+            if thread_id == "poison-run":
+                raise RuntimeError("delete blocked")
+            deleted.append(thread_id)
+
+    async def fake_recover_stale_runs(*, stale_after_seconds):
+        del stale_after_seconds
+        return 0
+
+    async def fake_list_terminal_checkpoint_thread_ids():
+        return ["poison-run", "healthy-run-1", "healthy-run-2"]
+
+    monkeypatch.setattr(main, "recover_stale_runs", fake_recover_stale_runs)
+    monkeypatch.setattr(
+        main,
+        "list_terminal_checkpoint_thread_ids",
+        fake_list_terminal_checkpoint_thread_ids,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await main._sweep_stale_and_terminal_checkpoints(FlakySaver())
+
+    assert deleted == ["healthy-run-1", "healthy-run-2"]
+    assert any(
+        "checkpoint_thread_delete_failed" in record.message
+        and "poison-run" in record.getMessage()
+        for record in caplog.records
+    )
