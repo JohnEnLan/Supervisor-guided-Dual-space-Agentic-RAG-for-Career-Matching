@@ -95,8 +95,11 @@ FastAPI polling routes. State is stored by `session_id` in PostgreSQL.
 Start the API locally:
 
 ```bash
-uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+python -m app.serve --host 127.0.0.1 --port 8000
 ```
+
+On Windows, this entrypoint selects `SelectorEventLoop` before Uvicorn
+creates the event loop, as required by psycopg's asynchronous connections.
 
 Minimal API flow:
 
@@ -119,7 +122,7 @@ curl http://127.0.0.1:8000/status/s1
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.db.migrate
-.\.venv\Scripts\python.exe -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m app.serve --host 127.0.0.1 --port 8000
 ```
 
 另开一个终端启动前端：

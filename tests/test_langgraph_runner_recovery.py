@@ -5,6 +5,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import json
+import logging
 from pathlib import Path
 import sys
 from typing import Any, AsyncIterator
@@ -483,6 +484,119 @@ def test_runner_resumes_after_strategy_without_reexecution_and_cleans_pg(
     _run_async(_assert_runner_recovers_and_cleans_checkpoints(monkeypatch))
 
 
+async def _assert_runner_recovers_before_first_checkpoint(monkeypatch) -> None:
+    from app.agents import orchestrator, supervisor
+    from app.db import pool as asyncpg_pool
+    from app.db import run_store
+    from app.graph import runner
+
+    database_url = _database_url()
+    run_id = f"runner-recovery-no-checkpoint-{uuid4()}"
+    session_id = f"runner-recovery-no-checkpoint-session-{uuid4()}"
+    brief = _brief()
+    execution_counts = {"intent": 0, "retrieve_match": 0, "strategy": 0}
+
+    await asyncpg_pool.close_pool()
+    monkeypatch.setattr(asyncpg_pool.settings, "database_url", database_url)
+    monkeypatch.setattr(asyncpg_pool.settings, "db_pool_min", 1)
+    monkeypatch.setattr(asyncpg_pool.settings, "db_pool_max", 4)
+
+    async def intent(state: SharedState, goal: str) -> SharedState:
+        execution_counts["intent"] += 1
+        state.career_state.current_goal = [goal]
+        return state
+
+    async def matching(
+        state: SharedState,
+        *,
+        retrieval_plan,
+        search_fn,
+    ) -> SharedState:
+        del retrieval_plan, search_fn
+        execution_counts["retrieve_match"] += 1
+        return _populate_matching_state(state)
+
+    async def strategy(state: SharedState) -> SharedState:
+        execution_counts["strategy"] += 1
+        return _populate_strategy_state(state)
+
+    async def chat(*_args, **_kwargs) -> str:
+        return json.dumps(
+            {
+                "hard_filter_violations": [],
+                "missing_evidence": [],
+                "fabrication_risks": [],
+                "too_few_results": {},
+                "needs_reretrieval": False,
+                "needs_repair": False,
+            }
+        )
+
+    monkeypatch.setattr(orchestrator, "run_intent_agent", intent)
+    monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
+    monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
+    monkeypatch.setattr(supervisor.deepseek, "chat", chat)
+
+    inserted = False
+    async with _open_checkpointer(database_url) as (checkpointer, pool):
+        try:
+            await _insert_queued_runs(
+                pool,
+                session_ids=[session_id],
+                run_ids=[run_id],
+                brief=brief,
+            )
+            inserted = True
+            async with pool.connection() as connection:
+                await connection.execute(
+                    """
+                    UPDATE match_runs
+                    SET status = 'running', stage = 'intent'
+                    WHERE run_id = %s
+                    """,
+                    (run_id,),
+                )
+
+            config = {"configurable": {"thread_id": run_id}}
+            assert await checkpointer.aget_tuple(config) is None
+
+            await runner.run_graph_match(
+                run_id=run_id,
+                checkpointer=checkpointer,
+            )
+
+            assert execution_counts == {
+                "intent": 1,
+                "retrieve_match": 1,
+                "strategy": 1,
+            }
+            terminal_run = await run_store.get_run(run_id=run_id)
+            assert terminal_run is not None
+            assert terminal_run.status is RunStatus.COMPLETED
+            product_result = ProductResult.model_validate(
+                terminal_run.result_snapshot
+            )
+            assert [
+                role.job_id for role in product_result.recommended_roles
+            ] == ["job-1"]
+            assert await _checkpoint_row_counts(pool, run_id) == {
+                table_name: 0 for table_name in CHECKPOINT_TABLES
+            }
+        finally:
+            await asyncpg_pool.close_pool()
+            if inserted:
+                await _delete_test_rows(
+                    checkpointer,
+                    pool,
+                    run_ids=[run_id],
+                    session_ids=[session_id],
+                )
+
+
+def test_runner_recovers_running_run_before_first_checkpoint(monkeypatch) -> None:
+    _run_async(_assert_runner_recovers_before_first_checkpoint(monkeypatch))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("outcome", "terminal_status"),
@@ -631,3 +745,29 @@ async def test_runner_retains_checkpoint_when_terminal_transition_loses_cas(
 
     assert stored_status is RunStatus.RUNNING
     assert deleted_threads == []
+
+
+@pytest.mark.asyncio
+async def test_best_effort_checkpoint_delete_logs_structured_warning(
+    caplog,
+) -> None:
+    from app.graph import runner
+
+    class FailingCheckpointer:
+        async def adelete_thread(self, thread_id: str) -> None:
+            raise RuntimeError(f"cannot delete {thread_id}")
+
+    with caplog.at_level(logging.WARNING, logger=runner.__name__):
+        await runner._best_effort_delete_checkpoint_thread(
+            FailingCheckpointer(),
+            "run-delete-failed",
+        )
+
+    records = [
+        record
+        for record in caplog.records
+        if record.name == runner.__name__
+    ]
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    assert records[0].run_id == "run-delete-failed"

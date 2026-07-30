@@ -120,14 +120,28 @@ def _ranked_job_evidence(state: SharedState) -> dict[str, dict[str, Any]]:
 
 
 def _verified_hard_failure_job_ids(state: SharedState) -> set[str]:
+    latest_verification = next(
+        (
+            entry
+            for entry in reversed(state.supervisor_log)
+            if entry.get("stage") == "final_verification"
+        ),
+        None,
+    )
+    if latest_verification is None:
+        return set()
+
     failed: set[str] = set()
-    for entry in state.supervisor_log:
-        violations = entry.get("hard_filter_violations") or []
-        if not isinstance(violations, list):
-            continue
-        for violation in violations:
-            if isinstance(violation, dict) and violation.get("job_id"):
-                failed.add(str(violation["job_id"]))
+    violations = latest_verification.get("hard_filter_violations") or []
+    if not isinstance(violations, list):
+        return failed
+    for violation in violations:
+        if (
+            isinstance(violation, dict)
+            and violation.get("source") == "deterministic"
+            and violation.get("job_id")
+        ):
+            failed.add(str(violation["job_id"]))
     return failed
 
 

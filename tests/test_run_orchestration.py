@@ -329,3 +329,24 @@ async def test_consulted_run_skips_duplicate_intent_agent(monkeypatch) -> None:
     assert stages[0] is RunStage.RETRIEVAL
     assert len(captured_metrics) == 1
     assert "finalization" in captured_metrics[0].stage_durations_ms
+
+
+def test_graph_facing_public_aliases_match_private_implementations():
+    """契约测试（F8）：图路径消费的公共别名必须与内部实现同一对象。"""
+    from app.agents import orchestrator
+
+    pairs = [
+        ("run_intent_under_supervision", "_run_intent_under_supervision"),
+        ("run_matching_under_supervision", "_run_matching_under_supervision"),
+        ("run_strategy_under_supervision", "_run_strategy_under_supervision"),
+        ("lock_approved_brief", "_lock_approved_brief"),
+        ("publish_verified_result", "_publish_verified_result"),
+        ("build_reretrieval_plan", "_build_reretrieval_plan"),
+        ("mark_reretrieval_loop_used", "_mark_reretrieval_loop_used"),
+        ("record_stage_duration", "_record_stage_duration"),
+        ("default_search_fn", "_default_search_fn"),
+    ]
+    for public_name, private_name in pairs:
+        assert getattr(orchestrator, public_name) is getattr(
+            orchestrator, private_name
+        )

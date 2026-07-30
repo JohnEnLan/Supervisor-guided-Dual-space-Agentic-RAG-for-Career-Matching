@@ -203,6 +203,7 @@ class PersistedRunRecorder:
         self.stage_history: list[RunStage] = []
         self.timeline: list[str] = []
         self.snapshots: list[dict[str, Any]] = []
+        self.result_snapshots: list[dict[str, Any]] = []
         self.save_result_statuses: list[RunStatus] = []
         self.saved_metrics = []
         self.transition_error_codes: list[str | None] = []
@@ -286,8 +287,8 @@ class PersistedRunRecorder:
         result_snapshot: dict[str, Any],
         warning_codes: list[str],
     ) -> MatchRun:
-        del result_snapshot
         assert run_id == self.run.run_id
+        self.result_snapshots.append(deepcopy(result_snapshot))
         self.timeline.append("save_result")
         self.save_result_statuses.append(self.status)
         assert self.status is RunStatus.RUNNING
@@ -621,11 +622,12 @@ async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered
     assert final_logs[0]["hard_filter_violations"] == [
         {
             "job_id": "job-1",
-            "field": "visa",
-            "expected": "eligible",
-            "actual": "unknown",
-        }
-    ]
+                "field": "visa",
+                "expected": "eligible",
+                "actual": "unknown",
+                "source": "llm_advisory",
+            }
+        ]
     assert final_logs[0]["repair_loop_used"] == 1
     assert final_logs[0]["reretrieval_loop_requested"] is True
     assert final_logs[0]["reretrieval_loop_used"] == 0
@@ -865,3 +867,113 @@ async def test_graph_runner_maps_failure_and_cancellation_like_legacy(
         event for event in recorder.timeline if event.startswith("event:")
     ] == expected_events
     assert recorder.timeline.count("save_result") == 0
+
+
+class ShiftablePerfClock:
+    """跟随墙钟推进，但 perf 原点可被人为重置（模拟进程重启）。"""
+
+    def __init__(self, wall: FakeClock) -> None:
+        self.wall = wall
+        self.offset = 0.0
+
+    def __call__(self) -> float:
+        return self.wall.value + self.offset
+
+
+@pytest.mark.asyncio
+async def test_graph_verification_duration_survives_perf_origin_reset(
+    monkeypatch,
+) -> None:
+    """回归 F5：verify 与 publish 之间 perf 原点重置（等价于进程重启）时，
+    verification 时长仍等于墙钟经过值。持久化 perf_counter 的旧实现无法通过。"""
+    from app.agents import orchestrator
+    from app.agents import supervisor
+    from app.graph import nodes as graph_nodes
+
+    brief = _brief()
+    recorder = PersistedRunRecorder(_run(brief), _state())
+    recorder.install(monkeypatch, orchestrator)
+
+    wall = FakeClock()
+    perf = ShiftablePerfClock(wall)
+    monkeypatch.setattr(orchestrator, "perf_counter", perf)
+    monkeypatch.setattr(graph_nodes.time, "time", wall)
+
+    async def intent(state: SharedState, goal: str) -> SharedState:
+        state.career_state.current_goal = [goal]
+        return state
+
+    async def matching(state: SharedState, *, retrieval_plan, search_fn):
+        del retrieval_plan, search_fn
+        return _populate_matching_state(state)
+
+    async def strategy(state: SharedState) -> SharedState:
+        return _populate_strategy_state(state)
+
+    async def chat(*_args, **_kwargs) -> str:
+        wall.advance(36)
+        # 核查完成后、publish 之前重置 perf 原点，模拟进程重启后续跑。
+        perf.offset = -1000.0
+        return _verification_payload()
+
+    monkeypatch.setattr(orchestrator, "run_intent_agent", intent)
+    monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
+    monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
+    monkeypatch.setattr(supervisor.deepseek, "chat", chat)
+
+    result = await _run_characterized_implementation(
+        "langgraph",
+        monkeypatch,
+        run_id=recorder.run.run_id,
+    )
+
+    durations = {
+        entry["stage_name"]: entry["duration_ms"]
+        for entry in result.state.supervisor_log
+        if entry.get("stage") == "public_stage_duration"
+    }
+    assert durations["verification"] == 36000
+
+
+@pytest.mark.asyncio
+async def test_both_implementations_produce_identical_product_results(
+    monkeypatch,
+) -> None:
+    """回归 F6：相同输入下 legacy 与 langgraph 发布的最终 ProductResult 全等。"""
+    from app.agents import orchestrator
+    from app.agents import supervisor
+
+    results: dict[str, dict[str, Any]] = {}
+    for implementation in ("legacy", "langgraph"):
+        brief = _brief()
+        recorder = PersistedRunRecorder(_run(brief), _state())
+        recorder.install(monkeypatch, orchestrator)
+
+        async def intent(state: SharedState, goal: str) -> SharedState:
+            state.career_state.current_goal = [goal]
+            return state
+
+        async def matching(state: SharedState, *, retrieval_plan, search_fn):
+            del retrieval_plan, search_fn
+            return _populate_matching_state(state)
+
+        async def strategy(state: SharedState) -> SharedState:
+            return _populate_strategy_state(state)
+
+        async def chat(*_args, **_kwargs) -> str:
+            return _verification_payload()
+
+        monkeypatch.setattr(orchestrator, "run_intent_agent", intent)
+        monkeypatch.setattr(orchestrator, "run_matching_agent", matching)
+        monkeypatch.setattr(orchestrator, "run_strategy_agent", strategy)
+        monkeypatch.setattr(supervisor.deepseek, "chat", chat)
+
+        await _run_characterized_implementation(
+            implementation,
+            monkeypatch,
+            run_id=recorder.run.run_id,
+        )
+        assert len(recorder.result_snapshots) == 1
+        results[implementation] = recorder.result_snapshots[0]
+
+    assert results["legacy"] == results["langgraph"]

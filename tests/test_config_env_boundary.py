@@ -50,12 +50,26 @@ def test_provider_concurrency_must_be_positive(field_name: str) -> None:
         Settings(**{field_name: 0})
 
 
+def test_checkpoint_sweep_interval_defaults_and_can_be_disabled() -> None:
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert Settings().checkpoint_sweep_interval_seconds == 3600
+    assert (
+        Settings(checkpoint_sweep_interval_seconds=0)
+        .checkpoint_sweep_interval_seconds
+        == 0
+    )
+    assert "CHECKPOINT_SWEEP_INTERVAL_SECONDS=3600" in example
+
+
 def test_langgraph_defaults_enabled_with_documented_rollback() -> None:
     settings = Settings()
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert settings.langgraph_orchestrator_enabled is True
     assert "LANGGRAPH_ORCHESTRATOR_ENABLED=true" in example
-    assert "LANGGRAPH_STRICT_MSGPACK=true" in example
+    # F7：LANGGRAPH_STRICT_MSGPACK 是无效开关（Settings 无该字段且加载时机太晚），
+    # 反序列化安全由 app/api/main.py 的显式类型 allowlist 控制。
+    assert "LANGGRAPH_STRICT_MSGPACK" not in example
     assert "false" in example.lower()
     assert "旧" in example or "legacy" in example.lower()

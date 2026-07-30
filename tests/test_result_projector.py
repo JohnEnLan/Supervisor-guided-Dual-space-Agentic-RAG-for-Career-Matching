@@ -109,14 +109,18 @@ def test_projector_never_exposes_shared_state_or_private_user_id() -> None:
     assert "retrieval_state" not in payload
 
 
-def test_projector_honors_supervisor_hard_filter_violations() -> None:
+def test_projector_honors_latest_deterministic_hard_filter_violations() -> None:
     state = _state()
     state.strategy_state.recommended_roles[0].pop("hard_constraint_passed")
     state.supervisor_log.append(
         {
             "stage": "final_verification",
             "hard_filter_violations": [
-                {"job_id": "job-good", "field": "location"}
+                {
+                    "job_id": "job-good",
+                    "field": "location",
+                    "source": "deterministic",
+                }
             ],
         }
     )
@@ -125,6 +129,56 @@ def test_projector_honors_supervisor_hard_filter_violations() -> None:
 
     assert "job-good" not in [role.job_id for role in result.recommended_roles]
     assert "hard_constraint_failed:job-good" in result.warnings
+
+
+def test_projector_does_not_drop_role_for_llm_advisory_violation() -> None:
+    state = _state()
+    state.strategy_state.recommended_roles[0].pop("hard_constraint_passed")
+    state.supervisor_log.append(
+        {
+            "stage": "final_verification",
+            "hard_filter_violations": [
+                {
+                    "job_id": "job-good",
+                    "field": "location",
+                    "source": "llm_advisory",
+                }
+            ],
+        }
+    )
+
+    result = project_product_result(state)
+
+    assert "job-good" in [role.job_id for role in result.recommended_roles]
+    assert "hard_constraint_failed:job-good" not in result.warnings
+
+
+def test_projector_ignores_historical_deterministic_violation() -> None:
+    state = _state()
+    state.strategy_state.recommended_roles[0].pop("hard_constraint_passed")
+    state.supervisor_log.extend(
+        [
+            {
+                "stage": "final_verification",
+                "hard_filter_violations": [
+                    {
+                        "job_id": "job-good",
+                        "field": "location",
+                        "source": "deterministic",
+                    }
+                ],
+            },
+            {
+                "stage": "final_verification",
+                "hard_filter_violations": [],
+            },
+        ]
+    )
+
+    result = project_product_result(state)
+
+    assert "job-good" in [role.job_id for role in result.recommended_roles]
+    assert "hard_constraint_failed:job-good" not in result.warnings
 
 
 def test_projector_warns_when_no_recommendation_is_publishable() -> None:

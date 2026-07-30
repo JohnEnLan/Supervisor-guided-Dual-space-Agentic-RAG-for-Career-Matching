@@ -158,7 +158,12 @@ async def final_verification(
     )
     parsed = _loads_or_empty(raw)
     result = {
-        "hard_filter_violations": _as_list(parsed.get("hard_filter_violations")),
+        "hard_filter_violations": [
+            {**violation, "source": "llm_advisory"}
+            if isinstance(violation, dict)
+            else violation
+            for violation in _as_list(parsed.get("hard_filter_violations"))
+        ],
         "missing_evidence": _as_list(parsed.get("missing_evidence")),
         "fabrication_risks": _as_list(parsed.get("fabrication_risks")),
         "too_few_results": _as_dict(parsed.get("too_few_results")),
@@ -279,6 +284,7 @@ def _add_deterministic_verification(
                         "field": "location",
                         "expected": sorted(allowed_locations),
                         "actual": location,
+                        "source": "deterministic",
                     }
                 )
 

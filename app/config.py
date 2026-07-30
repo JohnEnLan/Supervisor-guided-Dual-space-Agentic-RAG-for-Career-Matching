@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     monitoring_enabled: bool = False
     langgraph_orchestrator_enabled: bool = True
     run_stale_after_seconds: int = Field(default=900, ge=1)
+    checkpoint_sweep_interval_seconds: int = Field(default=3600, ge=0)
 
     max_clarification_loops: int = 1
     max_reretrieval_loops: int = 1

@@ -636,3 +636,19 @@ def _record_stage_duration(
             "duration_ms": max(0, round((perf_counter() - started_at) * 1000)),
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# 图路径（app/graph/nodes.py）消费的公共编排契约。
+# 下划线原名保留供本模块 legacy 路径内部使用；两套名字指向同一实现，
+# 契约由 tests/test_run_orchestration.py 的别名测试锚定。
+# ---------------------------------------------------------------------------
+run_intent_under_supervision = _run_intent_under_supervision
+run_matching_under_supervision = _run_matching_under_supervision
+run_strategy_under_supervision = _run_strategy_under_supervision
+lock_approved_brief = _lock_approved_brief
+publish_verified_result = _publish_verified_result
+build_reretrieval_plan = _build_reretrieval_plan
+mark_reretrieval_loop_used = _mark_reretrieval_loop_used
+record_stage_duration = _record_stage_duration
+default_search_fn = _default_search_fn

@@ -19,19 +19,19 @@ async def intent(state: GraphState) -> dict[str, Any]:
     shared = SharedState.model_validate(state["shared"])
     brief = MatchBrief.model_validate(state["brief"])
     started_at = orchestrator.perf_counter()
-    shared = await orchestrator._run_intent_under_supervision(
+    shared = await orchestrator.run_intent_under_supervision(
         shared,
         brief.career_goal,
         skip_agent=shared.career_state.intent_consulted,
     )
-    orchestrator._record_stage_duration(shared, "intent", started_at)
+    orchestrator.record_stage_duration(shared, "intent", started_at)
     return {"shared": shared, "brief": brief}
 
 
 async def lock_brief(state: GraphState) -> dict[str, Any]:
     shared = SharedState.model_validate(state["shared"])
     brief = MatchBrief.model_validate(state["brief"])
-    shared, retrieval_plan = await orchestrator._lock_approved_brief(
+    shared, retrieval_plan = await orchestrator.lock_approved_brief(
         shared,
         brief,
         run_id=state["run_id"],
@@ -54,15 +54,15 @@ async def retrieve_match(state: GraphState) -> dict[str, Any]:
         )
         started_at = orchestrator.perf_counter()
 
-    shared = await orchestrator._run_matching_under_supervision(
+    shared = await orchestrator.run_matching_under_supervision(
         shared,
         retrieval_plan=state["retrieval_plan"],
-        search_fn=orchestrator._default_search_fn,
+        search_fn=orchestrator.default_search_fn,
         locked_hard_constraints=brief.hard_constraints,
         attempt=attempt,
     )
     if attempt == 1:
-        orchestrator._record_stage_duration(
+        orchestrator.record_stage_duration(
             shared,
             "retrieval",
             started_at,
@@ -84,12 +84,12 @@ async def strategy(state: GraphState) -> dict[str, Any]:
         )
         started_at = orchestrator.perf_counter()
 
-    shared = await orchestrator._run_strategy_under_supervision(
+    shared = await orchestrator.run_strategy_under_supervision(
         shared,
         attempt=attempt,
     )
     if attempt == 1:
-        orchestrator._record_stage_duration(
+        orchestrator.record_stage_duration(
             shared,
             "strategy",
             started_at,
@@ -124,7 +124,7 @@ async def verify(state: GraphState) -> dict[str, Any]:
         min(1, int(verification.get("repair_loop_used", 0))),
     )
     if loops["reretrieval"]:
-        verification = orchestrator._mark_reretrieval_loop_used(
+        verification = orchestrator.mark_reretrieval_loop_used(
             shared,
             verification,
         )
@@ -143,7 +143,7 @@ async def prepare_reretrieval(state: GraphState) -> dict[str, Any]:
 
     shared = SharedState.model_validate(state["shared"])
     brief = MatchBrief.model_validate(state["brief"])
-    retrieval_plan, reretrieval_log = orchestrator._build_reretrieval_plan(
+    retrieval_plan, reretrieval_log = orchestrator.build_reretrieval_plan(
         state["retrieval_plan"],
         state["verification"],
     )
@@ -171,7 +171,7 @@ async def publish(state: GraphState) -> dict[str, Any]:
         verification_started_at = now_perf - max(
             0.0, time.time() - float(started_wall)
         )
-    shared, product_result = await orchestrator._publish_verified_result(
+    shared, product_result = await orchestrator.publish_verified_result(
         shared,
         brief,
         state["verification"],

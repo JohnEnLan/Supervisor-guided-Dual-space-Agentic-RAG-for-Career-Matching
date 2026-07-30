@@ -95,7 +95,7 @@ attempt: int, loops: {reretrieval, repair}, run_id: str, stage_timing 累计 }
 | S1 | **checkpointer spike（最大风险前移）**：真实 PostgreSQL 上 `asetup`、完整 SharedState round-trip、两个并发 thread_id 互不串、模拟进程重启后 `ainvoke(None, config)` 续跑 | spike 测试绿；PG 不可用则此步阻塞并上报 |
 | S2 | **特征测试先行**：为现行 orchestrator 的 stage/snapshot/log/event 顺序新增 characterization tests（§3.2 保序契约逐条锚定），旧 279 项原样冻结不许删改 | 特征测试对旧实现全绿 |
 | S3 | 实现 `app/graph/`（state/nodes/build）；图路径在 feature flag 下运行，与旧 orchestrator 跑同一特征测试集证明等价；不切 API | 双实现同测全绿 |
-| S4 | **最大验收门**：run API 切换到图路径（durability=sync + 外围幂等包装器）；OpenAPI 快照零漂移；故障注入（节点前/后/checkpoint 前后 kill）证明手动续跑；不删除任何旧编排入口 | 全量绿 + 恢复测试绿 |
+| S4 | **最大验收门**：run API 切换到图路径（durability=sync + 外围幂等包装器）；OpenAPI 快照零漂移；故障注入（已覆盖两类场景：节点完成且 checkpoint 落盘后中断、首个 checkpoint 生成前中断）证明手动续跑；不删除任何旧编排入口 | 全量绿 + 恢复测试绿 |
 | S5 | E2E：虚拟简历完整流程（上传→确认→意图→Brief→执行→群聊/结果页），检索出岗位且证据可溯源；并发多 run 隔离 | E2E 通过 |
 | S6 | 论文对照文档（两版架构图、恢复语义对比、代码量/测试对比）+ 收尾清理 | 文档完成 |
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from app.agents import orchestrator
@@ -18,6 +19,7 @@ SUCCESS_STATUSES = {
     RunStatus.COMPLETED,
     RunStatus.COMPLETED_WITH_WARNINGS,
 }
+logger = logging.getLogger(__name__)
 
 
 async def run_graph_match(
@@ -40,7 +42,6 @@ async def run_graph_match(
 
     graph_input: GraphState | None = None
     if run.status is RunStatus.QUEUED:
-        brief = MatchBrief.model_validate(run.approved_plan)
         await orchestrator.transition_run(
             run_id=run_id,
             current_status=RunStatus.QUEUED,
@@ -56,25 +57,17 @@ async def run_graph_match(
                 status=RunStatus.RUNNING.value,
                 public_payload={"message": "Matching run started"},
             )
-            initial_snapshot = await orchestrator.load_state_snapshot(
-                run_id=run_id
+            graph_input = await _build_initial_graph_state(
+                run_id=run_id,
+                run=run,
             )
-            if initial_snapshot is None:
-                raise RuntimeError(
-                    "run is missing its confirmed state snapshot"
-                )
-            initial_state = SharedState.model_validate(initial_snapshot)
-            graph_input = {
-                "shared": initial_state,
-                "brief": brief,
-                "retrieval_plan": {},
-                "verification": {},
-                "product_result": None,
-                "attempt": 1,
-                "loops": {"reretrieval": 0, "repair": 0},
-                "run_id": run_id,
-                "stage_timing": {},
-            }
+        elif checkpointer is None or await checkpointer.aget_tuple(
+            {"configurable": {"thread_id": run_id}}
+        ) is None:
+            graph_input = await _build_initial_graph_state(
+                run_id=run_id,
+                run=run,
+            )
         output = await build_graph(checkpointer=checkpointer).ainvoke(
             graph_input,
             config={
@@ -174,6 +167,29 @@ async def run_graph_match(
     return result
 
 
+async def _build_initial_graph_state(
+    *,
+    run_id: str,
+    run: MatchRun,
+) -> GraphState:
+    brief = MatchBrief.model_validate(run.approved_plan)
+    initial_snapshot = await orchestrator.load_state_snapshot(run_id=run_id)
+    if initial_snapshot is None:
+        raise RuntimeError("run is missing its confirmed state snapshot")
+    initial_state = SharedState.model_validate(initial_snapshot)
+    return {
+        "shared": initial_state,
+        "brief": brief,
+        "retrieval_plan": {},
+        "verification": {},
+        "product_result": None,
+        "attempt": 1,
+        "loops": {"reretrieval": 0, "repair": 0},
+        "run_id": run_id,
+        "stage_timing": {},
+    }
+
+
 async def _delete_checkpoint_thread(checkpointer: Any, run_id: str) -> None:
     if checkpointer is not None:
         await checkpointer.adelete_thread(run_id)
@@ -186,7 +202,11 @@ async def _best_effort_delete_checkpoint_thread(
     try:
         await _delete_checkpoint_thread(checkpointer, run_id)
     except Exception:
-        pass
+        logger.warning(
+            "checkpoint_thread_delete_failed",
+            extra={"run_id": run_id},
+            exc_info=True,
+        )
 
 
 async def _load_terminal_result(

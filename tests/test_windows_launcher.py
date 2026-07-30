@@ -49,6 +49,20 @@ def test_check_only_validates_without_starting_services() -> None:
     assert "frontend=http://127.0.0.1:5173" in output
 
 
+def test_start_ps1_uses_app_serve_module_entrypoint() -> None:
+    content = (ROOT / "start.ps1").read_text(encoding="utf-8").lower()
+
+    assert "-m app.serve" in content
+
+
+def test_readme_uses_app_serve_module_entrypoint() -> None:
+    content = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert content.count("-m app.serve") >= 2
+    assert "uvicorn app.api.main:app" not in content
+    assert "SelectorEventLoop" in content
+
+
 def test_start_bat_uses_its_own_directory_and_preserves_errors() -> None:
     content = (ROOT / "start.bat").read_text(encoding="utf-8").lower()
 

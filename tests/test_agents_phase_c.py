@@ -1142,6 +1142,61 @@ async def test_supervisor_does_not_record_repair_loop_without_a_repair_action(
 
 
 @pytest.mark.asyncio
+async def test_supervisor_labels_hard_filter_violation_sources(monkeypatch):
+    from app.agents import supervisor
+    from app.state.schema import CareerState, SharedState, StrategyState
+
+    async def fake_chat(system, user, **kwargs):
+        return json.dumps(
+            {
+                "hard_filter_violations": [
+                    {"job_id": "job-hallucinated", "field": "visa"}
+                ],
+                "missing_evidence": [],
+                "fabrication_risks": [],
+                "needs_reretrieval": False,
+                "needs_repair": False,
+            }
+        )
+
+    monkeypatch.setattr(supervisor.deepseek, "chat", fake_chat)
+    state = SharedState(
+        session_id="s-verification-sources",
+        user_id="u1",
+        career_state=CareerState(hard_constraints={"locations": ["London"]}),
+        strategy_state=StrategyState(
+            recommended_roles=[
+                {
+                    "job_id": "job-metadata-failure",
+                    "location": "Birmingham",
+                    "evidence_span_ids": ["job-metadata-failure:skills:1"],
+                }
+            ]
+        ),
+    )
+
+    result = await supervisor.final_verification(state)
+
+    assert result["hard_filter_violations"] == [
+        {
+            "job_id": "job-hallucinated",
+            "field": "visa",
+            "source": "llm_advisory",
+        },
+        {
+            "job_id": "job-metadata-failure",
+            "field": "location",
+            "expected": ["London"],
+            "actual": "Birmingham",
+            "source": "deterministic",
+        },
+    ]
+    assert state.supervisor_log[-1]["hard_filter_violations"] == result[
+        "hard_filter_violations"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_supervisor_records_removed_resume_advice_count(monkeypatch):
     from app.agents import supervisor
     from app.state.schema import ResumeState, SharedState, StrategyState

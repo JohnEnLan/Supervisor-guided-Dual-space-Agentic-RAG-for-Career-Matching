@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 
@@ -144,3 +146,170 @@ async def test_lifespan_owns_postgres_checkpointer_when_graph_enabled(
         "checkpoint_pool:close",
         "asyncpg:close",
     ]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_periodically_sweeps_checkpoints_and_cancels_task(
+    monkeypatch,
+):
+    from app.api import main
+
+    deleted_threads: list[str] = []
+    created_tasks: list[asyncio.Task] = []
+    periodic_delete_completed = asyncio.Event()
+    recover_calls = 0
+
+    class FakePool:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def open(self):
+            pass
+
+        async def wait(self, *, timeout):
+            assert timeout == 5
+
+        async def close(self):
+            pass
+
+    class FakeSaver:
+        def __init__(self, _pool, *, serde):
+            del serde
+
+        async def setup(self):
+            pass
+
+        async def adelete_thread(self, thread_id):
+            deleted_threads.append(thread_id)
+            if thread_id == "terminal-run-2":
+                periodic_delete_completed.set()
+
+    async def no_op():
+        return None
+
+    async def fake_recover_stale_runs(*, stale_after_seconds):
+        nonlocal recover_calls
+        assert stale_after_seconds >= 1
+        recover_calls += 1
+        return 0
+
+    async def fake_list_terminal_checkpoint_thread_ids():
+        return [f"terminal-run-{recover_calls}"]
+
+    real_create_task = asyncio.create_task
+
+    def recording_create_task(coro):
+        task = real_create_task(coro)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(
+        main.settings,
+        "langgraph_orchestrator_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        main.settings,
+        "checkpoint_sweep_interval_seconds",
+        0.01,
+        raising=False,
+    )
+    monkeypatch.setattr(main.settings, "database_url", "postgresql://graph")
+    monkeypatch.setattr(main, "AsyncConnectionPool", FakePool)
+    monkeypatch.setattr(main, "AsyncPostgresSaver", FakeSaver)
+    monkeypatch.setattr(main, "get_pool", no_op)
+    monkeypatch.setattr(main, "close_pool", no_op)
+    monkeypatch.setattr(
+        main,
+        "recover_stale_runs",
+        fake_recover_stale_runs,
+    )
+    monkeypatch.setattr(
+        main,
+        "list_terminal_checkpoint_thread_ids",
+        fake_list_terminal_checkpoint_thread_ids,
+    )
+    monkeypatch.setattr(main.asyncio, "create_task", recording_create_task)
+
+    async with main.lifespan(main.app):
+        await asyncio.wait_for(periodic_delete_completed.wait(), timeout=1)
+        assert len(created_tasks) == 1
+        assert not created_tasks[0].done()
+
+    assert created_tasks[0].cancelled()
+    assert recover_calls >= 2
+    assert deleted_threads[:2] == ["terminal-run-1", "terminal-run-2"]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_disables_periodic_sweep_when_interval_is_zero(
+    monkeypatch,
+):
+    from app.api import main
+
+    class FakePool:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def open(self):
+            pass
+
+        async def wait(self, *, timeout):
+            assert timeout == 5
+
+        async def close(self):
+            pass
+
+    class FakeSaver:
+        def __init__(self, _pool, *, serde):
+            del serde
+
+        async def setup(self):
+            pass
+
+        async def adelete_thread(self, _thread_id):
+            pass
+
+    async def no_op():
+        return None
+
+    async def fake_recover_stale_runs(*, stale_after_seconds):
+        assert stale_after_seconds >= 1
+        return 0
+
+    async def no_terminal_checkpoints():
+        return []
+
+    def reject_create_task(coro):
+        coro.close()
+        raise AssertionError("periodic checkpoint sweep must be disabled")
+
+    monkeypatch.setattr(
+        main.settings,
+        "langgraph_orchestrator_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        main.settings,
+        "checkpoint_sweep_interval_seconds",
+        0,
+    )
+    monkeypatch.setattr(main.settings, "database_url", "postgresql://graph")
+    monkeypatch.setattr(main, "AsyncConnectionPool", FakePool)
+    monkeypatch.setattr(main, "AsyncPostgresSaver", FakeSaver)
+    monkeypatch.setattr(main, "get_pool", no_op)
+    monkeypatch.setattr(main, "close_pool", no_op)
+    monkeypatch.setattr(
+        main,
+        "recover_stale_runs",
+        fake_recover_stale_runs,
+    )
+    monkeypatch.setattr(
+        main,
+        "list_terminal_checkpoint_thread_ids",
+        no_terminal_checkpoints,
+    )
+    monkeypatch.setattr(main.asyncio, "create_task", reject_create_task)
+
+    async with main.lifespan(main.app):
+        assert main.app.state.langgraph_checkpointer is not None
