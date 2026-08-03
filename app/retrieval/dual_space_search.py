@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from app.config import settings
 from app.retrieval.hybrid_search import JobCandidate, hybrid_search
 from app.retrieval.implicit_search import (
+    _bounded_float,
     match_implicit_evidence,
     retrieve_implicit_case_rows,
 )
@@ -66,8 +67,10 @@ async def dual_space_search(
             continue
 
         explicit_score = candidate.explicit_score or candidate.score
-        beta = _bounded(settings.implicit_max_weight) * evidence.confidence
-        final_score = (1.0 - beta) * _bounded(explicit_score) + beta * evidence.score
+        beta = _bounded_float(settings.implicit_max_weight) * evidence.confidence
+        final_score = (
+            (1.0 - beta) * _bounded_float(explicit_score) + beta * evidence.score
+        )
         sources = list(candidate.sources)
         if "implicit_case" not in sources:
             sources.append("implicit_case")
@@ -107,11 +110,3 @@ async def _safe_implicit_rows(
     except Exception:
         logger.warning("Implicit retrieval unavailable; using explicit results")
         return []
-
-
-def _bounded(value: Any) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return min(max(number, 0.0), 1.0)

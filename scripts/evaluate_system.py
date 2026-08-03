@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 DEFAULT_EVAL_MANIFEST = ROOT / "data/eval/evaluation_manifest.json"
 
 from app.db.pool import close_pool
-from app.evaluation.artifacts import normalized_text_sha256
+from app.evaluation.artifacts import load_jsonl, normalized_text_sha256
 from app.evaluation.metrics import (
     build_metric_table,
     compare_latent_space_runs,
@@ -33,8 +33,8 @@ from app.state.schema import ResumeState
 def load_eval_inputs(
     queries_path: Path, labels_path: Path, *, limit: int | None = None
 ) -> list[dict[str, Any]]:
-    queries = {row["case_id"]: row for row in _load_jsonl(queries_path)}
-    labels = {row["case_id"]: row for row in _load_jsonl(labels_path)}
+    queries = {row["case_id"]: row for row in load_jsonl(queries_path)}
+    labels = {row["case_id"]: row for row in load_jsonl(labels_path)}
     missing_labels = sorted(set(queries) - set(labels))
     missing_queries = sorted(set(labels) - set(queries))
     if missing_labels or missing_queries:
@@ -194,7 +194,7 @@ def _validate_ranking_artifact(
         corpus_rows = list(csv.DictReader(handle))
     corpus_job_ids = [str(row.get("job_id") or "").strip() for row in corpus_rows]
     current_corpus_sha256 = normalized_text_sha256(corpus_path)
-    query_rows = _load_jsonl(queries_path)
+    query_rows = load_jsonl(queries_path)
     query_ids = [str(row.get("case_id") or "").strip() for row in query_rows]
 
     _require_equal(
@@ -495,14 +495,6 @@ def _labels_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "relevant_job_ids": row["relevant_job_ids"],
         }
         for row in rows
-    ]
-
-
-def _load_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
     ]
 
 

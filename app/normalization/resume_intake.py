@@ -25,7 +25,7 @@ from pypdf import PdfReader
 
 from app.db.pool import close_pool
 from app.db.state_store import save_state
-from app.llm.deepseek import chat
+from app.llm.deepseek import chat, extract_json_response
 from app.state.schema import ResumeState, SharedState
 
 
@@ -230,18 +230,6 @@ def build_evidence_spans(raw_text: str, *, max_spans: int = 120) -> list[Evidenc
     return spans[:max_spans]
 
 
-def _extract_json(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    return json.loads(stripped)
-
-
 def _clean_string_list(values: Any, *, max_items: int = 80) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -436,7 +424,7 @@ async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan
         temperature=0.0,
         json_mode=True,
     )
-    parsed = LLMResumePayload.model_validate(_extract_json(raw))
+    parsed = LLMResumePayload.model_validate(extract_json_response(raw))
     valid_ids = {span.span_id for span in evidence_spans}
     evidence_text_by_id = {
         span.span_id: span.text

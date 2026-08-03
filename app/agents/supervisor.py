@@ -5,6 +5,7 @@ import re
 from hashlib import sha256
 from typing import Any
 
+from app.agents.base import coerce_dict, coerce_list, resume_evidence_ids
 from app.config import settings
 from app.llm import deepseek
 from app.memory.case_base import CareerCase
@@ -106,7 +107,7 @@ async def plan_retrieval(
         json_mode=True,
     )
     parsed = _loads_or_empty(raw)
-    llm_plan = _as_dict(parsed.get("retrieval_plan"))
+    llm_plan = coerce_dict(parsed.get("retrieval_plan"))
 
     needs_clarification = bool(parsed.get("needs_clarification")) or _is_vague_goal(
         user_goal_text, state
@@ -116,14 +117,14 @@ async def plan_retrieval(
     )
     explicit_soft_prefs = (
         state.career_state.soft_preferences
-        or _as_dict(llm_plan.get("soft_preferences"))
+        or coerce_dict(llm_plan.get("soft_preferences"))
     )
     plan = {
         "needs_clarification": needs_clarification,
         "clarification_question": parsed.get("clarification_question") or "",
         "clarification_loop_used": clarification_loop_used,
         "hard_constraints": state.career_state.hard_constraints
-        or _as_dict(llm_plan.get("hard_constraints")),
+        or coerce_dict(llm_plan.get("hard_constraints")),
         "soft_prefs": explicit_soft_prefs,
         "top_k": int(llm_plan.get("top_k") or default_top_k),
         # 确定性开关：以调用方参数为准，LLM 计划不可覆盖。
@@ -162,11 +163,11 @@ async def final_verification(
             {**violation, "source": "llm_advisory"}
             if isinstance(violation, dict)
             else violation
-            for violation in _as_list(parsed.get("hard_filter_violations"))
+            for violation in coerce_list(parsed.get("hard_filter_violations"))
         ],
-        "missing_evidence": _as_list(parsed.get("missing_evidence")),
-        "fabrication_risks": _as_list(parsed.get("fabrication_risks")),
-        "too_few_results": _as_dict(parsed.get("too_few_results")),
+        "missing_evidence": coerce_list(parsed.get("missing_evidence")),
+        "fabrication_risks": coerce_list(parsed.get("fabrication_risks")),
+        "too_few_results": coerce_dict(parsed.get("too_few_results")),
         "needs_reretrieval": bool(parsed.get("needs_reretrieval")),
         "needs_repair": bool(parsed.get("needs_repair")),
     }
@@ -245,7 +246,7 @@ def build_anonymous_case_from_feedback(
     if not decision.get("is_valuable"):
         raise ValueError("feedback is not valuable enough to become a career case")
 
-    role = _as_dict(decision.get("matched_role"))
+    role = coerce_dict(decision.get("matched_role"))
     case = CareerCase(
         case_id=_anonymous_feedback_case_id(
             session_id=state.session_id,
@@ -293,7 +294,7 @@ def _add_deterministic_verification(
         if not role.get("evidence_span_ids"):
             missing_evidence.append({"job_id": role.get("job_id"), "field": "role"})
 
-    known_resume_evidence = _resume_evidence_ids(state)
+    known_resume_evidence = resume_evidence_ids(state)
     fabrication_risks = list(result["fabrication_risks"])
     for item in state.strategy_state.resume_revision_plan:
         evidence_ids = set(item.get("evidence_span_ids") or [])
@@ -311,7 +312,7 @@ def _add_deterministic_verification(
         apply_repair=apply_repair,
     )
 
-    too_few_results = _as_dict(result.get("too_few_results"))
+    too_few_results = coerce_dict(result.get("too_few_results"))
     planned_top_k = _latest_planned_top_k(state)
     actual_count = len(state.retrieval_state.candidate_job_ids)
     planned_soft_prefs = _latest_planned_soft_prefs(state)
@@ -470,7 +471,7 @@ def _canonical_case_skill_tags(values: list[Any], *, limit: int) -> list[str]:
 
 
 def _repair_unsupported_resume_advice(state: SharedState) -> int:
-    known = _resume_evidence_ids(state)
+    known = resume_evidence_ids(state)
     kept = []
     dropped = 0
     for item in state.strategy_state.resume_revision_plan:
@@ -504,7 +505,7 @@ def _final_payload(state: SharedState) -> str:
             "career_state": state.career_state.model_dump(),
             "retrieval_state": state.retrieval_state.model_dump(),
             "strategy_state": state.strategy_state.model_dump(),
-            "resume_evidence_span_ids": sorted(_resume_evidence_ids(state)),
+            "resume_evidence_span_ids": sorted(resume_evidence_ids(state)),
         },
         ensure_ascii=False,
     )
@@ -515,15 +516,6 @@ def _is_vague_goal(user_goal_text: str, state: SharedState) -> bool:
         return False
     tokens = [token for token in user_goal_text.split() if len(token) > 2]
     return len(tokens) < 3
-
-
-def _resume_evidence_ids(state: SharedState) -> set[str]:
-    ids = set()
-    for span in state.resume_state.original_evidence_spans:
-        span_id = span.get("span_id") or span.get("id")
-        if span_id:
-            ids.add(str(span_id))
-    return ids
 
 
 def _latest_planned_top_k(state: SharedState) -> int:
@@ -541,7 +533,7 @@ def _latest_planned_soft_prefs(state: SharedState) -> dict[str, Any]:
     for entry in reversed(state.supervisor_log):
         plan = entry.get("retrieval_plan")
         if entry.get("stage") == "planning" and isinstance(plan, dict):
-            return _as_dict(plan.get("soft_prefs"))
+            return coerce_dict(plan.get("soft_prefs"))
     return {}
 
 
@@ -551,13 +543,3 @@ def _loads_or_empty(raw: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _as_list(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    return value if isinstance(value, list) else [value]

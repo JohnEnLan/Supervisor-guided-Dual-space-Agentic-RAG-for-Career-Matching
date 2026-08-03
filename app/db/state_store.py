@@ -103,33 +103,6 @@ async def get_resume_metadata(session_id: str) -> dict[str, Any]:
     return {"exists": True, **dict(row)}
 
 
-async def mark_resume_normalized(
-    *, session_id: str, content_hash: str
-) -> dict[str, Any]:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE session_state
-            SET resume_version = resume_version + 1,
-                confirmed_resume_version = NULL,
-                resume_content_hash = $2,
-                resume_confirmed_at = NULL,
-                status = 'resume_ready',
-                version = version + 1,
-                updated_at = now()
-            WHERE session_id = $1
-            RETURNING resume_version, confirmed_resume_version,
-                      resume_content_hash, resume_confirmed_at
-            """,
-            session_id,
-            content_hash,
-        )
-    if row is None:
-        raise KeyError(session_id)
-    return {"exists": True, **dict(row)}
-
-
 async def save_normalized_resume(
     *,
     session_id: str,

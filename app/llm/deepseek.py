@@ -4,7 +4,11 @@
 Agent 只调用 chat()，不直接 new 客户端。
 """
 import asyncio
+import json
+from typing import Any
+
 from openai import AsyncOpenAI
+
 from app.config import settings
 from app.llm.context_budget import fit_user_prompt_to_budget
 
@@ -15,6 +19,18 @@ _client = AsyncOpenAI(
 
 # 全局并发闸门：同时最多 N 个 LLM 调用
 _sem = asyncio.Semaphore(settings.llm_max_concurrency)
+
+
+def extract_json_response(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return json.loads(stripped)
 
 
 async def chat(

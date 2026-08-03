@@ -26,7 +26,7 @@ if str(ROOT) not in sys.path:
 from app.config import settings
 from app.db.pool import close_pool, get_pool
 from app.db.vector import to_pgvector
-from app.llm.deepseek import chat
+from app.llm.deepseek import chat, extract_json_response
 from app.llm.qwen_embed import embed_texts
 
 
@@ -160,18 +160,6 @@ def _normalize_role_cluster(value: Any) -> str:
     return text if text in valid else "other"
 
 
-def _extract_json(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    return json.loads(stripped)
-
-
 def _build_user_prompt(row: dict[str, str]) -> str:
     fields = {
         "job_id": _nonempty(row.get("job_id")),
@@ -192,7 +180,7 @@ async def _parse_with_deepseek(row: dict[str, str], index: int, total: int) -> d
     for attempt in range(3):
         try:
             raw = await chat(SYSTEM_PROMPT, prompt, temperature=0.0, json_mode=True)
-            parsed = _extract_json(raw)
+            parsed = extract_json_response(raw)
             print(f"[{index:02d}/{total}] parsed job_id={row.get('job_id')}")
             return parsed
         except Exception as exc:  # noqa: BLE001 - preserve progress for batch loading

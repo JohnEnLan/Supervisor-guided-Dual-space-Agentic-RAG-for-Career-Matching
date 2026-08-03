@@ -8,7 +8,7 @@ import json
 import logging
 from pathlib import Path
 import sys
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 from uuid import uuid4
 
 import pytest
@@ -20,7 +20,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from app.domain.match_brief import MatchBrief, create_match_brief
 from app.domain.results import ProductResult
-from app.domain.run import MatchRun, RunStage, RunStatus
+from app.domain.run import MatchRun, RunStatus
 from app.state.schema import CareerState, ResumeState, SharedState
 
 

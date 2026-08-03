@@ -6,8 +6,29 @@
 from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
+from typing import Any
+
 from app.state.schema import SharedState
 from app.llm import deepseek
+
+
+def coerce_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def coerce_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def resume_evidence_ids(state: SharedState) -> set[str]:
+    ids = set()
+    for span in state.resume_state.original_evidence_spans:
+        span_id = span.get("span_id") or span.get("id")
+        if span_id:
+            ids.add(str(span_id))
+    return ids
 
 
 class BaseAgent(ABC):

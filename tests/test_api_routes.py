@@ -1,7 +1,6 @@
 import hashlib
 import io
 import os
-from pathlib import Path
 from types import SimpleNamespace
 
 import httpx

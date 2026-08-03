@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, coerce_dict, coerce_list
 from app.domain.intent import CareerDirection, IntentConsultInput
 from app.state.schema import SharedState
 
@@ -57,17 +57,17 @@ Do not invent constraints that the user did not state.
         )
 
     def apply(self, state: SharedState, parsed: dict) -> SharedState:
-        state.career_state.current_goal = _as_list(parsed.get("current_goal"))
+        state.career_state.current_goal = coerce_list(parsed.get("current_goal"))
         state.career_state.long_term_goal = _filter_long_term_goal(
-            self.user_goal_text, _as_list(parsed.get("long_term_goal"))
+            self.user_goal_text, coerce_list(parsed.get("long_term_goal"))
         )
         state.career_state.hard_constraints = _filter_hard_constraints(
-            _as_dict(parsed.get("hard_constraints"))
+            coerce_dict(parsed.get("hard_constraints"))
         )
         state.career_state.soft_preferences = _filter_soft_preferences(
-            _as_dict(parsed.get("soft_preferences"))
+            coerce_dict(parsed.get("soft_preferences"))
         )
-        state.career_state.avoid_roles = _as_list(parsed.get("avoid_roles"))
+        state.career_state.avoid_roles = coerce_list(parsed.get("avoid_roles"))
         return state
 
 
@@ -141,14 +141,14 @@ hiring outcome.
         career.intent_assistant_message = str(
             parsed.get("assistant_message") or ""
         ).strip()
-        career.current_goal = _as_list(parsed.get("current_goal"))
+        career.current_goal = coerce_list(parsed.get("current_goal"))
         career.long_term_goal = _filter_long_term_goal(
             self.request.goal_text or "",
-            _as_list(parsed.get("long_term_goal")),
+            coerce_list(parsed.get("long_term_goal")),
         )
 
         hard_constraints = _filter_hard_constraints(
-            _as_dict(parsed.get("hard_constraints"))
+            coerce_dict(parsed.get("hard_constraints"))
         )
         hard_constraints.pop("companies", None)
         if self.request.company_exclusive and self.request.target_companies:
@@ -156,14 +156,14 @@ hiring outcome.
         career.hard_constraints = hard_constraints
 
         soft_preferences = _filter_soft_preferences(
-            _as_dict(parsed.get("soft_preferences"))
+            coerce_dict(parsed.get("soft_preferences"))
         )
         if self.request.target_companies:
             soft_preferences["preferred_companies"] = list(
                 self.request.target_companies
             )
         career.soft_preferences = soft_preferences
-        career.avoid_roles = _as_list(parsed.get("avoid_roles"))
+        career.avoid_roles = coerce_list(parsed.get("avoid_roles"))
         career.intent_directions = _validated_directions(
             parsed.get("directions")
         )
@@ -207,11 +207,11 @@ def _filter_hard_constraints(raw: dict[str, Any]) -> dict[str, Any]:
     }
     cleaned = {key: value for key, value in raw.items() if key in allowed}
     if "locations" in cleaned:
-        cleaned["locations"] = _as_list(cleaned["locations"])
+        cleaned["locations"] = coerce_list(cleaned["locations"])
     if "role_clusters" in cleaned:
-        cleaned["role_clusters"] = _as_list(cleaned["role_clusters"])
+        cleaned["role_clusters"] = coerce_list(cleaned["role_clusters"])
     if "companies" in cleaned:
-        cleaned["companies"] = _as_list(cleaned["companies"])
+        cleaned["companies"] = coerce_list(cleaned["companies"])
     if "max_years_exp" in cleaned and cleaned["max_years_exp"] is not None:
         cleaned["max_years_exp"] = int(cleaned["max_years_exp"])
     return {key: value for key, value in cleaned.items() if value not in (None, [], "")}
@@ -225,7 +225,7 @@ def _filter_soft_preferences(raw: dict[str, Any]) -> dict[str, Any]:
         "title_keywords",
     }
     cleaned = {
-        key: _as_list(value)
+        key: coerce_list(value)
         for key, value in raw.items()
         if key in allowed_list_fields
     }
@@ -253,18 +253,6 @@ def _has_explicit_long_term_signal(text: str) -> bool:
         "未来",
     )
     return any(marker in normalized for marker in markers)
-
-
-def _as_list(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def _validated_directions(value: Any) -> list[dict[str, Any]]:

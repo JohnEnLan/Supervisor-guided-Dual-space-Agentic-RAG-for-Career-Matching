@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.evaluation.artifacts import normalized_text_sha256
+from app.evaluation.artifacts import load_jsonl, normalized_text_sha256
 
 
 METHOD = "deterministic_weighted_token_overlap_v1"
@@ -30,7 +30,7 @@ def generate_lexical_ranking_artifact(
         raise ValueError("top_k must be positive")
 
     job_rows = _read_csv(corpus_path)
-    queries = _read_jsonl(queries_path)
+    queries = load_jsonl(queries_path)
     job_ids = [str(row.get("job_id") or "").strip() for row in job_rows]
     if not all(job_ids) or len(job_ids) != len(set(job_ids)):
         raise ValueError("corpus job_id values must be non-empty and unique")
@@ -81,14 +81,6 @@ def generate_lexical_ranking_artifact(
 def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
 
 
 def _weighted_document_tokens(row: dict[str, str]) -> Counter[str]:

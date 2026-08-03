@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowRight, Building2, Compass, MessageSquareText, Target } from "lucide-react";
+import { ArrowRight, Compass, MessageSquareText, Target } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 

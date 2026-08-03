@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, coerce_list, resume_evidence_ids
 from app.state.schema import SharedState
 
 
@@ -55,7 +55,7 @@ Return strict JSON:
                 "recommended_roles": state.strategy_state.recommended_roles,
                 "retrieval_state": state.retrieval_state.model_dump(),
                 "evidence_contract": {
-                    "resume_evidence_span_ids": sorted(_resume_evidence_ids(state)),
+                    "resume_evidence_span_ids": sorted(resume_evidence_ids(state)),
                     "job_evidence_span_ids": sorted(_job_evidence_ids(state)),
                     "all_evidence_span_ids": sorted(_all_evidence_ids(state)),
                 },
@@ -65,11 +65,11 @@ Return strict JSON:
 
     def apply(self, state: SharedState, parsed: dict) -> SharedState:
         valid_gaps, dropped_gaps = _filter_supported_items(
-            _as_list(parsed.get("skill_gap_analysis")),
+            coerce_list(parsed.get("skill_gap_analysis")),
             known_evidence_ids=_all_evidence_ids(state),
         )
         valid_path, dropped_path = _filter_supported_items(
-            _as_list(parsed.get("career_path")),
+            coerce_list(parsed.get("career_path")),
             known_evidence_ids=_all_evidence_ids(state),
             allowed_horizons={"short", "medium", "long"},
         )
@@ -77,7 +77,7 @@ Return strict JSON:
         state.strategy_state.career_path = valid_path
 
         valid_advice, dropped = _filter_resume_revision_plan(
-            state, _as_list(parsed.get("resume_revision_plan"))
+            state, coerce_list(parsed.get("resume_revision_plan"))
         )
         state.strategy_state.resume_revision_plan = valid_advice
         state.supervisor_log.append(
@@ -98,7 +98,7 @@ async def run_strategy_agent(state: SharedState) -> SharedState:
 def _filter_resume_revision_plan(
     state: SharedState, items: list[Any]
 ) -> tuple[list[dict[str, Any]], int]:
-    known = _resume_evidence_ids(state)
+    known = resume_evidence_ids(state)
     kept = []
     dropped = 0
     for item in items:
@@ -137,7 +137,7 @@ def _filter_supported_items(
 
 
 def _all_evidence_ids(state: SharedState) -> set[str]:
-    return _resume_evidence_ids(state) | _job_evidence_ids(state)
+    return resume_evidence_ids(state) | _job_evidence_ids(state)
 
 
 def _job_evidence_ids(state: SharedState) -> set[str]:
@@ -155,18 +155,3 @@ def _job_evidence_ids(state: SharedState) -> set[str]:
             if span_id:
                 ids.add(str(span_id))
     return ids
-
-
-def _resume_evidence_ids(state: SharedState) -> set[str]:
-    ids = set()
-    for span in state.resume_state.original_evidence_spans:
-        span_id = span.get("span_id") or span.get("id")
-        if span_id:
-            ids.add(str(span_id))
-    return ids
-
-
-def _as_list(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    return value if isinstance(value, list) else [value]

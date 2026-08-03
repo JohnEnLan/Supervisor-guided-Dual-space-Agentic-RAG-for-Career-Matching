@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from app.agents.base import coerce_dict
 from app.agents.intent_agent import run_intent_agent
 from app.agents.matching_agent import SearchFn, run_matching_agent
 from app.agents.strategy_agent import run_strategy_agent
@@ -500,8 +501,8 @@ def _build_reretrieval_plan(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     reretrieval_plan = dict(retrieval_plan)
     reason = "verification_requested"
-    original_soft_prefs = _as_dict(retrieval_plan.get("soft_prefs"))
-    too_few_results = _as_dict(verification.get("too_few_results"))
+    original_soft_prefs = coerce_dict(retrieval_plan.get("soft_prefs"))
+    too_few_results = coerce_dict(verification.get("too_few_results"))
 
     if too_few_results:
         reason = "too_few_results"
@@ -615,15 +616,11 @@ async def _publish_verified_result(
 
 def _public_retrieval_plan(plan: dict[str, Any]) -> dict[str, Any]:
     return {
-        "hard_constraints": _as_dict(plan.get("hard_constraints")),
-        "soft_prefs": _as_dict(plan.get("soft_prefs")),
+        "hard_constraints": coerce_dict(plan.get("hard_constraints")),
+        "soft_prefs": coerce_dict(plan.get("soft_prefs")),
         "top_k": plan.get("top_k"),
         "include_raptor": bool(plan.get("include_raptor", False)),
     }
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def _record_stage_duration(

@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from app.domain.match_brief import create_match_brief
 from app.domain.run import MatchRun, RunStatus
 from app.domain.results import ProductResult
 
