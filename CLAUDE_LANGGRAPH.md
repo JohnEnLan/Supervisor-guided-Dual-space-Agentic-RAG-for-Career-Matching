@@ -61,3 +61,18 @@ run API 切换为最大验收门、本轮不删除任何旧编排入口）。版
 - 不引入 LangSmith / LangServe / LangChain retriever 栈；检索仍是 `app/retrieval/` 的自研实现。
 - 不改 `/api/v1` 契约、不改 SharedState 结构、不改 evidence 边界。
 - 不在主线分支合并本分支任何提交，除非用户明确要求。
+
+## 5. V2 修订案（2026-08-04 · 计划双审通过后生效）
+
+依据 `docs/v2_redesign_plan.md`（v3 终审稿，Claude 子 agent 与 Codex 双审通过），下列条款**替代**本文件及 CLAUDE.md / AGENTS.md 中的对应旧条款；未列出的条款继续有效：
+
+| 旧条款 | V2 替代 |
+|---|---|
+| 一个月 / P0–P2 范围纪律 | 由 V2 计划 W0–W5 替代（用户授权的产品化阶段） |
+| `/api/v1` 契约冻结（快照零漂移） | 每工作流允许一次**有意**变更（W3 鉴权、W1 咨询、W5 demo 标记），随附 OpenAPI 快照与前端类型再生 |
+| 279/314 项测试冻结 | 删除仅限旧 API 专属用例，删除项在 commit message 逐一列账 |
+| clarification ≤ 1 次 | 图外咨询采用 `max_consult_rounds`（默认 8，1–15 钳制）；图内三类有界恢复计数不变，两者**不混算** |
+| SharedState 冻结 | 允许 V2 新增字段（consult_transcript、consult_rounds_used 等），"先改 schema 的单一事实来源"流程不变 |
+| 本轮不删旧入口 / 对外行为完全一致 | 废止：旧无前缀 API 按 W2 删除 |
+| evidence 边界 | 增补**演示语料条款**：`demo_synthetic=true` 语料的公司/城市/签证为合成场景事实（**薪资不合成**），必须全链路（DB 列 → API 投影 → UI 水印）标示；production 默认禁用 demo 语料（`DEMO_CORPUS_ENABLED`）；真实用户简历的证据边界**不变** |
+| 一次只实现一个模块 | **保留**，W4 由垂直切片满足 |
