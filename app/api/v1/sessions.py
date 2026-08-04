@@ -8,7 +8,7 @@ import re
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 
-from app.api.routes import _persist_upload
+from app.api.uploads import persist_upload
 from app.api.v1.schemas import (
     IntentConsultRequest,
     IntentConsultResponse,
@@ -80,7 +80,7 @@ async def upload_resume(
     state = await load_state(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="session_id not found")
-    resume_path = await _persist_upload(session_id, file)
+    resume_path = await persist_upload(session_id, file)
     await save_state(state, status="resume_queued")
     background_tasks.add_task(
         _normalize_resume,

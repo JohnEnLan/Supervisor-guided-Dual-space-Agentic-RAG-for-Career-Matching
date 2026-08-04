@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.agents.supervisor import (
@@ -120,6 +121,77 @@ async def process_feedback_closure_for_session(
         except Exception:
             pass
         return failed_result
+
+
+async def record_feedback_closure_error(
+    *,
+    session_id: str,
+    feedback_id: int,
+    persisted_feedback: dict[str, Any] | None = None,
+    mutate_state: Callable[..., Awaitable[Any]] | None = None,
+) -> dict[str, Any]:
+    known_feedback = persisted_feedback or {}
+    known_case_written = bool(known_feedback.get("case_written"))
+    known_case_id = (
+        known_feedback.get("case_id") if known_case_written else None
+    )
+    fallback_result = {
+        "closure_status": "error",
+        "case_written": known_case_written,
+        "case_id": known_case_id,
+        "soft_preference_updates": {},
+        "error_code": "feedback_closure_failed",
+    }
+    atomic_mutate = mutate_state or mutate_state_atomically
+    try:
+
+        def append_error_log(state: SharedState) -> dict[str, Any]:
+            case_written = known_case_written
+            case_id = known_case_id
+            for entry in state.feedback_state.user_feedback:
+                if str(entry.get("feedback_id")) == str(feedback_id):
+                    if entry.get("closure_status") in {"processed", "skipped"}:
+                        return {
+                            "closure_status": entry["closure_status"],
+                            "case_written": bool(entry.get("case_written")),
+                            "case_id": entry.get("case_id"),
+                            "soft_preference_updates": {},
+                            "error_code": entry.get("error_code"),
+                        }
+                    entry_case_written = bool(entry.get("case_written"))
+                    case_written = case_written or entry_case_written
+                    if entry_case_written and entry.get("case_id"):
+                        case_id = entry["case_id"]
+                    entry["closure_status"] = "error"
+                    entry["case_written"] = case_written
+                    entry["case_id"] = case_id
+                    entry["error_code"] = "feedback_closure_failed"
+                    break
+            state.supervisor_log.append(
+                {
+                    "stage": "feedback_closure_error",
+                    "feedback_id": feedback_id,
+                    "closure_status": "error",
+                    "case_written": case_written,
+                    "case_id": case_id,
+                    "error_code": "feedback_closure_failed",
+                }
+            )
+            return {
+                "closure_status": "error",
+                "case_written": case_written,
+                "case_id": case_id,
+                "soft_preference_updates": {},
+                "error_code": "feedback_closure_failed",
+            }
+
+        result = await atomic_mutate(
+            session_id=session_id,
+            mutator=append_error_log,
+        )
+        return result or fallback_result
+    except Exception:
+        return fallback_result
 
 
 async def _persist_closure_result(

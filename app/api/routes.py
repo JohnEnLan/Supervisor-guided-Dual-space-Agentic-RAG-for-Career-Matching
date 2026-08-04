@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import uuid
 from copy import deepcopy
 from pathlib import Path
 
@@ -9,6 +7,13 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from pydantic import BaseModel, Field, field_validator
 
 from app.agents.orchestrator import run_persisted_agentic_match_from_session
+from app.api.uploads import (
+    ALLOWED_RESUME_SUFFIXES,
+    MAX_RESUME_UPLOAD_BYTES,
+    UPLOAD_CHUNK_BYTES,
+    UPLOAD_DIR,
+    persist_upload,
+)
 from app.db.state_store import (
     FeedbackIdempotencyConflict,
     add_feedback,
@@ -18,7 +23,10 @@ from app.db.state_store import (
     save_state,
 )
 from app.api.result_projector import project_product_result
-from app.memory.feedback_loop import process_feedback_closure_for_session
+from app.memory.feedback_loop import (
+    process_feedback_closure_for_session,
+    record_feedback_closure_error,
+)
 from app.memory.feedback import normalize_application_outcome
 from app.normalization.resume_intake import intake_resume
 from app.retrieval.query_builder import build_resume_retrieval_query
@@ -26,10 +34,6 @@ from app.state.schema import SharedState
 
 
 router = APIRouter()
-UPLOAD_DIR = Path("data/resumes/uploads")
-ALLOWED_RESUME_SUFFIXES = {".pdf", ".docx", ".txt"}
-MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
-UPLOAD_CHUNK_BYTES = 64 * 1024
 
 
 class MatchRequest(BaseModel):
@@ -331,96 +335,23 @@ async def _record_feedback_closure_error(
     feedback_id: int,
     persisted_feedback: dict | None = None,
 ) -> dict:
-    known_feedback = persisted_feedback or {}
-    known_case_written = bool(known_feedback.get("case_written"))
-    known_case_id = (
-        known_feedback.get("case_id") if known_case_written else None
+    return await record_feedback_closure_error(
+        session_id=session_id,
+        feedback_id=feedback_id,
+        persisted_feedback=persisted_feedback,
+        mutate_state=mutate_state_atomically,
     )
-    fallback_result = {
-        "closure_status": "error",
-        "case_written": known_case_written,
-        "case_id": known_case_id,
-        "soft_preference_updates": {},
-        "error_code": "feedback_closure_failed",
-    }
-    try:
-        def append_error_log(state: SharedState) -> dict:
-            case_written = known_case_written
-            case_id = known_case_id
-            for entry in state.feedback_state.user_feedback:
-                if str(entry.get("feedback_id")) == str(feedback_id):
-                    if entry.get("closure_status") in {"processed", "skipped"}:
-                        return {
-                            "closure_status": entry["closure_status"],
-                            "case_written": bool(entry.get("case_written")),
-                            "case_id": entry.get("case_id"),
-                            "soft_preference_updates": {},
-                            "error_code": entry.get("error_code"),
-                        }
-                    entry_case_written = bool(entry.get("case_written"))
-                    case_written = case_written or entry_case_written
-                    if entry_case_written and entry.get("case_id"):
-                        case_id = entry["case_id"]
-                    entry["closure_status"] = "error"
-                    entry["case_written"] = case_written
-                    entry["case_id"] = case_id
-                    entry["error_code"] = "feedback_closure_failed"
-                    break
-            state.supervisor_log.append(
-                {
-                    "stage": "feedback_closure_error",
-                    "feedback_id": feedback_id,
-                    "closure_status": "error",
-                    "case_written": case_written,
-                    "case_id": case_id,
-                    "error_code": "feedback_closure_failed",
-                }
-            )
-            return {
-                "closure_status": "error",
-                "case_written": case_written,
-                "case_id": case_id,
-                "soft_preference_updates": {},
-                "error_code": "feedback_closure_failed",
-            }
-
-        result = await mutate_state_atomically(
-            session_id=session_id,
-            mutator=append_error_log,
-        )
-        return result or fallback_result
-    except Exception:
-        return fallback_result
 
 
 async def _persist_upload(session_id: str, file: UploadFile) -> Path:
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_RESUME_SUFFIXES:
-        suffix = ".txt"
-
-    session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
-    # Keep enough entropy for unique immutable upload paths without pushing
-    # deeply nested Windows workspaces over the legacy MAX_PATH boundary.
-    upload_id = uuid.uuid4().hex[:16]
-    path = UPLOAD_DIR / f"{session_hash}-{upload_id}{suffix}"
-    total_bytes = 0
-    try:
-        with path.open("xb") as destination:
-            while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-                total_bytes += len(chunk)
-                if total_bytes > MAX_RESUME_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail="resume file exceeds upload size limit",
-                    )
-                destination.write(chunk)
-        return path
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
-    finally:
-        await file.close()
+    return await persist_upload(
+        session_id,
+        file,
+        upload_dir=UPLOAD_DIR,
+        allowed_suffixes=ALLOWED_RESUME_SUFFIXES,
+        max_upload_bytes=MAX_RESUME_UPLOAD_BYTES,
+        chunk_bytes=UPLOAD_CHUNK_BYTES,
+    )
 
 
 def _resume_ready_for_matching(state: SharedState) -> bool:

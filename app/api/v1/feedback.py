@@ -7,6 +7,10 @@ from app.db.state_store import (
     add_feedback,
 )
 from app.domain.run import RunStatus
+from app.memory.feedback_loop import (
+    process_feedback_closure_for_session,
+    record_feedback_closure_error,
+)
 
 
 router = APIRouter()
@@ -50,4 +54,21 @@ async def add_run_reaction(
         raise HTTPException(
             status_code=409, detail="idempotency key payload conflict"
         ) from None
+
+    persisted_feedback = dict(result.feedback)
+    if result.created or persisted_feedback.get("closure_status") not in {
+        "processed",
+        "skipped",
+    }:
+        try:
+            await process_feedback_closure_for_session(
+                session_id=run.session_id,
+                feedback=persisted_feedback,
+            )
+        except Exception:
+            await record_feedback_closure_error(
+                session_id=run.session_id,
+                feedback_id=result.feedback_id,
+                persisted_feedback=persisted_feedback,
+            )
     return ReactionResponse(run_id=run_id, feedback_id=result.feedback_id)
