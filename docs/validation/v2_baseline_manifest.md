@@ -8,7 +8,9 @@
 | 分支 | langgraph |
 | 双远端 | GitHub `origin` + 伯明翰 GitLab，基线 commit 已同步 |
 
-## 数据库备份状态：**受阻待补**
+## 数据库备份状态：**已补做（2026-08-05）**
+
+用户关闭 Smart App Control 后 pgvector 恢复（向量查询验证通过），备份立即补做完成，下表已填实。以下为原始受阻记录（留档）：
 
 计划的 `pg_dump` 基线备份（仓库外受控目录 `Desktop/毕业论文_birmingham/backups/db/`，仅 hash 入库）当前无法执行：
 
@@ -21,4 +23,4 @@
 
 | 文件 | SHA-256 | 大小 | 状态 |
 |---|---|---|---|
-| `backups/db/v2-baseline-<date>.dump` | 待补 | 待补 | 等待 Smart App Control 解除 |
+| `backups/db/v2-baseline-20260805.dump`（仓库外） | `6CEAD068D43D6325C5022B09B00E089D75C3E9C6A96510424F0074E143FB3739` | 1,863,041 B | ✅ 完成 |
