@@ -56,6 +56,9 @@ async def add_run_reaction(
         raise HTTPException(
             status_code=409, detail="idempotency key payload conflict"
         ) from None
+    except ValueError as exc:
+        # 词表外的 outcome（如自由文本）是调用方错误，不是服务器故障
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
     persisted_feedback = dict(result.feedback)
     if result.created or persisted_feedback.get("closure_status") not in {

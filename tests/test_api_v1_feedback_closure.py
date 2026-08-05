@@ -394,3 +394,24 @@ async def test_v1_reaction_error_record_preserves_prior_durable_case(
     assert state.supervisor_log[-1]["case_written"] is True
     assert state.supervisor_log[-1]["case_id"] == "case-durable-15"
     assert "private retry failure" not in str(state.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_v1_reaction_rejects_unknown_outcome_with_422(monkeypatch):
+    # 2026-08-05 全局冒烟：词表外 outcome 曾让 ValueError 直穿成 500
+    from app.api.v1 import feedback
+
+    _patch_completed_run(monkeypatch, feedback)
+
+    async def fake_add_feedback(**kwargs):
+        from app.memory.feedback import normalize_application_outcome
+
+        normalize_application_outcome(kwargs["outcome"])
+        raise AssertionError("must not persist unknown outcome")
+
+    monkeypatch.setattr(feedback, "add_feedback", fake_add_feedback)
+
+    response = await _post_reaction(outcome="helpful")
+
+    assert response.status_code == 422
+    assert "helpful" in response.json()["detail"]

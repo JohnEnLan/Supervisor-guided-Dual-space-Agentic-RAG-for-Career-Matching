@@ -448,3 +448,87 @@ def test_max_consult_rounds_config_defaults_to_eight_and_hard_caps_at_fifteen() 
     assert Settings(max_consult_rounds=15).max_consult_rounds == 15
     with pytest.raises(ValidationError):
         Settings(max_consult_rounds=16)
+
+
+def test_hard_constraint_llm_variants_are_canonicalized() -> None:
+    from app.agents.consult_engine import _validated_consult_hard_constraints
+
+    # 单数键收到字符串列表：并入复数键，不再整轮报废
+    assert _validated_consult_hard_constraints({"location": ["上海", "北京"]}) == {
+        "locations": ["上海", "北京"]
+    }
+    # 已有复数键时合并去重
+    assert _validated_consult_hard_constraints(
+        {"location": ["北京"], "locations": ["上海", "北京"]}
+    ) == {"locations": ["上海", "北京"]}
+    # 复数键收到单字符串：包成列表
+    assert _validated_consult_hard_constraints({"locations": "上海"}) == {
+        "locations": ["上海"]
+    }
+    # 合法单数字符串行为不变
+    assert _validated_consult_hard_constraints({"location": "上海"}) == {
+        "location": "上海"
+    }
+    # company 单数列表恢复为 companies
+    assert _validated_consult_hard_constraints({"company": ["华为"]}) == {
+        "companies": ["华为"]
+    }
+
+
+def test_soft_preference_llm_variants_are_canonicalized() -> None:
+    from app.agents.consult_engine import _validated_consult_soft_preferences
+
+    assert _validated_consult_soft_preferences({"preferred_location": ["上海"]}) == {
+        "preferred_locations": ["上海"]
+    }
+    assert _validated_consult_soft_preferences({"title_keywords": "backend"}) == {
+        "title_keywords": ["backend"]
+    }
+
+
+def test_merge_profile_updates_accepts_real_llm_payload() -> None:
+    # 2026-08-05 全局冒烟捕获的真实 DeepSeek 输出（曾导致整轮 502）
+    from app.agents.consult_engine import _merge_profile_updates
+
+    career = CareerState()
+    _merge_profile_updates(
+        career,
+        updates={
+            "current_goal": [],
+            "long_term_goal": [],
+            "hard_constraints": {
+                "location": ["上海", "北京"],
+                "role_type": ["后端开发", "平台工程"],
+                "avoid": ["销售", "纯运维"],
+            },
+            "soft_preferences": {
+                "company_type": "科技公司",
+                "growth_space": True,
+                "tech_atmosphere": True,
+            },
+            "avoid_roles": ["销售", "纯运维"],
+        },
+        user_message="我更看重成长空间和技术氛围，不考虑销售和纯运维岗位",
+    )
+    assert career.hard_constraints["locations"] == ["上海", "北京"]
+    assert career.avoid_roles == ["销售", "纯运维"]
+
+
+def test_role_cluster_values_outside_vocabulary_are_dropped() -> None:
+    # 词表外簇值会让 SQL 硬过滤清空全部候选（2026-08-05 全局冒烟实测），必须丢弃
+    from app.agents.consult_engine import (
+        _validated_consult_hard_constraints,
+        _validated_consult_soft_preferences,
+    )
+
+    assert _validated_consult_hard_constraints(
+        {"role_clusters": ["后端开发", "software_engineering"]}
+    ) == {"role_clusters": ["software_engineering"]}
+    assert _validated_consult_hard_constraints({"role_clusters": ["后端开发"]}) == {}
+    assert _validated_consult_hard_constraints({"role_cluster": "后端开发"}) == {}
+    assert _validated_consult_hard_constraints({"role_cluster": "data_ai"}) == {
+        "role_cluster": "data_ai"
+    }
+    assert _validated_consult_soft_preferences(
+        {"preferred_role_clusters": ["平台工程", "finance"]}
+    ) == {"preferred_role_clusters": ["finance"]}

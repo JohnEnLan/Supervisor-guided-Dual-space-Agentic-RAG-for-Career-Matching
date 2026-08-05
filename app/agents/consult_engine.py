@@ -33,12 +33,14 @@ Return strict JSON:
   "assistant_reply": string (Chinese empathetic reflection, max 120 Chinese characters),
   "next_question": string,
   "profile_updates": {
-    "current_goal": [string],
+    "current_goal": [string] (the role or direction the user wants NOW, e.g. ["后端工程师"]),
     "long_term_goal": [string],
-    "hard_constraints": object,
-    "soft_preferences": object,
+    "hard_constraints": {"locations": [string], "role_clusters": [string], "companies": [string], "need_visa_sponsor": boolean, "remote": boolean, "degree_required": string, "work_mode": string, "max_years_exp": integer},
+    "soft_preferences": {"preferred_locations": [string], "preferred_role_clusters": [string], "preferred_companies": [string], "title_keywords": [string]},
     "avoid_roles": [string]
   },
+  Use EXACTLY these key names inside hard_constraints and soft_preferences; include only keys the user actually stated (e.g. 不需要签证担保 -> "need_visa_sponsor": false; 想去科技大厂 -> "preferred_companies" or "title_keywords"). Unknown or renamed keys will be discarded.
+  role_clusters / preferred_role_clusters values MUST come from this fixed vocabulary: software_engineering, data_ai, product_management, marketing_sales, healthcare, legal, education, operations, finance, customer_support. Map the user's wording onto it (e.g. 后端开发/平台工程 -> software_engineering; 数据分析/算法 -> data_ai). Keep the user's literal role words in current_goal and put useful English search words into title_keywords (e.g. ["backend", "platform"]).
   "phase_suggestion": "template" | "deepen" | "explore"
 }"""
 
@@ -398,10 +400,91 @@ def _remembered_profile_draft(value: Any) -> dict[str, Any]:
     return draft
 
 
+# 检索层 role_cluster 的受控词表（scripts/load_jobs.py 入库口径）。
+# 词表外的簇值会让 SQL 硬过滤清空全部候选，必须在进 state 前丢弃。
+ROLE_CLUSTER_VOCABULARY = frozenset(
+    {
+        "software_engineering",
+        "data_ai",
+        "product_management",
+        "marketing_sales",
+        "healthcare",
+        "legal",
+        "education",
+        "operations",
+        "finance",
+        "customer_support",
+        "other",
+    }
+)
+
+
+def _filter_role_cluster_values(out: dict[str, Any], *keys: str) -> None:
+    for key in keys:
+        value = out.get(key)
+        if _is_string_list(value):
+            kept = [
+                item.strip()
+                for item in value
+                if item.strip().lower() in ROLE_CLUSTER_VOCABULARY
+            ]
+            if kept:
+                out[key] = kept
+            else:
+                out.pop(key)
+        elif isinstance(value, str):
+            if value.strip().lower() not in ROLE_CLUSTER_VOCABULARY:
+                out.pop(key)
+
+
+_HARD_SINGULAR_TO_PLURAL = {
+    "location": "locations",
+    "role_cluster": "role_clusters",
+    "company": "companies",
+}
+_SOFT_SINGULAR_TO_PLURAL = {
+    "preferred_location": "preferred_locations",
+    "preferred_role_cluster": "preferred_role_clusters",
+    "preferred_company": "preferred_companies",
+    "title_keyword": "title_keywords",
+}
+
+
+def _canonicalize_llm_variants(
+    raw: dict[str, Any],
+    *,
+    singular_to_plural: dict[str, str],
+    list_fields: set[str],
+) -> dict[str, Any]:
+    # 真实 LLM 常把单数键写成字符串列表（如 location: ["上海","北京"]）、
+    # 把复数键写成单个字符串；进白名单校验前先归一，避免整轮咨询报废。
+    out = dict(raw)
+    for singular, plural in singular_to_plural.items():
+        value = out.get(singular)
+        if _is_string_list(value):
+            existing = out.get(plural)
+            out[plural] = _merge_strings(
+                existing if _is_string_list(existing) else [],
+                value,
+            )
+            out.pop(singular)
+    for key in list_fields:
+        value = out.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = [value]
+    return out
+
+
 def _validated_consult_hard_constraints(
     raw: dict[str, Any],
 ) -> dict[str, Any]:
     list_fields = {"locations", "role_clusters", "companies"}
+    raw = _canonicalize_llm_variants(
+        raw,
+        singular_to_plural=_HARD_SINGULAR_TO_PLURAL,
+        list_fields=list_fields,
+    )
+    _filter_role_cluster_values(raw, "role_clusters", "role_cluster")
     string_fields = {
         "location",
         "role_cluster",
@@ -447,6 +530,12 @@ def _validated_consult_soft_preferences(
         "preferred_companies",
         "title_keywords",
     }
+    raw = _canonicalize_llm_variants(
+        raw,
+        singular_to_plural=_SOFT_SINGULAR_TO_PLURAL,
+        list_fields=allowed,
+    )
+    _filter_role_cluster_values(raw, "preferred_role_clusters")
     for key in allowed & raw.keys():
         value = raw[key]
         if value is None:
