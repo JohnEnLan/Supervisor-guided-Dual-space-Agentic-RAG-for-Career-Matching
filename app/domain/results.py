@@ -27,6 +27,8 @@ class RecommendationResult(PublicModel):
     resume_evidence: list[EvidenceItem] = Field(default_factory=list)
     source_url: str | None = None
     listing_kind: Literal["source_url", "dataset_only"] = "dataset_only"
+    demo_synthetic: bool | None = None
+    country_code: Literal["CN", "UK"] | None = None
 
 
 class ResumeAdvice(PublicModel):

@@ -346,6 +346,9 @@ def _write_retrieval_state(state: SharedState, candidates: list[JobCandidate]) -
                 "sources": list(candidate.sources),
                 "evidence_span_ids": list(candidate.evidence_span_ids),
                 "evidence_spans": list(candidate.evidence_spans),
+                "demo_synthetic": candidate.demo_synthetic,
+                "country_code": candidate.country_code,
+                "source_tag": candidate.source_tag,
             }
         )
         for evidence_id in candidate.evidence_span_ids:

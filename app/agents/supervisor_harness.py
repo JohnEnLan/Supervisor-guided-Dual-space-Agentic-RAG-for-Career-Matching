@@ -221,14 +221,31 @@ def _check_publication_gate(
     blocked_job_ids = {
         str(item.get("job_id")) for item in hard_violations if item.get("job_id")
     }
+    ranked_by_job = {
+        str(row.get("job_id")): row
+        for row in state.retrieval_state.ranking_scores
+        if isinstance(row, dict) and row.get("job_id")
+    }
     roles = [
         role for role in state.strategy_state.recommended_roles if isinstance(role, dict)
     ]
+    missing_demo_markers = {
+        str(role.get("job_id"))
+        for role in roles
+        if role.get("job_id")
+        and ranked_by_job.get(str(role["job_id"]), {}).get("source_tag")
+        == "linkedin_ml_cnuk_demo_v1"
+        and ranked_by_job.get(str(role["job_id"]), {}).get("demo_synthetic")
+        is not True
+    }
+    if missing_demo_markers:
+        issues.append("demo_marker_missing")
     publishable_count = sum(
         1
         for role in roles
         if role.get("job_id")
         and str(role["job_id"]) not in blocked_job_ids
+        and str(role["job_id"]) not in missing_demo_markers
         and role.get("evidence_span_ids")
     )
     metrics.update(

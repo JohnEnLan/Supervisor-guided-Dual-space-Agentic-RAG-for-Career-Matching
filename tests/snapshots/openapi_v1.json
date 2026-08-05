@@ -1350,6 +1350,32 @@
             "title": "Concise Explanation",
             "type": "string"
           },
+          "country_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "CN",
+                  "UK"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "demo_synthetic": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demo Synthetic"
+          },
           "evidence": {
             "items": {
               "$ref": "#/components/schemas/EvidenceItem"

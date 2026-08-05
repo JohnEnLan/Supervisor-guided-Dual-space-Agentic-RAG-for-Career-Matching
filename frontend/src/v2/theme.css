@@ -116,6 +116,7 @@
 .v2-tier.now_fit { background: #e0f0e9; color: var(--v2-ok); }
 .v2-tier.stretch_fit { background: var(--v2-accent-soft); color: var(--v2-accent-hover); }
 .v2-tier.bridge_role { background: #e8e3f5; color: #5b4a8a; }
+.v2-demo-badge { display: inline-block; margin-left: 6px; padding: 3px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 650; background: #fdf1dc; color: #8a6116; border: 1px dashed #d9b268; }
 .v2-extra { border: 1px solid var(--v2-line); border-radius: 10px; padding: 10px 14px; background: var(--v2-surface); }
 .v2-extra summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
 .v2-warnings { color: var(--v2-warn); font-size: 0.84rem; }

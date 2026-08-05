@@ -34,6 +34,24 @@ from app.state.schema import SharedState
 logger = logging.getLogger(__name__)
 
 
+async def active_demo_corpus_exists(pool) -> bool:
+    if settings.app_env != "production":
+        return False
+    async with pool.acquire() as connection:
+        return bool(
+            await connection.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM jobs
+                    WHERE is_open = TRUE
+                      AND demo_synthetic = TRUE
+                )
+                """
+            )
+        )
+
+
 async def _sweep_stale_and_terminal_checkpoints(checkpointer) -> None:
     await recover_stale_runs(
         stale_after_seconds=settings.run_stale_after_seconds,
@@ -73,7 +91,12 @@ async def lifespan(app: FastAPI):
     checkpoint_sweep_task = None
     otp_cleanup_task = None
     validate_runtime_security(settings)
-    await get_pool()
+    pool = await get_pool()
+    active_demo_corpus = await active_demo_corpus_exists(pool)
+    validate_runtime_security(
+        settings,
+        active_demo_corpus=active_demo_corpus,
+    )
     try:
         otp_cleanup_task = asyncio.create_task(
             run_otp_cleanup(

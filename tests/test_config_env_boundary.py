@@ -99,6 +99,7 @@ def test_w3_auth_defaults_are_compatibility_safe_and_documented() -> None:
         "SMS_OTP_PROVIDER",
         "AUTH_ENFORCED",
         "MONITORING_ADMIN_MODE",
+        "DEMO_CORPUS_ENABLED",
     ):
         assert f"{name}=" in example
 
@@ -133,3 +134,24 @@ def test_production_rejects_documented_development_secrets() -> None:
 
     with pytest.raises(RuntimeError, match="AUTH_SECRET_KEY"):
         validate_runtime_security(runtime)
+
+
+def test_production_requires_explicit_demo_switch_for_active_demo_rows() -> None:
+    from app.config import validate_runtime_security
+
+    secure = Settings(
+        app_env="production",
+        auth_enforced=True,
+        auth_secret_key="a" * 32,
+        otp_pepper="b" * 32,
+        email_otp_provider="smtp",
+        sms_otp_provider="console",
+    )
+    # Isolate this gate from the existing console-provider production gate.
+    object.__setattr__(secure, "sms_otp_provider", "provider_for_test")
+
+    with pytest.raises(RuntimeError, match="DEMO_CORPUS_ENABLED"):
+        validate_runtime_security(secure, active_demo_corpus=True)
+
+    object.__setattr__(secure, "demo_corpus_enabled", True)
+    validate_runtime_security(secure, active_demo_corpus=True)

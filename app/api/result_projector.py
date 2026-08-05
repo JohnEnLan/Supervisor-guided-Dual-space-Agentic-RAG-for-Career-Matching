@@ -37,6 +37,14 @@ def project_product_result(state: SharedState) -> ProductResult:
             warnings.append(f"hard_constraint_failed:{job_id}")
             continue
 
+        if (
+            ranked_evidence.get(job_id, {}).get("source_tag")
+            == "linkedin_ml_cnuk_demo_v1"
+            and ranked_evidence.get(job_id, {}).get("demo_synthetic") is not True
+        ):
+            warnings.append(f"demo_marker_missing:{job_id}")
+            continue
+
         evidence = _job_evidence_for_role(role, ranked_evidence.get(job_id, {}))
         if not evidence:
             warnings.append(f"recommendation_missing_jd_evidence:{job_id}")
@@ -69,6 +77,12 @@ def project_product_result(state: SharedState) -> ProductResult:
                 source_url=_optional_text(role.get("source_url")),
                 listing_kind=(
                     "source_url" if role.get("source_url") else "dataset_only"
+                ),
+                demo_synthetic=(
+                    True if ranked_evidence.get(job_id, {}).get("demo_synthetic") is True else None
+                ),
+                country_code=_country_code(
+                    ranked_evidence.get(job_id, {}).get("country_code")
                 ),
             )
         )
@@ -203,3 +217,7 @@ def _resume_evidence_for_role(
 def _optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _country_code(value: Any) -> str | None:
+    return value if value in {"CN", "UK"} else None

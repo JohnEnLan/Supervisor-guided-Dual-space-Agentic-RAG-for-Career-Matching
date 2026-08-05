@@ -413,3 +413,42 @@ async def test_lifespan_rejects_production_compatibility_before_db_open(
     with pytest.raises(RuntimeError, match="AUTH_ENFORCED"):
         async with main.lifespan(main.app):
             pass
+
+
+@pytest.mark.asyncio
+async def test_lifespan_probes_active_demo_corpus_once_after_pool_open(monkeypatch):
+    from app.api import main
+
+    pool = object()
+    probes = []
+    validations = []
+
+    async def fake_get_pool():
+        return pool
+
+    async def fake_probe(candidate_pool):
+        probes.append(candidate_pool)
+        return True
+
+    def fake_validate(_settings, *, active_demo_corpus=False):
+        validations.append(active_demo_corpus)
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    async def cleanup_loop(*, interval_seconds):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main.settings, "langgraph_orchestrator_enabled", False)
+    monkeypatch.setattr(main, "get_pool", fake_get_pool)
+    monkeypatch.setattr(main, "close_pool", no_op)
+    monkeypatch.setattr(main, "recover_stale_runs", no_op)
+    monkeypatch.setattr(main, "run_otp_cleanup", cleanup_loop)
+    monkeypatch.setattr(main, "validate_runtime_security", fake_validate)
+    monkeypatch.setattr(main, "active_demo_corpus_exists", fake_probe, raising=False)
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert probes == [pool]
+    assert validations == [False, True]

@@ -1,0 +1,59 @@
+{
+  "canonicalization_version": "linkedin_ml_canonical_v1",
+  "chunk_count": 120584,
+  "collisions": {
+    "colliding_row_count": 204,
+    "collision_key_count": 102,
+    "excess_row_count": 102,
+    "max_collision_size": 2
+  },
+  "country_counts": {
+    "CN": 22315,
+    "UK": 9564
+  },
+  "dataset_id": "linkedin_ml_cnuk_demo_v1",
+  "embedding_batch_size": 10,
+  "embedding_fingerprint": {
+    "build_id": "cnuk_demo_embedding_v1",
+    "dimension": 1024,
+    "model": "text-embedding-v4",
+    "splitter_version": "load_jobs_splitter_v1:max_chars=1800:67138f974667da3d"
+  },
+  "manifest_version": "cnuk_demo_manifest_v1",
+  "output_file": {
+    "bytes": 145707043,
+    "name": "cnuk_demo_v1.csv",
+    "sha256": "5aa0d87160d9bcf894173b6d44dd03f97a1819632adf8f84519e35d81d6c899b"
+  },
+  "projected_embedding_requests": 12059,
+  "rejection_counts": {
+    "duplicate_canonical_job": 436,
+    "jd_not_over_300_chars": 228,
+    "sentinel_company": 703
+  },
+  "row_count": 31879,
+  "salary_policy": "source_values_only_in_source_metadata_no_display_range",
+  "serialization": "utf-8-no-bom,rfc4180,comma,lf,fixed-columns",
+  "source_file": {
+    "bytes": 130289473,
+    "name": "LinkedInJobs_MLDataset.csv",
+    "row_count": 33246,
+    "sha256": "25c32abb828fa8e4505544af35c26ec3c5a2f0b292093ff56c96525e6d8f1b0b"
+  },
+  "synthetic_fields": [
+    "company",
+    "location",
+    "visa_sponsor"
+  ],
+  "transform_version": "cnuk_demo_transform_v1",
+  "visa_sponsor": {
+    "CN": {
+      "ratio": 0.047815,
+      "true_count": 1067
+    },
+    "UK": {
+      "ratio": 0.342116,
+      "true_count": 3272
+    }
+  }
+}

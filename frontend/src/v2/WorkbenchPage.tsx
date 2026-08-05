@@ -154,6 +154,11 @@ function ResultCards({ runId }: { runId: string }) {
         <article key={role.job_id} className="v2-job-card">
           <header>
             <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ?? role.tier}</span>
+            {role.demo_synthetic ? (
+              <span className="v2-demo-badge" title="该岗位来自合成演示语料，公司与城市为演示映射">
+                演示数据{role.country_code ? ` · ${role.country_code}` : ""}
+              </span>
+            ) : null}
             <h3>{role.title ?? role.job_id}</h3>
             <p>
               {role.company ?? "—"} · {role.location ?? "—"}

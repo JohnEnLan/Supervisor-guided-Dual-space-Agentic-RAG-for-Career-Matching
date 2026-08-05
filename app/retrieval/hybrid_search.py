@@ -125,6 +125,9 @@ class JobCandidate:
     degree_required: str | None = None
     min_years_exp: int | None = None
     is_open: bool | None = None
+    demo_synthetic: bool | None = None
+    country_code: str | None = None
+    source_tag: str | None = None
     rrf_score: float = 0.0
     bm25_score: float = 0.0
     dense_score: float = 0.0
@@ -490,6 +493,9 @@ def _rerank_candidates(
                 degree_required=metadata.get("degree_required"),
                 min_years_exp=metadata.get("min_years_exp"),
                 is_open=metadata.get("is_open"),
+                demo_synthetic=metadata.get("demo_synthetic"),
+                country_code=metadata.get("country_code"),
+                source_tag=metadata.get("source_tag"),
                 rrf_score=round(rrf_by_job.get(job_id, 0.0), 6),
                 bm25_score=round(bm25_by_job.get(job_id, 0.0), 6),
                 dense_score=round(dense_by_job.get(job_id, 0.0), 6),
@@ -609,7 +615,8 @@ async def _fetch_job_metadata(
         rows = await conn.fetch(
             """
             SELECT job_id, title, company, location, visa_sponsor,
-                   degree_required, min_years_exp, role_cluster, is_open
+                   degree_required, min_years_exp, role_cluster, is_open,
+                   demo_synthetic, country_code, source_tag
             FROM jobs
             WHERE job_id = ANY($1::text[])
             """,

@@ -18,6 +18,7 @@ frontend/playwright-report/
 frontend/.vite/
 frontend/*.tsbuildinfo
 .worktrees/
+/outputs/w5/
 
 # Keep generated/private inputs out of Git by default.
 data/resumes/*

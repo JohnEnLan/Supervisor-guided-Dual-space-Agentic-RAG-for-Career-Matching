@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     sms_otp_provider: Literal["console"] = "console"
     auth_enforced: bool = False
     monitoring_admin_mode: bool = False
+    demo_corpus_enabled: bool = False
 
     deepseek_api_key: str
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -68,7 +69,11 @@ class Settings(BaseSettings):
     max_repair_loops: int = 1
 
 
-def validate_runtime_security(runtime_settings: Settings) -> None:
+def validate_runtime_security(
+    runtime_settings: Settings,
+    *,
+    active_demo_corpus: bool = False,
+) -> None:
     if runtime_settings.app_env != "production":
         return
     if not runtime_settings.auth_enforced:
@@ -95,6 +100,11 @@ def validate_runtime_security(runtime_settings: Settings) -> None:
         raise RuntimeError(
             "MONITORING_ADMIN_MODE is required when monitoring is enabled "
             "in production"
+        )
+    if active_demo_corpus and not runtime_settings.demo_corpus_enabled:
+        raise RuntimeError(
+            "DEMO_CORPUS_ENABLED must be true when production has active "
+            "demo_synthetic jobs"
         )
 
 

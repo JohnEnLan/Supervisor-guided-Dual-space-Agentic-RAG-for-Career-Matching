@@ -894,6 +894,10 @@ export interface components {
             company?: string | null;
             /** Concise Explanation */
             concise_explanation: string;
+            /** Country Code */
+            country_code?: ("CN" | "UK") | null;
+            /** Demo Synthetic */
+            demo_synthetic?: boolean | null;
             /** Evidence */
             evidence?: components["schemas"]["EvidenceItem"][];
             /** Job Id */

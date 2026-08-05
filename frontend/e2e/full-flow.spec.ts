@@ -199,6 +199,8 @@ function installV2Api(page: Page, state: FlowState) {
               resume_evidence: [{ evidence_span_id: "R001", field: "resume", content: "Built a Python service." }],
               source_url: null,
               listing_kind: "dataset_only",
+              demo_synthetic: true,
+              country_code: "CN",
             },
           ],
           resume_strategy: [{ section: "experience", suggestion: "量化你的服务性能收益。", evidence_span_ids: ["R001"] }],
@@ -260,6 +262,7 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await expect(page.getByText("结果已通过发布核查。")).toBeVisible();
   await expect(page.getByText("Backend Engineer")).toBeVisible();
   await expect(page.getByText("现在就投")).toBeVisible();
+  await expect(page.getByText("演示数据 · CN")).toBeVisible();
 
   await page.getByRole("button", { name: "查看证据" }).click();
   await expect(page.getByText("Python, SQL required.")).toBeVisible();
