@@ -73,3 +73,63 @@ def test_langgraph_defaults_enabled_with_documented_rollback() -> None:
     assert "LANGGRAPH_STRICT_MSGPACK" not in example
     assert "false" in example.lower()
     assert "旧" in example or "legacy" in example.lower()
+
+
+def test_w3_auth_defaults_are_compatibility_safe_and_documented() -> None:
+    settings = Settings()
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert settings.app_env == "development"
+    assert settings.auth_enforced is False
+    assert settings.auth_session_ttl_days == 7
+    assert settings.email_otp_provider == "console"
+    assert settings.sms_otp_provider == "console"
+    assert settings.monitoring_admin_mode is False
+    for name in (
+        "APP_ENV",
+        "AUTH_SECRET_KEY",
+        "OTP_PEPPER",
+        "AUTH_SESSION_TTL_DAYS",
+        "EMAIL_OTP_PROVIDER",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD",
+        "SMTP_FROM_EMAIL",
+        "SMS_OTP_PROVIDER",
+        "AUTH_ENFORCED",
+        "MONITORING_ADMIN_MODE",
+    ):
+        assert f"{name}=" in example
+
+
+def test_production_refuses_compatibility_or_console_otp() -> None:
+    from app.config import validate_runtime_security
+
+    compatibility = Settings(app_env="production", auth_enforced=False)
+    with pytest.raises(RuntimeError, match="AUTH_ENFORCED"):
+        validate_runtime_security(compatibility)
+
+    console = Settings(
+        app_env="production",
+        auth_enforced=True,
+        auth_secret_key="a" * 32,
+        otp_pepper="b" * 32,
+        email_otp_provider="smtp",
+        sms_otp_provider="console",
+    )
+    with pytest.raises(RuntimeError, match="console"):
+        validate_runtime_security(console)
+
+
+def test_production_rejects_documented_development_secrets() -> None:
+    from app.config import validate_runtime_security
+
+    runtime = Settings(
+        app_env="production",
+        auth_enforced=True,
+        email_otp_provider="smtp",
+    )
+
+    with pytest.raises(RuntimeError, match="AUTH_SECRET_KEY"):
+        validate_runtime_security(runtime)

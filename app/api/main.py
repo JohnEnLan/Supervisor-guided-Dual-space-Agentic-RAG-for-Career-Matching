@@ -14,8 +14,13 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg_pool import AsyncConnectionPool
 
+from app.api.auth.otp import (
+    OTP_CLEANUP_INTERVAL_SECONDS,
+    run_otp_cleanup,
+)
+from app.api.auth.sessions import OriginCheckMiddleware
 from app.api.v1.router import router as v1_router
-from app.config import settings
+from app.config import settings, validate_runtime_security
 from app.db.pool import close_pool, get_pool
 from app.db.run_store import (
     list_terminal_checkpoint_thread_ids,
@@ -66,8 +71,15 @@ async def lifespan(app: FastAPI):
     checkpoint_pool = None
     checkpointer = None
     checkpoint_sweep_task = None
+    otp_cleanup_task = None
+    validate_runtime_security(settings)
     await get_pool()
     try:
+        otp_cleanup_task = asyncio.create_task(
+            run_otp_cleanup(
+                interval_seconds=OTP_CLEANUP_INTERVAL_SECONDS,
+            )
+        )
         if settings.langgraph_orchestrator_enabled:
             checkpoint_pool = AsyncConnectionPool(
                 conninfo=settings.database_url,
@@ -106,6 +118,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         try:
+            if otp_cleanup_task is not None:
+                otp_cleanup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await otp_cleanup_task
             if checkpoint_sweep_task is not None:
                 checkpoint_sweep_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -119,4 +135,5 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Career-RAG", lifespan=lifespan)
+app.add_middleware(OriginCheckMiddleware)
 app.include_router(v1_router)

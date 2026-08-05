@@ -122,3 +122,35 @@ def test_monitoring_recent_runs_returns_only_allow_list_fields(monkeypatch) -> N
         "warning_codes",
         "error_code",
     }
+
+
+def test_monitoring_admin_mode_requires_is_admin_even_when_enabled(
+    monkeypatch,
+) -> None:
+    from app.api.auth.deps import optional_current_user
+    from app.api.auth.sessions import AuthedUser
+    from app.api.v1 import monitoring
+    from app.api.v1.router import router
+
+    monkeypatch.setattr(monitoring.settings, "monitoring_enabled", True)
+    monkeypatch.setattr(monitoring.settings, "monitoring_admin_mode", True)
+    app = FastAPI()
+    app.include_router(router)
+
+    def user(*, is_admin: bool):
+        return AuthedUser(
+            user_id="11111111-1111-1111-1111-111111111111",
+            display_name=None,
+            avatar_url=None,
+            status="active",
+            token_version=0,
+            is_admin=is_admin,
+            created_at=datetime.now(UTC),
+            last_login_at=None,
+        )
+
+    app.dependency_overrides[optional_current_user] = lambda: user(is_admin=False)
+    with TestClient(app) as client:
+        response = client.get("/api/v1/monitoring/overview")
+
+    assert response.status_code == 403

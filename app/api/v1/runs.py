@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
+from app.api.auth.deps import require_owned_run
 from app.agents.orchestrator import run_persisted_agentic_match_run
 from app.agents.trace import (
     build_public_explain,
@@ -45,6 +46,7 @@ PUBLIC_STAGE_ORDER = (
     "/runs/{run_id}/execute",
     response_model=RunStatusResponse,
     status_code=202,
+    dependencies=[Depends(require_owned_run)],
 )
 async def execute_run(
     run_id: str,
@@ -70,7 +72,11 @@ async def execute_run(
     return _status_response(run)
 
 
-@router.get("/runs/{run_id}/status", response_model=RunStatusResponse)
+@router.get(
+    "/runs/{run_id}/status",
+    response_model=RunStatusResponse,
+    dependencies=[Depends(require_owned_run)],
+)
 async def run_status(run_id: str) -> RunStatusResponse:
     run = await get_run(run_id=run_id)
     if run is None:
@@ -81,6 +87,7 @@ async def run_status(run_id: str) -> RunStatusResponse:
 @router.get(
     "/runs/{run_id}/conversation",
     response_model=RunConversationResponse,
+    dependencies=[Depends(require_owned_run)],
 )
 async def run_conversation(run_id: str) -> RunConversationResponse:
     run = await get_run(run_id=run_id)
@@ -115,7 +122,11 @@ async def run_conversation(run_id: str) -> RunConversationResponse:
     )
 
 
-@router.get("/runs/{run_id}/result", response_model=RunResultResponse)
+@router.get(
+    "/runs/{run_id}/result",
+    response_model=RunResultResponse,
+    dependencies=[Depends(require_owned_run)],
+)
 async def run_result(run_id: str) -> RunResultResponse:
     run = await get_run(run_id=run_id)
     if run is None:
@@ -141,7 +152,11 @@ async def run_result(run_id: str) -> RunResultResponse:
     )
 
 
-@router.get("/runs/{run_id}/explain", response_model=RunExplainResponse)
+@router.get(
+    "/runs/{run_id}/explain",
+    response_model=RunExplainResponse,
+    dependencies=[Depends(require_owned_run)],
+)
 async def run_explain(run_id: str) -> RunExplainResponse:
     if not settings.evaluation_capability_enabled:
         raise HTTPException(status_code=404, detail="explain capability disabled")

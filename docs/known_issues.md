@@ -15,3 +15,6 @@
 | 8 | 评估集重复 case ID 静默覆盖 | scripts/evaluate_system.py:30-48 | 当前数据集无重复；策略（报错 vs 合并）待定 | 扩数据集前 |
 | 9 | AsyncOpenAI 客户端无 aclose：测试反复启停可能残留 transport | app/llm/*.py | 无生产影响，进程退出即释放 | 顺手时 |
 | 10 | 持久任务队列：BackgroundTasks 进程内执行，重启丢 in-flight（已加启动 stale 回收缓解） | app/api/v1/ | Release 1 工程化范畴，计划文档已有设计 | 产品化阶段 |
+| 11 | W3 前历史 session 的 `owner_user_id` 为空，开启鉴权后按无主数据一律不可达；compatibility 仅供 development/test 旧前端过渡 | session_state.owner_user_id | 不把历史 TEXT `user_id` 猜测映射到新账号，避免错误认领简历/结果；保留至 W4 切换后制定受审计的认领或到期删除策略 | W4 切换后 |
+| 12 | 生产短信发送商尚未接入；W3 的 phone OTP 只有 development/test console hook，production 会 fail closed | app/api/auth/providers.py, app/config.py | W3 明确只交付 `SMS_OTP_PROVIDER=console`，且配置中没有 Twilio/阿里云凭据契约；不能在生产泄露验证码 | 选定供应商并补凭据、签名与回执契约后 |
+| 13 | 账号删除端点与编排尚未交付 | app/api/auth/, app/db/ | 删除需按 `checkpoint_writes/checkpoint_blobs/checkpoints`（按 run_id）→ run events/metrics/runs → session_state → private/feedback memory → identities → users 的顺序执行，并为无主历史数据另定策略，不能靠级联关系猜测 | W4 鉴权切换与数据保留策略定稿后 |

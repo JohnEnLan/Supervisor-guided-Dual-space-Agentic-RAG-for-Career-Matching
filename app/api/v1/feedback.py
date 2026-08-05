@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.auth.deps import require_owned_run
 from app.api.v1.schemas import ReactionRequest, ReactionResponse
 from app.db.run_store import get_run
 from app.db.state_store import (
@@ -20,6 +21,7 @@ router = APIRouter()
     "/runs/{run_id}/reaction",
     response_model=ReactionResponse,
     status_code=202,
+    dependencies=[Depends(require_owned_run)],
 )
 async def add_run_reaction(
     run_id: str, request: ReactionRequest

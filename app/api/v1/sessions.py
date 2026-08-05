@@ -6,8 +6,19 @@ from copy import deepcopy
 from pathlib import Path
 import re
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from typing import Annotated
 
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+)
+
+from app.api.auth.deps import optional_current_user, require_owned_session
+from app.api.auth.sessions import AuthedUser
 from app.api.uploads import persist_upload
 from app.api.v1.schemas import (
     IntentConsultRequest,
@@ -58,11 +69,25 @@ _INTENT_CAREER_FIELDS = (
 
 
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
-async def create_session(request: SessionCreateRequest) -> SessionResponse:
+async def create_session(
+    request: SessionCreateRequest,
+    user: Annotated[
+        AuthedUser | None,
+        Depends(optional_current_user),
+    ],
+) -> SessionResponse:
+    legacy_user_id = request.model_dump()["user_id"]
+    resolved_user_id = user.user_id if user is not None else legacy_user_id
+    if resolved_user_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="user_id is required in compatibility mode",
+        )
     session_id = str(uuid.uuid4())
     await save_state(
-        SharedState(session_id=session_id, user_id=request.user_id),
+        SharedState(session_id=session_id, user_id=resolved_user_id),
         status="awaiting_resume",
+        owner_user_id=user.user_id if user is not None else None,
     )
     return SessionResponse(session_id=session_id, status="awaiting_resume")
 
@@ -71,6 +96,7 @@ async def create_session(request: SessionCreateRequest) -> SessionResponse:
     "/sessions/{session_id}/resume",
     response_model=ResumeAcceptedResponse,
     status_code=202,
+    dependencies=[Depends(require_owned_session)],
 )
 async def upload_resume(
     session_id: str,
@@ -94,6 +120,7 @@ async def upload_resume(
 @router.get(
     "/sessions/{session_id}/resume-preview",
     response_model=ResumePreviewResponse,
+    dependencies=[Depends(require_owned_session)],
 )
 async def resume_preview(session_id: str) -> ResumePreviewResponse:
     state = await load_state(session_id)
@@ -120,6 +147,7 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
 @router.post(
     "/sessions/{session_id}/resume-confirm",
     response_model=ResumeConfirmResponse,
+    dependencies=[Depends(require_owned_session)],
 )
 async def resume_confirm(session_id: str) -> ResumeConfirmResponse:
     current = await get_resume_metadata(session_id)
@@ -142,6 +170,7 @@ async def resume_confirm(session_id: str) -> ResumeConfirmResponse:
 @router.get(
     "/sessions/{session_id}/intent-consult",
     response_model=IntentConsultResponse,
+    dependencies=[Depends(require_owned_session)],
 )
 async def get_intent_consultation(session_id: str) -> IntentConsultResponse:
     state = await load_state(session_id)
@@ -159,6 +188,7 @@ async def get_intent_consultation(session_id: str) -> IntentConsultResponse:
 @router.post(
     "/sessions/{session_id}/intent-consult",
     response_model=IntentConsultResponse,
+    dependencies=[Depends(require_owned_session)],
 )
 async def consult_intent(
     session_id: str,
@@ -218,6 +248,7 @@ async def consult_intent(
     "/sessions/{session_id}/match-brief",
     response_model=MatchBriefResponse,
     status_code=201,
+    dependencies=[Depends(require_owned_session)],
 )
 async def build_match_brief(
     session_id: str, request: MatchBriefRequest

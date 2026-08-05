@@ -305,10 +305,11 @@ async def test_twenty_competing_executes_queue_a_run_once(monkeypatch):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         responses = await asyncio.gather(
             *[
-                client.post(
-                    "/api/v1/runs/run-race/execute",
-                    json={"plan_version": 1, "plan_hash": "b" * 64},
-                )
+                    client.post(
+                        "/api/v1/runs/run-race/execute",
+                        json={"plan_version": 1, "plan_hash": "b" * 64},
+                        headers={"Origin": "http://test"},
+                    )
                 for _index in range(20)
             ]
         )

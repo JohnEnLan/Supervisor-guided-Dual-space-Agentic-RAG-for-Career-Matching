@@ -29,22 +29,28 @@ class FeedbackWriteResult:
     feedback: dict[str, Any]
 
 
-async def save_state(state: SharedState, status: str = "running") -> None:
+async def save_state(
+    state: SharedState,
+    status: str = "running",
+    *,
+    owner_user_id: str | None = None,
+) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(
                 """
                 INSERT INTO session_state (
-                    session_id, user_id, state, status, updated_at
+                    session_id, user_id, state, status, owner_user_id, updated_at
                 )
-                VALUES ($1, $2, $3::jsonb, $4, now())
+                VALUES ($1, $2, $3::jsonb, $4, $5::uuid, now())
                 ON CONFLICT (session_id) DO NOTHING
                 """,
                 state.session_id,
                 state.user_id,
                 state.model_dump_json(),
                 status,
+                owner_user_id,
             )
 
             latest = await _load_locked_state(conn, state.session_id)

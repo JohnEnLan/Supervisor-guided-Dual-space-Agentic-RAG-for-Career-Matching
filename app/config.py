@@ -1,5 +1,6 @@
 """集中配置。默认读取 .env，测试可显式关闭 dotenv 加载。"""
 import os
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +22,21 @@ class Settings(BaseSettings):
     database_url: str
     db_pool_min: int = 2
     db_pool_max: int = 10
+
+    app_env: Literal["development", "test", "production"] = "development"
+    auth_secret_key: str = "development-only-auth-secret-key-change-me"
+    otp_pepper: str = "development-only-otp-pepper-change-me"
+    auth_session_ttl_days: int = Field(default=7, ge=1, le=30)
+    email_otp_provider: Literal["console", "smtp"] = "console"
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_start_tls: bool = True
+    sms_otp_provider: Literal["console"] = "console"
+    auth_enforced: bool = False
+    monitoring_admin_mode: bool = False
 
     deepseek_api_key: str
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -49,6 +65,36 @@ class Settings(BaseSettings):
     max_clarification_loops: int = 1
     max_reretrieval_loops: int = 1
     max_repair_loops: int = 1
+
+
+def validate_runtime_security(runtime_settings: Settings) -> None:
+    if runtime_settings.app_env != "production":
+        return
+    if not runtime_settings.auth_enforced:
+        raise RuntimeError("AUTH_ENFORCED must be true in production")
+    if (
+        len(runtime_settings.auth_secret_key.encode("utf-8")) < 32
+        or runtime_settings.auth_secret_key.startswith("development-only-")
+    ):
+        raise RuntimeError("AUTH_SECRET_KEY must be at least 32 bytes")
+    if (
+        len(runtime_settings.otp_pepper.encode("utf-8")) < 32
+        or runtime_settings.otp_pepper.startswith("development-only-")
+    ):
+        raise RuntimeError("OTP_PEPPER must be at least 32 bytes")
+    if "console" in {
+        runtime_settings.email_otp_provider,
+        runtime_settings.sms_otp_provider,
+    }:
+        raise RuntimeError("console OTP providers are forbidden in production")
+    if (
+        runtime_settings.monitoring_enabled
+        and not runtime_settings.monitoring_admin_mode
+    ):
+        raise RuntimeError(
+            "MONITORING_ADMIN_MODE is required when monitoring is enabled "
+            "in production"
+        )
 
 
 settings = Settings()  # 全局唯一实例

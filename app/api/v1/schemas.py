@@ -21,8 +21,64 @@ class CapabilitiesResponse(PublicDTO):
     execution_durability: Literal["process_local"] = "process_local"
 
 
+class OtpRequest(PublicDTO):
+    channel: Literal["email", "phone"]
+    target: str = Field(min_length=3, max_length=320)
+
+
+class OtpRequestAccepted(PublicDTO):
+    status: Literal["otp_accepted"] = "otp_accepted"
+
+
+class OtpVerifyRequest(PublicDTO):
+    channel: Literal["email", "phone"]
+    target: str = Field(min_length=3, max_length=320)
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class MeResponse(PublicDTO):
+    user_id: str
+    display_name: str | None = None
+    avatar_url: str | None = None
+    status: str
+    is_admin: bool
+    created_at: datetime
+    last_login_at: datetime | None = None
+
+
+class ProfilePatchRequest(PublicDTO):
+    profile: dict[str, Any]
+
+
+class ProfileResponse(PublicDTO):
+    profile: dict[str, Any] = Field(default_factory=dict)
+    updated_at: datetime
+
+
+class MeSessionResponse(PublicDTO):
+    session_id: str
+    status: str
+    updated_at: datetime
+
+
+class MeSessionsResponse(PublicDTO):
+    sessions: list[MeSessionResponse] = Field(default_factory=list)
+    page: int
+    page_size: int
+    has_more: bool
+
+
 class SessionCreateRequest(PublicDTO):
-    user_id: str = Field(min_length=1, max_length=200)
+    user_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        deprecated=True,
+        description=(
+            "Deprecated compatibility user id; W4 removes this field. "
+            "Authenticated requests always use the session Cookie owner."
+        ),
+    )
 
 
 class SessionResponse(PublicDTO):

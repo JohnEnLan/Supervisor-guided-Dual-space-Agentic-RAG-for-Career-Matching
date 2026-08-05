@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.auth.routes import router as auth_router
 from app.api.v1.feedback import router as feedback_router
 from app.api.v1.monitoring import router as monitoring_router
 from app.api.v1.runs import router as runs_router
@@ -20,6 +21,7 @@ async def capabilities() -> CapabilitiesResponse:
     )
 
 
+router.include_router(auth_router)
 router.include_router(sessions_router)
 router.include_router(runs_router)
 router.include_router(feedback_router)

@@ -233,10 +233,13 @@ async def test_lifespan_periodically_sweeps_checkpoints_and_cancels_task(
 
     async with main.lifespan(main.app):
         await asyncio.wait_for(periodic_delete_completed.wait(), timeout=1)
-        assert len(created_tasks) == 1
-        assert not created_tasks[0].done()
+        assert len(created_tasks) == 2
+        assert {
+            task.get_coro().__name__ for task in created_tasks
+        } == {"run_otp_cleanup", "_run_checkpoint_sweeper"}
+        assert all(not task.done() for task in created_tasks)
 
-    assert created_tasks[0].cancelled()
+    assert all(task.cancelled() for task in created_tasks)
     assert recover_calls >= 2
     assert deleted_threads[:2] == ["terminal-run-1", "terminal-run-2"]
 
@@ -280,9 +283,16 @@ async def test_lifespan_disables_periodic_sweep_when_interval_is_zero(
     async def no_terminal_checkpoints():
         return []
 
-    def reject_create_task(coro):
-        coro.close()
-        raise AssertionError("periodic checkpoint sweep must be disabled")
+    created_tasks: list[asyncio.Task] = []
+    real_create_task = asyncio.create_task
+
+    def recording_create_task(coro):
+        if coro.cr_code.co_name == "_run_checkpoint_sweeper":
+            coro.close()
+            raise AssertionError("periodic checkpoint sweep must be disabled")
+        task = real_create_task(coro)
+        created_tasks.append(task)
+        return task
 
     monkeypatch.setattr(
         main.settings,
@@ -309,10 +319,14 @@ async def test_lifespan_disables_periodic_sweep_when_interval_is_zero(
         "list_terminal_checkpoint_thread_ids",
         no_terminal_checkpoints,
     )
-    monkeypatch.setattr(main.asyncio, "create_task", reject_create_task)
+    monkeypatch.setattr(main.asyncio, "create_task", recording_create_task)
 
     async with main.lifespan(main.app):
         assert main.app.state.langgraph_checkpointer is not None
+
+    assert len(created_tasks) == 1
+    assert created_tasks[0].get_coro().__name__ == "run_otp_cleanup"
+    assert created_tasks[0].cancelled()
 
 
 @pytest.mark.asyncio
@@ -353,3 +367,49 @@ async def test_sweep_isolates_per_thread_delete_failures(monkeypatch, caplog):
         and "poison-run" in record.getMessage()
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_lifespan_always_owns_independent_otp_cleanup_task(monkeypatch):
+    from app.api import main
+
+    task_started = asyncio.Event()
+
+    async def no_op():
+        return None
+
+    async def no_stale_runs(*, stale_after_seconds):
+        del stale_after_seconds
+        return 0
+
+    async def cleanup_loop(*, interval_seconds):
+        assert interval_seconds > 0
+        task_started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(main.settings, "langgraph_orchestrator_enabled", False)
+    monkeypatch.setattr(main, "get_pool", no_op)
+    monkeypatch.setattr(main, "close_pool", no_op)
+    monkeypatch.setattr(main, "recover_stale_runs", no_stale_runs)
+    monkeypatch.setattr(main, "run_otp_cleanup", cleanup_loop, raising=False)
+
+    async with main.lifespan(main.app):
+        await asyncio.wait_for(task_started.wait(), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_rejects_production_compatibility_before_db_open(
+    monkeypatch,
+):
+    from app.api import main
+
+    async def forbidden_pool():
+        raise AssertionError("invalid production config must fail before DB")
+
+    monkeypatch.setattr(main.settings, "app_env", "production")
+    monkeypatch.setattr(main.settings, "auth_enforced", False)
+    monkeypatch.setattr(main, "get_pool", forbidden_pool)
+
+    with pytest.raises(RuntimeError, match="AUTH_ENFORCED"):
+        async with main.lifespan(main.app):
+            pass
