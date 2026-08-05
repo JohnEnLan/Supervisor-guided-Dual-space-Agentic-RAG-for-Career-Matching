@@ -50,7 +50,7 @@
 |---|---|
 | `main.py` | 服务的总开关。启动时建两个数据库连接池（asyncpg 给业务、psycopg 给 checkpoint）、初始化 checkpoint 存储、回收上次崩溃残留的运行、起一个每小时清理隐私快照的后台钟；关闭时把这些都善后。 |
 | `serve.py`（在 app/ 下） | 唯一正确的启动方式 `python -m app.serve`。存在的原因很具体：Windows 上 uvicorn 默认的事件循环跑不了 psycopg，这里强制换成兼容的循环再启动。 |
-| `routes.py` | **旧版 API**（/resume /match /status /result /feedback）。是项目早期的接口，现在保留是为了论文里"系统演进"的叙事和一批老测试；响应已改为安全投影，不泄露内部状态。新功能不要往这里加。 |
+| `routes.py`（已删除） | W2b 已移除无前缀旧 API（/resume /match /status /result /feedback）及其专属测试；服务现在只挂载 `/api/v1` router。 |
 | `v1/` 目录 | **正式 API**。`sessions.py`（建会话/传简历/确认简历/意图咨询/确认 Brief）、`runs.py`（提交执行/查进度/取结果/群聊消息流/评估解释）、`feedback.py`（对推荐岗位点赞点踩）、`monitoring.py`（运行指标）、`schemas.py`（所有请求/响应的数据格式——**前后端的合同**）、`router.py`（把它们拼起来+能力开关声明）。 |
 | `result_projector.py` | **隐私守门员**。内部状态里有简历原文、监督日志等私密内容，这个文件负责把它"投影"成只含可公开字段的结果。硬约束违规剔岗只认确定性核查结论（AI 说某岗位违规不算数）；此外发布门还会过滤缺岗位 ID 或缺 JD 证据的条目。 |
 | `conversation_projector.py` | **群聊导演**。把一次运行的进度、Brief、恢复事件、结果，翻译成"需求顾问·小意 / 岗位顾问·小检 / 规划师·小策 / PM"四个角色的群聊台词。纯模板代码生成，不调 AI，所以又快又稳还不会泄密。 |
@@ -76,7 +76,7 @@
 | `strategy_agent.py` | 规划师。写技能差距、简历修改建议、职业路径。所有简历建议必须引用真实的简历原文片段编号，引用不上的直接丢弃。 |
 | `supervisor.py` | PM 的两次出场：规划阶段（旧路径用）和终审阶段。终审调一次大模型做综合判断，然后**确定性复核**接管：数量、ID 合法性、证据完整性、隐性声明清理。修复动作（删除无证据建议）每次运行最多一次。 |
 | `supervisor_harness.py` | PM 的检查清单：7 个纯代码检查点（每个 Agent 前后 + 发布门禁），不调大模型，发现锁定的硬约束被改动等严重问题会直接抛错拦截。 |
-| `orchestrator.py` | **旧编排 + 公共工具箱**。主线分支用它跑全流程；本分支保留它两个用途：旧 API 还在用、图工位复用它的函数（文件底部有一组公共别名，就是图路径的"合同"）。 |
+| `orchestrator.py` | **公共编排工具箱**。保留 `run_agentic_match_from_state`、`run_persisted_agentic_match_run`（图路径回退）及图工位复用的函数；旧 session 入口已在 W2b 删除。 |
 | `trace.py` | 答辩解释器。把监督日志按白名单投影成"排名怎么来的、恢复发生过几次、每阶段多少毫秒"，供评估页展示。 |
 
 ### app/retrieval/ —— 检索层（"怎么找岗位"）
@@ -109,7 +109,7 @@
 
 | 区 | 大白话 |
 |---|---|
-| `memory/` | P1 机制：`private_memory` 用户私有简历版本、`feedback` 投递反馈、`case_base` 匿名案例库（带邮箱/电话/链接的 PII 检测，脏数据进不来）、`feedback_loop` 反馈沉淀为案例的闭环（目前挂在旧 API）。 |
+| `memory/` | P1 机制：`private_memory` 用户私有简历版本、`feedback` 投递反馈、`case_base` 匿名案例库（带邮箱/电话/链接的 PII 检测，脏数据进不来）、`feedback_loop` 反馈沉淀为案例的闭环（已接入 v1 reaction）。 |
 | `evaluation/` | `metrics.py`：Precision/Recall/MRR/NDCG、硬过滤准确率（逐列核验，缺数据算 unknown 不算通过）、解释忠实度（按岗位对证据，A 岗不能借 B 岗的证据）；`load_validation.py` 压测统计。 |
 | `llm/` | `deepseek.py` 聊天模型、`qwen_embed.py` 向量化。两者都有 Semaphore 限流（防止把 API 打爆）；上下文预算（超长输入自动压缩并标记 truncated）只在 DeepSeek 聊天边界做，向量化没有。 |
 | `domain/` | 纯数据结构：`match_brief.py` 确认单（内容哈希 + 不可变）、`results.py` 对外结果 DTO（禁止多余字段）、`run.py` run 状态机定义、`intent.py`、`monitoring.py`。 |

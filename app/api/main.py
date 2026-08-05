@@ -14,7 +14,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg_pool import AsyncConnectionPool
 
-from app.api.routes import router
 from app.api.v1.router import router as v1_router
 from app.config import settings
 from app.db.pool import close_pool, get_pool
@@ -120,5 +119,4 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Career-RAG", lifespan=lifespan)
-app.include_router(router)
 app.include_router(v1_router)

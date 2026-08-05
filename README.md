@@ -104,16 +104,43 @@ creates the event loop, as required by psycopg's asynchronous connections.
 Minimal API flow:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/resume \
-  -F "session_id=s1" \
-  -F "user_id=u1" \
+curl -X POST http://127.0.0.1:8000/api/v1/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"u1"}'
+
+# Copy session_id from the response.
+SESSION_ID="<session_id>"
+
+curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/resume" \
   -F "file=@data/resumes/sample.txt"
 
-curl -X POST http://127.0.0.1:8000/match \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"s1","user_goal_text":"Find data analyst jobs in Birmingham","top_k":5}'
+# Poll until the preview is ready, then confirm the normalized resume.
+curl "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/resume-preview"
+curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/resume-confirm"
 
-curl http://127.0.0.1:8000/status/s1
+curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/intent-consult" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"targeted","goal_text":"Find data analyst jobs in Birmingham","target_roles":["Data Analyst"]}'
+
+curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/match-brief" \
+  -H "Content-Type: application/json" \
+  -d '{"career_goal":"Find data analyst jobs in Birmingham","hard_constraints":{},"soft_preferences":{},"avoid_roles":[],"result_count":5}'
+
+# Copy run_id, brief.plan_version and brief.plan_hash from the response.
+RUN_ID="<run_id>"
+PLAN_VERSION=1
+PLAN_HASH="<plan_hash>"
+
+curl -X POST "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/execute" \
+  -H "Content-Type: application/json" \
+  -d "{\"plan_version\":$PLAN_VERSION,\"plan_hash\":\"$PLAN_HASH\"}"
+
+curl "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/status"
+curl "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/result"
+
+curl -X POST "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/reaction" \
+  -H "Content-Type: application/json" \
+  -d '{"job_id":"<recommended_job_id>","outcome":"interview","user_rating":5}'
 ```
 
 ## React 答辩工作台

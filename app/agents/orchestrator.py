@@ -25,7 +25,7 @@ from app.db.run_store import (
     transition_run,
     update_run_stage,
 )
-from app.db.state_store import load_state, mutate_state_atomically
+from app.db.state_store import mutate_state_atomically
 from app.domain.match_brief import MatchBrief
 from app.domain.monitoring import build_run_metrics
 from app.domain.run import RunStage, RunStatus
@@ -275,115 +275,6 @@ async def run_agentic_match_from_state(
     )
 
 
-async def run_persisted_agentic_match_from_session(
-    *,
-    session_id: str,
-    user_goal_text: str,
-    top_k: int = 5,
-    include_raptor: bool = False,
-    search_fn: SearchFn | None = None,
-) -> AgenticMatchResult:
-    state = await _load_required_state(session_id)
-
-    state = await _run_intent_under_supervision(state, user_goal_text)
-    state = await _persist_stage_state(
-        state,
-        status="intent_done",
-        owned_fields=("career_state",),
-    )
-
-    state = await _load_required_state(session_id)
-    retrieval_plan = await plan_retrieval(
-        state,
-        user_goal_text=user_goal_text,
-        default_top_k=top_k,
-        include_raptor=include_raptor,
-    )
-    state = await _persist_stage_state(
-        state,
-        status="supervisor_planning_done",
-        owned_fields=(),
-    )
-
-    state = await _load_required_state(session_id)
-    state = await _run_matching_under_supervision(
-        state,
-        retrieval_plan=retrieval_plan,
-        search_fn=search_fn or _default_search_fn,
-    )
-    state = await _persist_stage_state(
-        state,
-        status="retrieval_done",
-        owned_fields=("retrieval_state", "strategy_state"),
-    )
-
-    state = await _load_required_state(session_id)
-    state = await _run_strategy_under_supervision(state)
-    state = await _persist_stage_state(
-        state,
-        status="strategy_done",
-        owned_fields=("strategy_state",),
-    )
-
-    state = await _load_required_state(session_id)
-    verification = await final_verification(state)
-    if verification.get("reretrieval_loop_requested"):
-        reretrieval_plan, reretrieval_log = _build_reretrieval_plan(
-            retrieval_plan, verification
-        )
-        state.supervisor_log.append(reretrieval_log)
-        state = await _persist_stage_state(
-            state,
-            status="reretrieval_planned",
-            owned_fields=(),
-        )
-
-        state = await _load_required_state(session_id)
-        state = await _run_matching_under_supervision(
-            state,
-            retrieval_plan=reretrieval_plan,
-            search_fn=search_fn or _default_search_fn,
-            attempt=2,
-        )
-        state = await _persist_stage_state(
-            state,
-            status="reretrieval_done",
-            owned_fields=("retrieval_state", "strategy_state"),
-        )
-
-        state = await _load_required_state(session_id)
-        state = await _run_strategy_under_supervision(state, attempt=2)
-        state = await _persist_stage_state(
-            state,
-            status="strategy_rerun_done",
-            owned_fields=("strategy_state",),
-        )
-
-        state = await _load_required_state(session_id)
-        verification = await final_verification(
-            state,
-            allow_repair=verification.get("repair_loop_used", 0) == 0,
-        )
-        verification = _mark_reretrieval_loop_used(state, verification)
-
-    record_supervisor_checkpoint(
-        state,
-        checkpoint="publication_gate",
-        verification=verification,
-        attempt=2 if verification.get("reretrieval_loop_used") else 1,
-    )
-    state = await _persist_stage_state(
-        state,
-        status="agentic_done",
-        owned_fields=("strategy_state",),
-    )
-    return AgenticMatchResult(
-        state=state,
-        retrieval_plan=retrieval_plan,
-        final_verification=verification,
-    )
-
-
 async def _default_search_fn(**kwargs):
     from app.retrieval.dual_space_search import dual_space_search
 
@@ -464,13 +355,6 @@ async def _run_strategy_under_supervision(
         checkpoint="strategy_output",
         attempt=attempt,
     )
-    return state
-
-
-async def _load_required_state(session_id: str) -> SharedState:
-    state = await load_state(session_id)
-    if state is None:
-        raise KeyError(f"session_id not found in state_store: {session_id}")
     return state
 
 

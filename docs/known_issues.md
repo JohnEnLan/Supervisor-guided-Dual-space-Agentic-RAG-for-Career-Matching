@@ -6,7 +6,7 @@
 | # | 事项 | 位置 | 暂缓理由 | 建议时机 |
 |---|---|---|---|---|
 | 1 | 案例库双模型统一：`career_cases`（写入链）与 `anonymous_resume_cases + case_job_outcomes`（隐式检索读取链）互不连通 | app/memory/、scripts/seed_cases.py | 涉及表结构与读写链设计决策，P1 演示走 seed_cases 即可 | 迁移后 / 答辩后 |
-| 2 | v1 反馈闭环服务化：v1 reaction 只持久化，不做 legacy 已有的 case 沉淀闭环 | app/api/v1/feedback.py | 依赖 #1 的模型统一；文档 v7.1 已如实声明 | 与 #1 一起 |
+| 2 | 反馈闭环已迁 v1，模型统一仍暂缓 | app/api/v1/feedback.py, app/memory/feedback_loop.py | v1 reaction 已接入 case 沉淀闭环；但写入链与隐式检索读取链仍依赖 #1 的模型统一 | 与 #1 一起 |
 | 3 | RAPTOR 重建代际清理：数据源消失的旧节点不删除 | app/retrieval/raptor.py:518-602 | RAPTOR 主线关闭，仅消融实验用 | 重跑消融前 |
 | 4 | RAPTOR role-summary 绕过 allow_ids：job_id 为 NULL 的节点不受硬过滤白名单约束 | app/retrieval/raptor.py:368-384 | 同上，主线关闭 | 重跑消融前 |
 | 5 | case 软偏好从未被排序消费：`case_target_roles/case_bridge_roles` 持久化后无读取方 | app/memory/feedback_loop.py:59-63 | 产品决策（是否让历史案例影响排序）未定 | 与 #1/#2 一起 |
