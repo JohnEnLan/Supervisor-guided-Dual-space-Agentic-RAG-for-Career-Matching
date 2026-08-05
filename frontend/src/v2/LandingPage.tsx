@@ -26,6 +26,18 @@ export function LandingPage() {
     if (me.data) navigate("/app", { replace: true });
   }, [me.data, navigate]);
 
+  // 服务端可能禁用某个 OTP 通道（如 production 未接短信网关）：
+  // 只展示可用通道的 tab；接口不可达时退化为全部展示
+  const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities });
+  const enabledChannels = (
+    capabilities.data?.otp_channels?.length
+      ? capabilities.data.otp_channels
+      : (Object.keys(CHANNEL_META) as Channel[])
+  ) as Channel[];
+  useEffect(() => {
+    if (!enabledChannels.includes(channel)) setChannel(enabledChannels[0]);
+  }, [enabledChannels.join(","), channel]);
+
   useEffect(() => {
     if (cooldown <= 0) return;
     const timer = setInterval(() => setCooldown((s) => s - 1), 1000);
@@ -73,7 +85,7 @@ export function LandingPage() {
           <h2>开始使用</h2>
           <p className="hint">验证码登录，首次登录自动创建账号</p>
           <div className="v2-tabs" role="tablist">
-            {(Object.keys(CHANNEL_META) as Channel[]).map((key) => (
+            {enabledChannels.map((key) => (
               <button
                 key={key}
                 role="tab"

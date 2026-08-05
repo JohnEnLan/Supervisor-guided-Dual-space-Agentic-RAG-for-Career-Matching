@@ -2,7 +2,7 @@ r"""V2 全局多场景冒烟：真实服务器 + 真实 PG/pgvector + 真实 LLM
 
 用法（需先启动服务器并把 stdout 重定向到日志，console OTP 从日志读码）：
   $env:AUTH_ENFORCED = "true"
-  .venv\Scripts\python -m app.serve *> tmp\smoke_server.log   # 后台
+  .venv\Scripts\python -u -m app.serve *> tmp\smoke_server.log   # 后台（-u 防 stdout 块缓冲吞掉验证码）
   .venv\Scripts\python scripts\global_smoke.py tmp\smoke_server.log
 
 场景矩阵:
@@ -25,6 +25,20 @@ BASE = "http://127.0.0.1:8000/api/v1"
 ORIGIN = {"Origin": "http://127.0.0.1:8000"}
 LOG = ROOT / (sys.argv[1] if len(sys.argv) > 1 else "tmp/smoke_server.log")
 RESUME = ROOT / "data/resumes/demo_software_engineer_resume.docx"
+
+
+def ensure_resume_fixture() -> None:
+    # data/resumes 不入 git：干净检出时先跑生成器
+    if RESUME.exists():
+        return
+    import subprocess
+
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/generate_demo_resume.py")],
+        cwd=ROOT,
+        check=True,
+    )
+    assert RESUME.exists(), f"resume fixture still missing: {RESUME}"
 
 RUN_ID = str(int(time.time()))[-7:]
 EMAIL_A = f"smoke-{RUN_ID}@example.com"
@@ -71,6 +85,7 @@ def login(client: httpx.Client, channel: str, target: str) -> dict:
 
 
 def main():
+    ensure_resume_fixture()
     a = httpx.Client(timeout=60)
     b = httpx.Client(timeout=60)
     anon = httpx.Client(timeout=30)
@@ -230,6 +245,15 @@ def main():
     run_id = brief["run_id"]
     plan = brief["brief"]
 
+    # 错误 plan_hash 必须趁 plan_ready 阶段测：运行完成后 409 来自状态 CAS，
+    # 无论 hash 校验是否退化都会绿
+    r = a.post(
+        f"{BASE}/runs/{run_id}/execute",
+        json={"plan_version": plan["plan_version"], "plan_hash": "f" * 64},
+        headers=ORIGIN,
+    )
+    check("B9b 错误 plan_hash 409（plan_ready 阶段）", r.status_code == 409, str(r.status_code))
+
     r = a.post(
         f"{BASE}/runs/{run_id}/execute",
         json={"plan_version": plan["plan_version"], "plan_hash": plan["plan_hash"]},
@@ -253,7 +277,11 @@ def main():
     r = a.get(f"{BASE}/runs/{run_id}/conversation")
     conv = r.json() if r.status_code == 200 else {}
     personas = {m.get("persona") for m in conv.get("messages", [])}
-    check("B12 群聊播报四角色", bool({"pm", "job_scout"} & personas), f"personas={sorted(personas)}")
+    check(
+        "B12 群聊播报四角色",
+        {"pm", "job_scout", "strategist", "intent_consultant"} <= personas,
+        f"personas={sorted(personas)}",
+    )
 
     r = a.get(f"{BASE}/runs/{run_id}/result")
     result = (r.json() or {}).get("result") or {}
@@ -306,10 +334,10 @@ def main():
 
     r = a.post(
         f"{BASE}/runs/{run_id}/execute",
-        json={"plan_version": plan["plan_version"], "plan_hash": "f" * 64},
+        json={"plan_version": plan["plan_version"], "plan_hash": plan["plan_hash"]},
         headers=ORIGIN,
     )
-    check("D2 错误 plan_hash 409", r.status_code == 409, str(r.status_code))
+    check("D2 完成态重复执行 409", r.status_code == 409, str(r.status_code))
 
     # 咨询本身不要求简历（设计如此：小意可先聊）；简历门槛在 match-brief
     r = a.post(f"{BASE}/sessions", json={}, headers=ORIGIN)

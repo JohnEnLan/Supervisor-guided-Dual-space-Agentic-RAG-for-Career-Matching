@@ -41,6 +41,17 @@
           "monitoring_enabled": {
             "title": "Monitoring Enabled",
             "type": "boolean"
+          },
+          "otp_channels": {
+            "items": {
+              "enum": [
+                "email",
+                "phone"
+              ],
+              "type": "string"
+            },
+            "title": "Otp Channels",
+            "type": "array"
           }
         },
         "required": [

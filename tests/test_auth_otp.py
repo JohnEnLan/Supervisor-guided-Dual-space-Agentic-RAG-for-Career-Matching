@@ -58,12 +58,13 @@ class _OtpConnection:
         if "pg_advisory_xact_lock" in sql:
             self.locks.append((int(args[0]), int(args[1])))
             return "SELECT 1"
-        if "DELETE FROM otp_challenges" in sql and "WHERE id = $1" in sql:
-            before = len(self.challenges)
-            self.challenges = [
-                item for item in self.challenges if item["id"] != int(args[0])
-            ]
-            return f"DELETE {before - len(self.challenges)}"
+        if "SET delivery_failed = TRUE" in sql and "WHERE id = $1" in sql:
+            updated = 0
+            for item in self.challenges:
+                if item["id"] == int(args[0]):
+                    item["delivery_failed"] = True
+                    updated += 1
+            return f"UPDATE {updated}"
         if "DELETE FROM otp_challenges" in sql:
             self.challenges = [
                 item
@@ -109,6 +110,7 @@ class _OtpConnection:
                 if item["channel"] == channel
                 and item["normalized_target"] == target
                 and item["purpose"] == purpose
+                and not item.get("delivery_failed")
             ]
             newest = max(
                 matching,
@@ -444,7 +446,11 @@ async def test_failed_delivery_challenge_removal_keeps_prior_code_verifiable() -
     )
 
     assert removed is True
-    assert [item["id"] for item in connection.challenges] == [1]
+    # 行必须保留（签发限流按行数计窗口），只打 delivery_failed 标志
+    assert [item["id"] for item in connection.challenges] == [1, 2]
+    failed = next(item for item in connection.challenges if item["id"] == 2)
+    assert failed.get("delivery_failed") is True
+    # 验证选取跳过失败行：旧码不被遮蔽
     assert await otp.verify_otp(
         channel="email",
         target="person@example.com",

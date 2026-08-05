@@ -112,6 +112,8 @@ def _secure_production_settings(**overrides) -> Settings:
         "otp_pepper": "b" * 32,
         "email_otp_provider": "smtp",
         "sms_otp_provider": "disabled",
+        "smtp_host": "smtp.example.com",
+        "smtp_from_email": "noreply@example.com",
     }
     values.update(overrides)
     return Settings(**values)
@@ -193,3 +195,20 @@ def test_production_requires_explicit_demo_switch_for_active_demo_rows() -> None
 
     object.__setattr__(secure, "demo_corpus_enabled", True)
     validate_runtime_security(secure, active_demo_corpus=True)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        {"smtp_host": None},
+        {"smtp_from_email": None},
+        {"smtp_host": None, "smtp_from_email": None},
+    ],
+)
+def test_production_refuses_smtp_channel_without_smtp_config(missing) -> None:
+    # 复审 P1：缺 SMTP 关键配置的 production 曾能启动，但每次发码都失败，
+    # 对外仍统一 202 —— 全体用户静默无法登录
+    from app.config import validate_runtime_security
+
+    with pytest.raises(RuntimeError, match="SMTP_HOST and SMTP_FROM_EMAIL"):
+        validate_runtime_security(_secure_production_settings(**missing))

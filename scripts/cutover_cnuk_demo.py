@@ -115,6 +115,15 @@ async def _flip(
             """,
             list(old_source_tags),
         )
+        # 哨兵行：干净部署（零 legacy 行）下也要留下"发生过 forward"的记录，
+        # 否则 rollback 会因快照为空被拒绝，新语料再也关不掉。
+        # 哨兵 job_id 不存在于 jobs 表，恢复 JOIN 自然跳过它。
+        await connection.execute(
+            """
+            INSERT INTO corpus_cutover_snapshot (job_id, was_open)
+            VALUES ('__cutover_marker__', FALSE)
+            """
+        )
         await connection.execute(
             """
             UPDATE jobs

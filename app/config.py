@@ -96,6 +96,13 @@ def validate_runtime_security(
         raise RuntimeError("at least one OTP provider must be enabled")
     if "console" in otp_providers:
         raise RuntimeError("console OTP providers are forbidden in production")
+    if runtime_settings.email_otp_provider == "smtp" and not (
+        runtime_settings.smtp_host and runtime_settings.smtp_from_email
+    ):
+        raise RuntimeError(
+            "SMTP_HOST and SMTP_FROM_EMAIL are required when the email OTP "
+            "provider is smtp in production"
+        )
     if (
         runtime_settings.monitoring_enabled
         and not runtime_settings.monitoring_admin_mode

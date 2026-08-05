@@ -8,6 +8,7 @@ from app.db.state_store import (
     add_feedback,
 )
 from app.domain.run import RunStatus
+from app.memory.feedback import normalize_application_outcome
 from app.memory.feedback_loop import (
     process_feedback_closure_for_session,
     record_feedback_closure_error,
@@ -44,6 +45,12 @@ async def add_run_reaction(
             status_code=422, detail="job_id is not in this run result"
         )
     try:
+        # 前置校验：只有 outcome 词表错误是调用方问题；持久化路径上的
+        # ValueError/ValidationError 属服务器故障，不能一并按 422 吞掉
+        normalize_application_outcome(request.outcome)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    try:
         result = await add_feedback(
             session_id=run.session_id,
             job_id=request.job_id,
@@ -56,9 +63,6 @@ async def add_run_reaction(
         raise HTTPException(
             status_code=409, detail="idempotency key payload conflict"
         ) from None
-    except ValueError as exc:
-        # 词表外的 outcome（如自由文本）是调用方错误，不是服务器故障
-        raise HTTPException(status_code=422, detail=str(exc)) from None
 
     persisted_feedback = dict(result.feedback)
     if result.created or persisted_feedback.get("closure_status") not in {

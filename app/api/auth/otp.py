@@ -257,6 +257,7 @@ async def verify_otp(
                     WHERE channel = $1
                       AND normalized_target = $2
                       AND purpose = $3
+                      AND delivery_failed = FALSE
                     ORDER BY created_at DESC, id DESC
                     LIMIT 1
                     FOR UPDATE
@@ -335,11 +336,14 @@ async def invalidate_otp_challenge(
     *,
     pool: Any | None = None,
 ) -> bool:
+    # 不能 DELETE：签发限流按 otp_challenges 行数计窗口，删除会让
+    # 故障通道被无限重试。打标志让验证选取跳过即可。
     database_pool = pool or await get_pool()
     async with database_pool.acquire() as connection:
         result = await connection.execute(
             """
-            DELETE FROM otp_challenges
+            UPDATE otp_challenges
+            SET delivery_failed = TRUE
             WHERE id = $1
             """,
             challenge_id,

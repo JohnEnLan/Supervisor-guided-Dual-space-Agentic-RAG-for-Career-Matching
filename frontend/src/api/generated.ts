@@ -409,6 +409,8 @@ export interface components {
             explain_enabled: boolean;
             /** Monitoring Enabled */
             monitoring_enabled: boolean;
+            /** Otp Channels */
+            otp_channels?: ("email" | "phone")[];
         };
         /** CareerPathItem */
         CareerPathItem: {

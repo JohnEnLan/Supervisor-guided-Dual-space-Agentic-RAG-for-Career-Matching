@@ -39,6 +39,7 @@ function installV2Api(page: Page, state: FlowState) {
         execution_durability: "process_local",
         explain_enabled: false,
         monitoring_enabled: false,
+        otp_channels: ["email", "phone"],
       });
     if (path.endsWith("/auth/otp/request")) return json({ accepted: true, channel: "email" }, 202);
     if (path.endsWith("/auth/otp/verify")) {

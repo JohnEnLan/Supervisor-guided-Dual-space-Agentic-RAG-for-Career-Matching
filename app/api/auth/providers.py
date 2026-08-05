@@ -50,7 +50,9 @@ async def send_otp(
 
     if runtime_settings.app_env == "production":
         raise RuntimeError("console OTP providers are forbidden in production")
-    print(f"[development OTP] {channel} {target}: {code}")
+    # flush：开发/冒烟场景 stdout 常被重定向到日志文件（块缓冲），
+    # 不刷会让读日志取码的一方拿不到刚签发的验证码。
+    print(f"[development OTP] {channel} {target}: {code}", flush=True)
 
 
 async def _send_email_smtp(

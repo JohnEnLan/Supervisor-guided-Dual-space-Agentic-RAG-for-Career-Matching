@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS otp_challenges (
     expires_at        TIMESTAMPTZ NOT NULL,
     consumed_at       TIMESTAMPTZ,
     client_ip         INET,
+    delivery_failed   BOOLEAN NOT NULL DEFAULT FALSE,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_otp_challenge_target_created

@@ -19,6 +19,9 @@ class CapabilitiesResponse(PublicDTO):
     explain_enabled: bool
     monitoring_enabled: bool
     execution_durability: Literal["process_local"] = "process_local"
+    # 可用的 OTP 登录通道；配置为 disabled 的通道不出现在列表里，
+    # 前端据此隐藏对应登录 tab
+    otp_channels: list[Literal["email", "phone"]] = Field(default_factory=list)
 
 
 class OtpRequest(PublicDTO):

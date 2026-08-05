@@ -74,6 +74,7 @@ class StatefulConnection(Connection):
             return all(
                 self.rows[job_id]["is_open"] == was_open
                 for job_id, was_open in self.snapshot.items()
+                if job_id in self.rows
             )
         if "bool_and" in sql:
             source_tag, expected_open = args
@@ -94,6 +95,9 @@ class StatefulConnection(Connection):
             return "SELECT 1"
         if "CREATE TABLE IF NOT EXISTS corpus_cutover_snapshot" in sql:
             return "CREATE TABLE"
+        if "INSERT INTO corpus_cutover_snapshot" in sql and "__cutover_marker__" in sql:
+            self.snapshot["__cutover_marker__"] = False
+            return "INSERT 0 1"
         if "INSERT INTO corpus_cutover_snapshot" in sql:
             old_source_tags = set(args[0])
             self.snapshot = {
@@ -107,9 +111,12 @@ class StatefulConnection(Connection):
             "UPDATE jobs" in normalized
             and "FROM corpus_cutover_snapshot" in normalized
         ):
+            restored = 0
             for job_id, was_open in self.snapshot.items():
-                self.rows[job_id]["is_open"] = was_open
-            return f"UPDATE {len(self.snapshot)}"
+                if job_id in self.rows:
+                    self.rows[job_id]["is_open"] = was_open
+                    restored += 1
+            return f"UPDATE {restored}"
         if "DELETE FROM corpus_cutover_snapshot" in sql:
             deleted = len(self.snapshot)
             self.snapshot.clear()
@@ -236,7 +243,7 @@ async def test_forward_and_rollback_restore_each_legacy_visibility_value() -> No
         old_source_tags=("legacy-fixrev",),
     )
 
-    assert connection.snapshot == original
+    assert connection.snapshot == {**original, "__cutover_marker__": False}
     assert all(
         not connection.rows[job_id]["is_open"] for job_id in original
     )
@@ -263,3 +270,38 @@ async def test_forward_and_rollback_restore_each_legacy_visibility_value() -> No
     )
     assert "job_id TEXT PRIMARY KEY" in snapshot_ddl
     assert "was_open BOOLEAN NOT NULL" in snapshot_ddl
+
+
+@pytest.mark.asyncio
+async def test_forward_without_legacy_rows_still_records_rollbackable_cutover() -> None:
+    # 复审 P2：干净部署（零 legacy 行）forward 后快照为空，rollback 被拒，
+    # 新语料再也关不掉——哨兵行保证 rollback 永远可用
+    connection = StatefulConnection()
+    connection.rows = {
+        "demo-new": {"source_tag": "demo-v1", "is_open": False},
+    }
+    pool = Pool(connection)
+
+    await switch_corpus(
+        pool,
+        direction="forward",
+        source_tag="demo-v1",
+        expected_jobs=1,
+        expected_chunks=1,
+        old_source_tags=("legacy-fixrev",),
+    )
+
+    assert connection.snapshot == {"__cutover_marker__": False}
+    assert connection.rows["demo-new"]["is_open"] is True
+
+    await switch_corpus(
+        pool,
+        direction="rollback",
+        source_tag="demo-v1",
+        expected_jobs=1,
+        expected_chunks=1,
+        old_source_tags=("legacy-fixrev",),
+    )
+
+    assert connection.rows["demo-new"]["is_open"] is False
+    assert connection.snapshot == {}

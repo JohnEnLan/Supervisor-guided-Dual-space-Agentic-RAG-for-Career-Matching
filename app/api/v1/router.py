@@ -14,10 +14,16 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/capabilities", response_model=CapabilitiesResponse)
 async def capabilities() -> CapabilitiesResponse:
+    otp_channels = []
+    if settings.email_otp_provider != "disabled":
+        otp_channels.append("email")
+    if settings.sms_otp_provider != "disabled":
+        otp_channels.append("phone")
     return CapabilitiesResponse(
         dual_space_enabled=settings.dual_space_enabled,
         explain_enabled=settings.evaluation_capability_enabled,
         monitoring_enabled=settings.monitoring_enabled,
+        otp_channels=otp_channels,
     )
 
 
