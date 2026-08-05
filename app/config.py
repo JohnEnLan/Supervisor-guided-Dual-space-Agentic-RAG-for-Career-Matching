@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     qwen_embed_model: str = "text-embedding-v3"
     embed_dim: int = 1024  # 必须与 schema.sql 里的 vector(N) 一致
 
+    rerank_enabled: bool = False
+    rerank_model: Literal["gte-rerank-v2"] = "gte-rerank-v2"
+    rerank_endpoint: str | None = None
+    rerank_top_n: int = Field(default=20, ge=1, le=200)
+    rerank_timeout_seconds: float = Field(default=5, gt=0)
+    rerank_max_concurrency: int = Field(default=4, ge=1)
+    rerank_doc_max_chars: int = Field(default=1500, ge=100, le=4000)
+    rerank_query_max_chars: int = Field(default=600, ge=100, le=4000)
+
     llm_max_concurrency: int = Field(default=5, ge=1)
     llm_user_prompt_max_chars: int = Field(default=60_000, ge=1_000)
     embed_max_concurrency: int = Field(default=8, ge=1)

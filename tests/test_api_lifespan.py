@@ -416,6 +416,36 @@ async def test_lifespan_rejects_production_compatibility_before_db_open(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_validates_enabled_rerank_before_db_open(monkeypatch):
+    from app.api import main
+
+    calls: list[str] = []
+
+    def fake_require_endpoint():
+        calls.append("rerank:validate")
+        raise RuntimeError("invalid rerank endpoint")
+
+    async def forbidden_pool():
+        calls.append("db:open")
+        raise AssertionError("rerank config must fail before DB")
+
+    monkeypatch.setattr(main.settings, "rerank_enabled", True, raising=False)
+    monkeypatch.setattr(
+        main,
+        "_require_rerank_endpoint",
+        fake_require_endpoint,
+        raising=False,
+    )
+    monkeypatch.setattr(main, "get_pool", forbidden_pool)
+
+    with pytest.raises(RuntimeError, match="invalid rerank endpoint"):
+        async with main.lifespan(main.app):
+            pass
+
+    assert calls == ["rerank:validate"]
+
+
+@pytest.mark.asyncio
 async def test_lifespan_probes_active_demo_corpus_once_after_pool_open(monkeypatch):
     from app.api import main
 

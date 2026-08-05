@@ -47,6 +47,9 @@ async def retrieve_match(state: GraphState) -> dict[str, Any]:
     shared = SharedState.model_validate(state["shared"])
     brief = MatchBrief.model_validate(state["brief"])
     attempt = max(1, int(state["attempt"]))
+    retrieval_plan = dict(state["retrieval_plan"])
+    if "use_cross_encoder" not in retrieval_plan:
+        retrieval_plan["use_cross_encoder"] = False
     if attempt == 1:
         await orchestrator.update_run_stage(
             run_id=state["run_id"],
@@ -56,7 +59,7 @@ async def retrieve_match(state: GraphState) -> dict[str, Any]:
 
     shared = await orchestrator.run_matching_under_supervision(
         shared,
-        retrieval_plan=state["retrieval_plan"],
+        retrieval_plan=retrieval_plan,
         search_fn=orchestrator.default_search_fn,
         locked_hard_constraints=brief.hard_constraints,
         attempt=attempt,
@@ -71,7 +74,11 @@ async def retrieve_match(state: GraphState) -> dict[str, Any]:
             run_id=state["run_id"],
             state_snapshot=shared.model_dump(mode="json"),
         )
-    return {"shared": shared, "brief": brief}
+    return {
+        "shared": shared,
+        "brief": brief,
+        "retrieval_plan": retrieval_plan,
+    }
 
 
 async def strategy(state: GraphState) -> dict[str, Any]:

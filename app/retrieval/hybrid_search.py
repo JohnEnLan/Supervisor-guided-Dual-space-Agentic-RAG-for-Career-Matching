@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import re
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass, field as dataclass_field, replace
 from typing import Any
 
 from app.config import settings
@@ -12,10 +13,19 @@ from app.db.pool import close_pool, get_pool
 from app.db.state_store import load_state
 from app.db.vector import to_pgvector
 from app.llm.qwen_embed import embed_one
+from app.llm.reranker import (
+    RerankMisconfigured,
+    RerankUnavailable,
+    _require_rerank_endpoint,
+    est_tokens,
+    rerank_documents,
+)
 from app.retrieval.query_builder import build_resume_retrieval_query
 from app.retrieval.raptor import search_raptor_nodes
 from app.retrieval.rrf import rrf_fuse
 
+
+logger = logging.getLogger(__name__)
 
 BM25_STOPWORDS = {
     "about",
@@ -86,6 +96,9 @@ FIELD_AWARE_BONUS = {
 }
 MAX_FIELD_BONUS = 0.08
 MAX_TOP_K = 50
+MAX_RERANK_TOP_N = 200
+RERANK_ITEM_TOKEN_LIMIT = 3_800
+RERANK_REQUEST_TOKEN_LIMIT = 27_000
 _HARD_LIST_FIELDS = ("locations", "role_clusters", "companies")
 _SOFT_LIST_FIELDS = (
     "preferred_locations",
@@ -134,10 +147,18 @@ class JobCandidate:
     raptor_score: float = 0.0
     field_bonus: float = 0.0
     sources: list[str] = dataclass_field(default_factory=list)
-    explicit_score: float = 0.0
+    explicit_score: float | None = None
+    cross_score: float | None = None
+    cross_rank: int | None = None
     implicit_score: float = 0.0
     implicit_confidence: float = 0.0
     implicit_evidence: list[dict[str, Any]] = dataclass_field(default_factory=list)
+
+
+def effective_explicit_score(candidate: JobCandidate) -> float:
+    if candidate.explicit_score is not None:
+        return candidate.explicit_score
+    return candidate.score
 
 
 def _validate_string_list_fields(
@@ -190,6 +211,14 @@ def _bounded_top_k(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError("top_k must be an integer")
     return min(max(value, 1), MAX_TOP_K)
+
+
+def _validated_rerank_top_n(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("rerank_top_n must be an integer")
+    if not 1 <= value <= MAX_RERANK_TOP_N:
+        raise ValueError("rerank_top_n must be between 1 and 200")
+    return value
 
 
 def _build_hard_filter_query(hard_constraints: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -668,22 +697,222 @@ async def _fetch_evidence_payloads(
     }
 
 
+async def _fetch_rerank_documents(
+    pool,
+    job_ids: list[str],
+) -> dict[str, str]:
+    if not job_ids:
+        return {}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT job_id,
+                   COALESCE(title, '') AS title,
+                   array_to_string(COALESCE(required_skills, ARRAY[]::TEXT[]), ', ')
+                       AS required_skills,
+                   COALESCE(raw_jd, '') AS raw_jd
+            FROM jobs
+            WHERE job_id = ANY($1::text[])
+            """,
+            job_ids,
+        )
+
+    rows_by_job = {str(row["job_id"]): row for row in rows}
+    if set(rows_by_job) != set(job_ids):
+        raise RerankUnavailable("rerank_document_row_missing")
+
+    documents: dict[str, str] = {}
+    for job_id in job_ids:
+        row = rows_by_job[job_id]
+        title = str(row["title"] or "").strip()
+        required_skills = str(row["required_skills"] or "").strip()
+        raw_jd = str(row["raw_jd"] or "").strip()
+        if not any((title, required_skills, raw_jd)):
+            raise RerankUnavailable("rerank_document_empty")
+        documents[job_id] = "\n".join(
+            (
+                f"Title: {title}",
+                f"Required skills: {required_skills}",
+                f"Job description: {raw_jd}",
+            )
+        )
+    return documents
+
+
+def _truncate_to_token_limit(
+    text: str,
+    *,
+    max_chars: int,
+    max_tokens: int = RERANK_ITEM_TOKEN_LIMIT,
+) -> str:
+    bounded = text[:max_chars]
+    if est_tokens(bounded) <= max_tokens:
+        return bounded
+
+    low = 0
+    high = len(bounded)
+    while low < high:
+        midpoint = (low + high + 1) // 2
+        if est_tokens(bounded[:midpoint]) <= max_tokens:
+            low = midpoint
+        else:
+            high = midpoint - 1
+    return bounded[:low]
+
+
+def _prepare_rerank_inputs(
+    query: str,
+    documents: list[str],
+    *,
+    query_max_chars: int,
+    document_max_chars: int,
+) -> tuple[str, list[str], int]:
+    bounded_query = _truncate_to_token_limit(
+        query,
+        max_chars=query_max_chars,
+    )
+    bounded_documents = [
+        _truncate_to_token_limit(document, max_chars=document_max_chars)
+        for document in documents
+    ]
+    query_tokens = est_tokens(bounded_query)
+    selected: list[str] = []
+    selected_document_tokens = 0
+    for document in bounded_documents:
+        document_tokens = est_tokens(document)
+        next_count = len(selected) + 1
+        next_total = (
+            query_tokens * next_count
+            + selected_document_tokens
+            + document_tokens
+        )
+        if next_total > RERANK_REQUEST_TOKEN_LIMIT:
+            break
+        selected.append(document)
+        selected_document_tokens += document_tokens
+    return bounded_query, selected, len(selected)
+
+
+def _remap_cross_scores(
+    candidates: list[JobCandidate],
+    cross_scores: list[float],
+) -> list[JobCandidate]:
+    effective_count = len(cross_scores)
+    if effective_count > len(candidates):
+        raise ValueError("cross scores exceed candidate count")
+    applied_window = candidates[:effective_count]
+    untouched_tail = candidates[effective_count:]
+    scored_window = [
+        replace(candidate, cross_score=cross_score, cross_rank=None)
+        for candidate, cross_score in zip(applied_window, cross_scores)
+    ]
+    if len(set(cross_scores)) < 2:
+        return scored_window + untouched_tail
+
+    ranked_window = [
+        candidate
+        for _original_position, candidate in sorted(
+            enumerate(scored_window),
+            key=lambda item: (-float(item[1].cross_score), item[0]),
+        )
+    ]
+    lo = min(candidate.score for candidate in applied_window)
+    hi = max(candidate.score for candidate in applied_window)
+    denominator = max(len(ranked_window) - 1, 1)
+    remapped_window = []
+    for cross_rank, candidate in enumerate(ranked_window):
+        remapped_score = hi - cross_rank * (hi - lo) / denominator
+        remapped_window.append(
+            replace(
+                candidate,
+                score=remapped_score,
+                explicit_score=remapped_score,
+                cross_rank=cross_rank,
+            )
+        )
+    return remapped_window + untouched_tail
+
+
+async def _apply_cross_encoder(
+    pool,
+    *,
+    query: str,
+    candidates: list[JobCandidate],
+    cross_count: int,
+) -> tuple[bool, list[JobCandidate], str]:
+    requested_window = candidates[:cross_count]
+    requested_ids = [candidate.job_id for candidate in requested_window]
+    documents_by_job = await _fetch_rerank_documents(pool, requested_ids)
+    if set(documents_by_job) != set(requested_ids):
+        raise RerankUnavailable("rerank_document_row_missing")
+    documents = [documents_by_job[job_id] for job_id in requested_ids]
+    if any(not isinstance(document, str) or not document.strip() for document in documents):
+        raise RerankUnavailable("rerank_document_empty")
+
+    bounded_query, bounded_documents, effective_count = _prepare_rerank_inputs(
+        query,
+        documents,
+        query_max_chars=settings.rerank_query_max_chars,
+        document_max_chars=settings.rerank_doc_max_chars,
+    )
+    if effective_count < 2:
+        return False, candidates, "budget_empty"
+
+    cross_scores = await rerank_documents(bounded_query, bounded_documents)
+    if len(cross_scores) != effective_count:
+        raise RerankUnavailable("rerank_response_length_mismatch")
+    return True, _remap_cross_scores(candidates, cross_scores), "applied"
+
+
 async def hybrid_search(
     query: str,
     hard_constraints: dict[str, Any] | None = None,
     soft_prefs: dict[str, Any] | None = None,
     top_k: int = 20,
     include_raptor: bool = False,
+    use_cross_encoder: bool | None = None,
+    rerank_top_n: int | None = None,
+    rerank_audit: dict[str, Any] | None = None,
 ) -> list[JobCandidate]:
     if not isinstance(query, str):
         raise TypeError("query must be a string")
+
+    original_hard_constraints = hard_constraints
+    original_soft_prefs = soft_prefs
+    original_top_k = top_k
+    enabled = (
+        settings.rerank_enabled
+        if use_cross_encoder is None
+        else use_cross_encoder
+    )
+    if not isinstance(enabled, bool):
+        raise TypeError("use_cross_encoder must be a boolean")
+    n = _validated_rerank_top_n(
+        settings.rerank_top_n if rerank_top_n is None else rerank_top_n
+    )
+    if enabled:
+        _require_rerank_endpoint()
+    if rerank_audit is not None:
+        rerank_audit.clear()
+        rerank_audit.update(
+            {
+                "requested": 0,
+                "effective": 0,
+                "applied": False,
+                "reason_code": "disabled" if not enabled else "not_attempted",
+            }
+        )
     if not query.strip():
         return []
 
     hard_constraints = _validated_hard_constraints(hard_constraints)
     soft_prefs = _validated_soft_preferences(soft_prefs)
     top_k = _bounded_top_k(top_k)
-    recall_k = max(top_k * 4, top_k, 10)
+    recall_k = (
+        max(top_k * 4, n * 4, 10)
+        if enabled
+        else max(top_k * 4, top_k, 10)
+    )
     pool = await get_pool()
 
     allow_ids = await _hard_filter_ids(pool, hard_constraints)
@@ -728,7 +957,12 @@ async def hybrid_search(
     if not fused:
         return []
 
-    candidate_fused = fused[: max(top_k * 3, top_k)]
+    pool_depth = (
+        max(top_k * 3, n)
+        if enabled
+        else max(top_k * 3, top_k)
+    )
+    candidate_fused = fused[:pool_depth]
     candidate_ids = [job_id for job_id, _score in candidate_fused]
     metadata_by_job = await _fetch_job_metadata(pool, candidate_ids)
     hydrated_fused = [
@@ -747,18 +981,74 @@ async def hybrid_search(
         for job_id, fields in evidence_fields_by_job.items()
     }
 
-    return _rerank_candidates(
+    scored_pool = _rerank_candidates(
         fused=hydrated_fused,
         bm25_by_job=_score_by_job(bm25_ranks),
         dense_by_job=_score_by_job(dense_ranks),
         evidence_by_job=evidence_by_job,
         metadata_by_job=metadata_by_job,
         soft_prefs=soft_prefs,
-        top_k=top_k,
+        top_k=len(hydrated_fused),
         field_bonus_by_job=field_bonus_by_job,
         raptor_by_job=_score_by_job(raptor_ranks),
         evidence_payloads_by_job=evidence_payloads_by_job,
     )
+    if not enabled:
+        return scored_pool[:top_k]
+
+    cross_count = min(n, len(scored_pool))
+    if rerank_audit is not None:
+        rerank_audit["requested"] = cross_count
+    fallback_required = False
+    cross_candidates = scored_pool
+    reason_code = "not_attempted"
+    try:
+        applied, cross_candidates, reason_code = await _apply_cross_encoder(
+            pool,
+            query=query,
+            candidates=scored_pool,
+            cross_count=cross_count,
+        )
+        fallback_required = not applied
+    except RerankMisconfigured:
+        raise
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        fallback_required = True
+        reason_code = type(exc).__name__
+
+    logger.info(
+        "cross_encoder applied=%s reason=%s requested=%d",
+        not fallback_required,
+        reason_code,
+        cross_count,
+    )
+    if rerank_audit is not None:
+        rerank_audit.update(
+            {
+                "effective": (
+                    sum(
+                        candidate.cross_score is not None
+                        for candidate in cross_candidates
+                    )
+                    if not fallback_required
+                    else 0
+                ),
+                "applied": not fallback_required,
+                "reason_code": reason_code,
+            }
+        )
+    if fallback_required:
+        return await hybrid_search(
+            query=query,
+            hard_constraints=original_hard_constraints,
+            soft_prefs=original_soft_prefs,
+            top_k=original_top_k,
+            include_raptor=include_raptor,
+            use_cross_encoder=False,
+        )
+    return cross_candidates[:top_k]
 
 
 async def _query_from_session(session_id: str) -> str:
@@ -816,6 +1106,7 @@ async def _main_async(args: argparse.Namespace) -> None:
             soft_prefs=_parse_json_arg(args.soft_prefs),
             top_k=args.top_k,
             include_raptor=args.include_raptor,
+            use_cross_encoder=args.use_cross_encoder,
         )
         _print_candidates(candidates)
     finally:
@@ -836,6 +1127,12 @@ def main() -> None:
         "--include-raptor",
         action="store_true",
         help="Add RAPTOR-lite summary-node recall as a third retrieval source.",
+    )
+    parser.add_argument(
+        "--use-cross-encoder",
+        action="store_true",
+        default=None,
+        help="Enable the configured cross-encoder rerank stage.",
     )
     parser.add_argument("--hard-constraints", help="JSON object for SQL hard filters.")
     parser.add_argument("--soft-prefs", help="JSON object for ranking preferences.")

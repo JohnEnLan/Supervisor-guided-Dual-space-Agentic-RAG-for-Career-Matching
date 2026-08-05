@@ -6,7 +6,11 @@ from dataclasses import replace
 from typing import Any, Awaitable, Callable
 
 from app.config import settings
-from app.retrieval.hybrid_search import JobCandidate, hybrid_search
+from app.retrieval.hybrid_search import (
+    JobCandidate,
+    effective_explicit_score,
+    hybrid_search,
+)
 from app.retrieval.implicit_search import (
     _bounded_float,
     match_implicit_evidence,
@@ -29,6 +33,7 @@ async def dual_space_search(
     top_k: int,
     implicit_enabled: bool = True,
     include_raptor: bool = False,
+    use_cross_encoder: bool = False,
     explicit_search: ExplicitSearch = hybrid_search,
     implicit_rows_search: ImplicitRowsSearch = retrieve_implicit_case_rows,
 ) -> list[JobCandidate]:
@@ -38,6 +43,7 @@ async def dual_space_search(
         soft_prefs=soft_prefs,
         top_k=top_k,
         include_raptor=include_raptor,
+        use_cross_encoder=use_cross_encoder,
     )
     if not implicit_enabled or not anonymized_resume_text.strip():
         return await explicit_call
@@ -66,7 +72,7 @@ async def dual_space_search(
             fused.append(candidate)
             continue
 
-        explicit_score = candidate.explicit_score or candidate.score
+        explicit_score = effective_explicit_score(candidate)
         beta = _bounded_float(settings.implicit_max_weight) * evidence.confidence
         final_score = (
             (1.0 - beta) * _bounded_float(explicit_score) + beta * evidence.score
@@ -90,7 +96,10 @@ async def dual_space_search(
         fused,
         key=lambda candidate: (
             -candidate.score,
-            -candidate.explicit_score,
+            -effective_explicit_score(candidate),
+            candidate.cross_rank
+            if candidate.cross_rank is not None
+            else float("inf"),
             candidate.job_id,
         ),
     )[:top_k]

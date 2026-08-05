@@ -15,6 +15,7 @@ from app.agents.strategy_agent import run_strategy_agent
 from app.agents.supervisor import final_verification, plan_retrieval
 from app.agents.supervisor_harness import record_supervisor_checkpoint
 from app.api.result_projector import project_product_result
+from app.config import settings
 from app.db.event_store import append_event
 from app.db.monitoring_store import save_run_metrics
 from app.db.run_store import (
@@ -436,6 +437,7 @@ async def _lock_approved_brief(
         "soft_prefs": dict(brief.soft_preferences),
         "top_k": brief.result_count,
         "include_raptor": False,
+        "use_cross_encoder": settings.rerank_enabled,
     }
     state.supervisor_log.append(
         {
@@ -504,6 +506,7 @@ def _public_retrieval_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "soft_prefs": coerce_dict(plan.get("soft_prefs")),
         "top_k": plan.get("top_k"),
         "include_raptor": bool(plan.get("include_raptor", False)),
+        "use_cross_encoder": bool(plan.get("use_cross_encoder", False)),
     }
 
 

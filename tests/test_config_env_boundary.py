@@ -50,6 +50,54 @@ def test_provider_concurrency_must_be_positive(field_name: str) -> None:
         Settings(**{field_name: 0})
 
 
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("rerank_top_n", 0),
+        ("rerank_top_n", 201),
+        ("rerank_timeout_seconds", 0),
+        ("rerank_max_concurrency", 0),
+        ("rerank_doc_max_chars", 99),
+        ("rerank_doc_max_chars", 4001),
+        ("rerank_query_max_chars", 99),
+        ("rerank_query_max_chars", 4001),
+    ],
+)
+def test_rerank_configuration_rejects_out_of_range_values(
+    field_name: str,
+    invalid_value: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field_name: invalid_value})
+
+
+def test_rerank_defaults_and_endpoint_shapes_are_documented() -> None:
+    runtime = Settings()
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert runtime.rerank_enabled is False
+    assert runtime.rerank_model == "gte-rerank-v2"
+    assert runtime.rerank_endpoint is None
+    assert runtime.rerank_top_n == 20
+    assert runtime.rerank_timeout_seconds == 5
+    assert runtime.rerank_max_concurrency == 4
+    assert runtime.rerank_doc_max_chars == 1500
+    assert runtime.rerank_query_max_chars == 600
+    for name in (
+        "RERANK_ENABLED",
+        "RERANK_MODEL",
+        "RERANK_ENDPOINT",
+        "RERANK_TOP_N",
+        "RERANK_TIMEOUT_SECONDS",
+        "RERANK_MAX_CONCURRENCY",
+        "RERANK_DOC_MAX_CHARS",
+        "RERANK_QUERY_MAX_CHARS",
+    ):
+        assert f"{name}=" in example
+    assert "{WorkspaceId}.cn-beijing.maas.aliyuncs.com" in example
+    assert "legacy" in example.lower()
+
+
 def test_checkpoint_sweep_interval_defaults_and_can_be_disabled() -> None:
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 

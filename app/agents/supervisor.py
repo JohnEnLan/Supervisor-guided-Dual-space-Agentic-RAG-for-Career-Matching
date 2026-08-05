@@ -129,6 +129,7 @@ async def plan_retrieval(
         "top_k": int(llm_plan.get("top_k") or default_top_k),
         # 确定性开关：以调用方参数为准，LLM 计划不可覆盖。
         "include_raptor": include_raptor,
+        "use_cross_encoder": settings.rerank_enabled,
     }
     state.supervisor_log.append(
         {
@@ -140,6 +141,7 @@ async def plan_retrieval(
                 "soft_prefs": plan["soft_prefs"],
                 "top_k": plan["top_k"],
                 "include_raptor": plan["include_raptor"],
+                "use_cross_encoder": plan["use_cross_encoder"],
             },
         }
     )

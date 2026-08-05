@@ -9,7 +9,11 @@ from app.agents.base import BaseAgent
 from app.config import settings
 from app.llm import deepseek
 from app.retrieval.dual_space_search import dual_space_search
-from app.retrieval.hybrid_search import JobCandidate, hybrid_search
+from app.retrieval.hybrid_search import (
+    JobCandidate,
+    effective_explicit_score,
+    hybrid_search,
+)
 from app.retrieval.implicit_search import build_implicit_query_text
 from app.retrieval.query_builder import build_resume_retrieval_query
 from app.state.schema import SharedState
@@ -112,6 +116,9 @@ async def run_matching_agent(
         "soft_prefs": retrieval_plan.get("soft_prefs") or {},
         "top_k": int(retrieval_plan.get("top_k") or 5),
         "include_raptor": bool(retrieval_plan.get("include_raptor", False)),
+        "use_cross_encoder": bool(
+            retrieval_plan.get("use_cross_encoder", False)
+        ),
     }
     if selected_search is not hybrid_search:
         search_kwargs.update(
@@ -339,7 +346,9 @@ def _write_retrieval_state(state: SharedState, candidates: list[JobCandidate]) -
                 "dense_score": candidate.dense_score,
                 "raptor_score": candidate.raptor_score,
                 "field_bonus": candidate.field_bonus,
-                "explicit_score": candidate.explicit_score or candidate.score,
+                "explicit_score": effective_explicit_score(candidate),
+                "cross_score": candidate.cross_score,
+                "cross_rank": candidate.cross_rank,
                 "implicit_score": candidate.implicit_score,
                 "implicit_confidence": candidate.implicit_confidence,
                 "implicit_evidence": list(candidate.implicit_evidence),
@@ -383,7 +392,7 @@ def _recommended_role_from_candidate(
         "implicit_explanation": llm_role.get("implicit_explanation")
         or _default_implicit_explanation(candidate),
         "implicit_evidence": list(candidate.implicit_evidence),
-        "explicit_score": candidate.explicit_score or candidate.score,
+        "explicit_score": effective_explicit_score(candidate),
         "implicit_score": candidate.implicit_score,
         "implicit_confidence": candidate.implicit_confidence,
         "evidence_span_ids": evidence_span_ids,
@@ -394,7 +403,7 @@ def _recommended_role_from_candidate(
             "dense": candidate.dense_score,
             "raptor": candidate.raptor_score,
             "field_bonus": candidate.field_bonus,
-            "explicit": candidate.explicit_score or candidate.score,
+            "explicit": effective_explicit_score(candidate),
             "implicit": candidate.implicit_score,
             "implicit_confidence": candidate.implicit_confidence,
             "sources": list(candidate.sources),
@@ -446,7 +455,7 @@ def _candidate_payload(candidate: JobCandidate) -> dict[str, Any]:
         "location": candidate.location,
         "role_cluster": candidate.role_cluster,
         "score": candidate.score,
-        "explicit_score": candidate.explicit_score or candidate.score,
+        "explicit_score": effective_explicit_score(candidate),
         "implicit_score": candidate.implicit_score,
         "implicit_confidence": candidate.implicit_confidence,
         "implicit_evidence": candidate.implicit_evidence,

@@ -437,8 +437,9 @@ async def test_persisted_run_preserves_checkpoint_stage_snapshot_and_terminal_or
         "retrieval_plan": {
             "hard_constraints": brief.hard_constraints,
             "soft_prefs": brief.soft_preferences,
-            "top_k": brief.result_count,
-            "include_raptor": False,
+                "top_k": brief.result_count,
+                "include_raptor": False,
+                "use_cross_encoder": False,
         },
     }
 
@@ -618,6 +619,7 @@ async def test_reretrieval_work_is_charged_to_verification_and_logs_stay_ordered
         "soft_prefs": brief.soft_preferences,
         "top_k": brief.result_count,
         "include_raptor": False,
+        "use_cross_encoder": False,
     }
     assert final_logs[0]["hard_filter_violations"] == [
         {

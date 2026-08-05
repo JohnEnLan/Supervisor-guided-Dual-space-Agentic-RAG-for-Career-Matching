@@ -28,6 +28,7 @@ from app.db.run_store import (
 )
 from app.domain.match_brief import MatchBrief
 from app.domain.results import ProductResult
+from app.llm.reranker import _require_rerank_endpoint
 from app.state.schema import SharedState
 
 
@@ -91,6 +92,8 @@ async def lifespan(app: FastAPI):
     checkpoint_sweep_task = None
     otp_cleanup_task = None
     validate_runtime_security(settings)
+    if settings.rerank_enabled:
+        _require_rerank_endpoint()
     pool = await get_pool()
     active_demo_corpus = await active_demo_corpus_exists(pool)
     validate_runtime_security(

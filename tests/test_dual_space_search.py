@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -37,6 +38,28 @@ def test_retrieval_package_exports_dual_space_search() -> None:
     from app.retrieval import dual_space_search
 
     assert callable(dual_space_search)
+
+
+def test_effective_explicit_score_preserves_optional_three_state_semantics() -> None:
+    from app.retrieval.hybrid_search import effective_explicit_score
+
+    unset = JobCandidate(job_id="unset", score=0.7, evidence_span_ids=[])
+    zero = JobCandidate(
+        job_id="zero",
+        score=0.7,
+        explicit_score=0.0,
+        evidence_span_ids=[],
+    )
+    positive = JobCandidate(
+        job_id="positive",
+        score=0.7,
+        explicit_score=0.4,
+        evidence_span_ids=[],
+    )
+
+    assert effective_explicit_score(unset) == 0.7
+    assert effective_explicit_score(zero) == 0.0
+    assert effective_explicit_score(positive) == 0.4
 
 
 @pytest.mark.asyncio
@@ -122,6 +145,133 @@ async def test_confident_implicit_evidence_can_rerank_explicit_candidates() -> N
     assert "implicit_case" in result[0].sources
     assert len(result[0].implicit_evidence) == 3
     assert result[0].implicit_evidence[0]["highest_stage"] == "joined"
+
+
+@pytest.mark.asyncio
+async def test_legal_zero_explicit_score_does_not_fall_back_during_fusion() -> None:
+    from app.retrieval.dual_space_search import dual_space_search
+
+    async def explicit_search(**kwargs):
+        return [
+            JobCandidate(
+                job_id="job-zero",
+                score=0.8,
+                explicit_score=0.0,
+                evidence_span_ids=["jd-job-zero"],
+                company="Acme",
+                role_cluster="data",
+            )
+        ]
+
+    async def implicit_rows_search(**kwargs):
+        return [
+            _outcome(f"case-{index}", "job-zero")
+            for index in range(3)
+        ]
+
+    result = await dual_space_search(
+        query="data analyst",
+        anonymized_resume_text="SQL analyst internship",
+        hard_constraints={},
+        soft_prefs={},
+        top_k=1,
+        explicit_search=explicit_search,
+        implicit_rows_search=implicit_rows_search,
+    )
+
+    assert result[0].explicit_score == 0.0
+    assert result[0].score == 0.3
+
+
+@pytest.mark.asyncio
+async def test_cross_rank_breaks_full_score_tie_before_job_id() -> None:
+    from app.retrieval.dual_space_search import dual_space_search
+
+    candidates = [
+        replace(_candidate("job-z", 0.8), cross_rank=0),
+        replace(_candidate("job-a", 0.8), cross_rank=1),
+    ]
+
+    async def explicit_search(**kwargs):
+        return candidates
+
+    async def implicit_rows_search(**kwargs):
+        return [
+            _outcome(f"z-{index}", "job-z") for index in range(3)
+        ] + [
+            _outcome(f"a-{index}", "job-a") for index in range(3)
+        ]
+
+    result = await dual_space_search(
+        query="data analyst",
+        anonymized_resume_text="SQL analyst internship",
+        hard_constraints={},
+        soft_prefs={},
+        top_k=2,
+        explicit_search=explicit_search,
+        implicit_rows_search=implicit_rows_search,
+    )
+
+    assert [candidate.job_id for candidate in result] == ["job-z", "job-a"]
+
+
+@pytest.mark.asyncio
+async def test_missing_cross_rank_retains_job_id_tie_breaker() -> None:
+    from app.retrieval.dual_space_search import dual_space_search
+
+    candidates = [_candidate("job-z", 0.8), _candidate("job-a", 0.8)]
+
+    async def explicit_search(**kwargs):
+        return candidates
+
+    async def implicit_rows_search(**kwargs):
+        return [
+            _outcome(f"z-{index}", "job-z") for index in range(3)
+        ] + [
+            _outcome(f"a-{index}", "job-a") for index in range(3)
+        ]
+
+    result = await dual_space_search(
+        query="data analyst",
+        anonymized_resume_text="SQL analyst internship",
+        hard_constraints={},
+        soft_prefs={},
+        top_k=2,
+        explicit_search=explicit_search,
+        implicit_rows_search=implicit_rows_search,
+    )
+
+    assert [candidate.job_id for candidate in result] == ["job-a", "job-z"]
+
+
+@pytest.mark.asyncio
+async def test_existing_clamp_asymmetry_is_preserved_for_partial_implicit_hits() -> None:
+    from app.retrieval.dual_space_search import dual_space_search
+
+    async def explicit_search(**kwargs):
+        return [_candidate("job-hit", 1.2), _candidate("job-no-hit", 1.1)]
+
+    async def implicit_rows_search(**kwargs):
+        return [
+            _outcome(f"case-{index}", "job-hit") for index in range(3)
+        ]
+
+    result = await dual_space_search(
+        query="data analyst",
+        anonymized_resume_text="SQL analyst internship",
+        hard_constraints={},
+        soft_prefs={},
+        top_k=2,
+        explicit_search=explicit_search,
+        implicit_rows_search=implicit_rows_search,
+    )
+
+    assert [candidate.job_id for candidate in result] == [
+        "job-no-hit",
+        "job-hit",
+    ]
+    assert result[0].score == 1.1
+    assert result[1].score == 1.0
 
 
 @pytest.mark.asyncio

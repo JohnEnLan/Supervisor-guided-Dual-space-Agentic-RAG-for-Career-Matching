@@ -534,6 +534,33 @@ def test_matching_agent_exposes_separate_explicit_and_implicit_evidence() -> Non
     assert role["implicit_evidence"][0]["highest_stage"] == "interview"
 
 
+def test_matching_agent_preserves_zero_explicit_score_in_all_consumers() -> None:
+    from app.agents.matching_agent import (
+        _candidate_payload,
+        _recommended_role_from_candidate,
+        _write_retrieval_state,
+    )
+    from app.retrieval.hybrid_search import JobCandidate
+    from app.state.schema import SharedState
+
+    candidate = JobCandidate(
+        job_id="job-zero",
+        score=0.75,
+        explicit_score=0.0,
+        evidence_span_ids=["job-zero:skills:1"],
+    )
+    state = SharedState(session_id="s-zero", user_id="u-zero")
+
+    _write_retrieval_state(state, [candidate])
+    role = _recommended_role_from_candidate(candidate, None)
+    payload = _candidate_payload(candidate)
+
+    assert state.retrieval_state.ranking_scores[0]["explicit_score"] == 0.0
+    assert role["explicit_score"] == 0.0
+    assert role["source_scores"]["explicit"] == 0.0
+    assert payload["explicit_score"] == 0.0
+
+
 @pytest.mark.asyncio
 async def test_matching_agent_prompt_includes_job_evidence_content(monkeypatch):
     from app.agents import base
