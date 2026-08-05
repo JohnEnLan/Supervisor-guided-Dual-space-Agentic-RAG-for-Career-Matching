@@ -336,6 +336,12 @@ async def build_raptor_index(
             jobs_with_chunks=jobs_with_chunks,
         ),
     )
+    if limit is None:
+        # 全量重建 = 新一代索引：清掉数据源已消失的旧代节点，
+        # 否则语料切换后旧语料的节点会永远留在检索面里。
+        await _delete_stale_nodes(
+            pool, keep_node_ids=[node.node_id for node in nodes]
+        )
     return RaptorBuildStats(
         job_nodes=len(job_nodes),
         role_nodes=len(role_nodes),
@@ -375,7 +381,13 @@ async def search_raptor_nodes(
                    1 - (embedding <=> $1::vector) AS score
             FROM raptor_nodes
             WHERE embedding IS NOT NULL
-              AND (job_id IS NULL OR job_id = ANY($2::text[]))
+              AND (
+                  job_id = ANY($2::text[])
+                  OR (
+                      job_id IS NULL
+                      AND source_job_ids && $2::text[]
+                  )
+              )
             ORDER BY embedding <=> $1::vector
             LIMIT $3
             """,
@@ -560,6 +572,24 @@ async def _upsert_nodes(
                 updated_at = now()
             """,
             records,
+        )
+
+
+async def _delete_stale_nodes(pool, *, keep_node_ids: Sequence[str]) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM raptor_node_chunks
+            WHERE node_id <> ALL($1::text[])
+            """,
+            list(keep_node_ids),
+        )
+        await conn.execute(
+            """
+            DELETE FROM raptor_nodes
+            WHERE node_id <> ALL($1::text[])
+            """,
+            list(keep_node_ids),
         )
 
 

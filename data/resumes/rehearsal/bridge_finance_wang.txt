@@ -1,0 +1,24 @@
+Wang Ming
+Email: wangming.demo@example.com | Edinburgh, UK (settled status, no visa needed)
+
+SUMMARY
+Financial analyst with 4 years in banking, transitioning toward data and
+analytics roles. Completed part-time data engineering bootcamp.
+
+EXPERIENCE
+Financial Analyst, Northgate Bank (Edinburgh) 2022-2026
+- Built Excel/VBA models for credit risk; migrated reports to Python.
+- Partnered with data team on a customer segmentation project (SQL, Python).
+
+Junior Analyst, Crestline Wealth (London) 2021-2022
+- Prepared client portfolio reviews and market summaries.
+
+PROJECTS
+- Bootcamp capstone: batch pipeline with Airflow + dbt loading bank
+  transaction data into a warehouse with quality checks.
+
+SKILLS
+Excel/VBA, SQL, Python (pandas), financial modelling, Airflow basics, dbt basics
+
+EDUCATION
+B.A. Finance, University of Edinburgh, 2021

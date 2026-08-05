@@ -1,0 +1,24 @@
+Chen Chen
+Email: chenchen.demo@example.com | Shanghai, China
+
+SUMMARY
+Backend engineer with 3 years building Python services. Focus on API design,
+PostgreSQL performance, and cloud deployment on containers.
+
+EXPERIENCE
+Backend Engineer, Hummingbird Tech (Shanghai) 2023-2026
+- Built FastAPI microservices serving 2M requests/day; p99 latency cut 40%.
+- Designed PostgreSQL schemas and tuned slow queries with EXPLAIN ANALYZE.
+- Introduced Redis caching and async task queues; on-call for production.
+
+Software Engineer Intern, Lakeview Data (Beijing) 2022
+- Wrote ETL jobs in Python and SQL; automated daily reporting pipeline.
+
+PROJECTS
+- Open-source rate limiter middleware for FastAPI (1.2k stars).
+
+SKILLS
+Python, FastAPI, PostgreSQL, Redis, Docker, Kubernetes basics, CI/CD, Linux
+
+EDUCATION
+B.Eng. Computer Science, Zhejiang University, 2022

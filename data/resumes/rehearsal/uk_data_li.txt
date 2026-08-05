@@ -1,0 +1,24 @@
+Li Yue
+Email: liyue.demo@example.com | Currently in Birmingham, UK (student visa)
+
+SUMMARY
+Data analyst completing an MSc in the UK. Needs Skilled Worker visa
+sponsorship. Strong SQL, Python analytics, and dashboarding.
+
+EXPERIENCE
+Data Analyst Intern, Midlands Retail Group (Birmingham) 2025
+- Built weekly sales dashboards in Power BI for 40 stores.
+- Wrote SQL over a Snowflake warehouse; automated anomaly alerts in Python.
+
+Research Assistant, University of Birmingham 2024-2025
+- Cleaned and analysed survey data (pandas, statsmodels); co-authored report.
+
+PROJECTS
+- Customer churn prediction with scikit-learn (AUC 0.86) on public dataset.
+
+SKILLS
+SQL, Python, pandas, scikit-learn, Power BI, Tableau, A/B testing, statistics
+
+EDUCATION
+MSc Data Science, University of Birmingham, 2026 (Distinction expected)
+B.Sc. Statistics, Sichuan University, 2024

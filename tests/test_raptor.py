@@ -475,3 +475,126 @@ async def test_search_raptor_nodes_applies_top_k_after_job_aggregation(monkeypat
         ("job-1", "job-1:skills:2"),
         ("job-2", "job-2:skills:1"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_search_node_sql_enforces_allowlist_for_role_summaries(monkeypatch):
+    # known_issues #4：job_id 为 NULL 的 role_summary 节点必须受 allow_ids 约束
+    # （source_job_ids 与白名单有交集才可入选），不能整类绕过硬过滤。
+    from app.config import settings
+    from app.retrieval import raptor
+
+    captured_sql = {}
+
+    class Connection:
+        async def execute(self, _sql, *_args):
+            return None
+
+        async def fetch(self, sql, *args):
+            if "FROM raptor_nodes" in sql:
+                captured_sql["nodes"] = " ".join(sql.split())
+                return []
+            raise AssertionError(sql)
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    async def fake_embed_one(_text):
+        return [0.0] * settings.embed_dim
+
+    monkeypatch.setattr(raptor, "embed_one", fake_embed_one)
+
+    await raptor.search_raptor_nodes(
+        Pool(), query="python backend", allow_ids=["job-1"], top_k=5
+    )
+
+    nodes_sql = captured_sql["nodes"]
+    assert "job_id = ANY($2::text[])" in nodes_sql
+    assert "source_job_ids && $2::text[]" in nodes_sql
+    assert "job_id IS NULL OR job_id = ANY" not in nodes_sql
+
+
+@pytest.mark.asyncio
+async def test_full_rebuild_deletes_stale_generation_nodes(monkeypatch):
+    # known_issues #3：全量重建后，数据源已消失的旧代节点必须被清掉
+    from app.config import settings
+    from app.retrieval import raptor
+
+    deletes = []
+
+    class Connection:
+        async def execute(self, sql, *args):
+            normalized = " ".join(sql.split())
+            if "DELETE FROM" in normalized:
+                deletes.append((normalized, args))
+            return None
+
+        async def executemany(self, _sql, _records):
+            return None
+
+        async def fetch(self, _sql, *_args):
+            return []
+
+    class Acquire:
+        async def __aenter__(self):
+            return Connection()
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    async def fake_fetch_jobs(_pool, *, limit):
+        return {
+            "job-1": {
+                "job": {
+                    "job_id": "job-1",
+                    "title": "Backend Engineer",
+                    "company": "示例",
+                    "location": "上海",
+                    "role_cluster": "software_engineering",
+                },
+                "chunks": [
+                    {
+                        "chunk_id": "job-1:skills:1",
+                        "field": "required_skills",
+                        "content": "Python",
+                    }
+                ],
+            }
+        }
+
+    async def fake_embed(nodes, batch_size):
+        return [[0.0] * settings.embed_dim for _node in nodes]
+
+    monkeypatch.setattr(raptor, "_fetch_jobs_with_chunks", fake_fetch_jobs)
+    monkeypatch.setattr(raptor, "_embed_nodes", fake_embed)
+
+    stats = await raptor.build_raptor_index(Pool(), limit=None)
+
+    assert stats.total_nodes == 2  # job 节点 + role 汇总节点
+    stale_deletes = [
+        (sql, args)
+        for sql, args in deletes
+        if "<> ALL($1::text[])" in sql
+    ]
+    assert len(stale_deletes) == 2  # node_chunks 与 nodes 各一条
+    kept = stale_deletes[0][1][0]
+    assert any(node_id.startswith("job:") or node_id.startswith("role:") for node_id in kept)
+
+    # 部分构建（limit 非 None）不做代际清理
+    deletes.clear()
+    await raptor.build_raptor_index(Pool(), limit=1)
+    assert not [
+        sql for sql, _args in deletes if "<> ALL($1::text[])" in sql
+    ]
