@@ -56,7 +56,7 @@ def test_every_v1_resource_id_route_has_the_matching_ownership_dependency() -> N
         checked.append(route.path)
         assert expected in _dependency_calls(route.dependant), route.path
 
-    assert len(checked) == 12
+    assert len(checked) == 15
 
 
 class _Acquire:
@@ -104,6 +104,19 @@ class _Pool:
             "/api/v1/sessions/session-b/intent-consult",
             {"json": {"mode": "targeted"}},
         ),
+        ("get", "/api/v1/sessions/session-b/consult", {}),
+        (
+            "post",
+            "/api/v1/sessions/session-b/consult",
+            {
+                "json": {
+                    "mode": "targeted",
+                    "message": "继续",
+                    "expected_round": 0,
+                }
+            },
+        ),
+        ("post", "/api/v1/sessions/session-b/consult/finalize", {}),
         (
             "post",
             "/api/v1/sessions/session-b/match-brief",

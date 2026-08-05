@@ -18,9 +18,14 @@ from fastapi import (
 )
 
 from app.api.auth.deps import optional_current_user, require_owned_session
+from app.api.auth.routes import load_profile, merge_profile
 from app.api.auth.sessions import AuthedUser
 from app.api.uploads import persist_upload
 from app.api.v1.schemas import (
+    ConsultBriefDraftResponse,
+    ConsultRequest,
+    ConsultResponse,
+    ConsultStateResponse,
     IntentConsultRequest,
     IntentConsultResponse,
     MatchBriefRequest,
@@ -35,7 +40,17 @@ from app.api.v1.schemas import (
     SessionCreateRequest,
     SessionResponse,
 )
-from app.agents.intent_agent import run_visible_intent_consultation
+from app.agents.consult_engine import (
+    ConsultError,
+    ConsultResponseError,
+    ConsultRoundLimitReached,
+    build_brief_draft,
+    calculate_completeness,
+    can_finalize,
+    determine_phase,
+    profile_draft,
+    run_consult_round,
+)
 from app.db.run_store import RunConflict, create_run, save_match_brief
 from app.db.state_store import (
     confirm_resume,
@@ -46,7 +61,7 @@ from app.db.state_store import (
     save_state,
 )
 from app.domain.match_brief import create_match_brief
-from app.domain.intent import IntentConsultInput, project_intent_consultation
+from app.domain.intent import project_intent_consultation
 from app.normalization.resume_intake import intake_resume
 from app.state.schema import SharedState
 
@@ -65,7 +80,13 @@ _INTENT_CAREER_FIELDS = (
     "intent_needs_clarification",
     "intent_clarification_question",
     "intent_clarification_used",
+    "consult_transcript",
+    "consult_rounds_used",
 )
+
+
+class _ConsultRoundConflict(ValueError):
+    pass
 
 
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
@@ -185,6 +206,66 @@ async def get_intent_consultation(session_id: str) -> IntentConsultResponse:
     return IntentConsultResponse.model_validate(projection.model_dump())
 
 
+@router.get(
+    "/sessions/{session_id}/consult",
+    response_model=ConsultStateResponse,
+    dependencies=[Depends(require_owned_session)],
+)
+async def get_consultation(session_id: str) -> ConsultStateResponse:
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    career = state.career_state
+    mode = career.intent_mode or "targeted"
+    return ConsultStateResponse(
+        transcript=career.consult_transcript,
+        profile_draft=profile_draft(career),
+        round=career.consult_rounds_used,
+        phase=determine_phase(career, mode=mode),
+        completeness=calculate_completeness(career),
+        can_finalize=can_finalize(career),
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/consult",
+    response_model=ConsultResponse,
+    dependencies=[Depends(require_owned_session)],
+)
+async def continue_consultation(
+    session_id: str,
+    request: ConsultRequest,
+    user: Annotated[AuthedUser | None, Depends(optional_current_user)],
+) -> ConsultResponse:
+    turn, _persisted = await _execute_consult_round(
+        session_id=session_id,
+        mode=request.mode,
+        message=request.message,
+        expected_round=request.expected_round,
+        status="intent_consulting",
+        user_id=user.user_id if user is not None else None,
+    )
+    return ConsultResponse.model_validate(turn.__dict__)
+
+
+@router.post(
+    "/sessions/{session_id}/consult/finalize",
+    response_model=ConsultBriefDraftResponse,
+    dependencies=[Depends(require_owned_session)],
+)
+async def finalize_consultation(
+    session_id: str,
+) -> ConsultBriefDraftResponse:
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    try:
+        draft = build_brief_draft(state.career_state)
+    except ConsultError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return ConsultBriefDraftResponse.model_validate(draft)
+
+
 @router.post(
     "/sessions/{session_id}/intent-consult",
     response_model=IntentConsultResponse,
@@ -193,6 +274,7 @@ async def get_intent_consultation(session_id: str) -> IntentConsultResponse:
 async def consult_intent(
     session_id: str,
     request: IntentConsultRequest,
+    user: Annotated[AuthedUser | None, Depends(optional_current_user)],
 ) -> IntentConsultResponse:
     metadata = await get_resume_metadata(session_id)
     if not metadata.get("exists"):
@@ -201,45 +283,20 @@ async def consult_intent(
     if version < 1 or metadata.get("confirmed_resume_version") != version:
         raise HTTPException(status_code=409, detail="resume must be confirmed")
 
+    message = _legacy_consult_message(request)
     state = await load_state(session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="session_id not found")
-    supervisor_log_start = len(state.supervisor_log)
-    try:
-        updated = await run_visible_intent_consultation(
-            state,
-            IntentConsultInput.model_validate(request.model_dump()),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
-    if updated.career_state.intent_mode is None:
-        raise HTTPException(
-            status_code=502, detail="intent consultation unavailable"
-        )
-    status = (
-        "intent_clarification"
-        if updated.career_state.intent_needs_clarification
-        else "intent_consulted"
-    )
-    new_supervisor_entries = updated.supervisor_log[supervisor_log_start:]
-
-    def persist_intent(latest: SharedState) -> SharedState:
-        for field_name in _INTENT_CAREER_FIELDS:
-            setattr(
-                latest.career_state,
-                field_name,
-                deepcopy(getattr(updated.career_state, field_name)),
-            )
-        for entry in new_supervisor_entries:
-            if entry not in latest.supervisor_log:
-                latest.supervisor_log.append(deepcopy(entry))
-        return latest.model_copy(deep=True)
-
-    persisted = await mutate_state_atomically(
+    expected_round = state.career_state.consult_rounds_used
+    turn, persisted = await _execute_consult_round(
         session_id=session_id,
-        mutator=persist_intent,
-        status=status,
+        mode=request.mode,
+        message=message,
+        expected_round=expected_round,
+        status=None,
+        user_id=user.user_id if user is not None else None,
     )
+    persisted.career_state.intent_assistant_message = turn.assistant_reply
     projection = project_intent_consultation(persisted)
     return IntentConsultResponse.model_validate(projection.model_dump())
 
@@ -251,7 +308,9 @@ async def consult_intent(
     dependencies=[Depends(require_owned_session)],
 )
 async def build_match_brief(
-    session_id: str, request: MatchBriefRequest
+    session_id: str,
+    request: MatchBriefRequest,
+    user: Annotated[AuthedUser | None, Depends(optional_current_user)],
 ) -> MatchBriefResponse:
     metadata = await get_resume_metadata(session_id)
     if not metadata.get("exists"):
@@ -271,14 +330,16 @@ async def build_match_brief(
         clarification_question=request.clarification_question,
         plan_version=1,
     )
-    def persist_match_brief(state: SharedState) -> None:
+    def persist_match_brief(state: SharedState) -> dict:
         state.career_state.current_goal = [request.career_goal]
         state.career_state.hard_constraints = dict(request.hard_constraints)
         state.career_state.soft_preferences = dict(request.soft_preferences)
         state.career_state.avoid_roles = list(request.avoid_roles)
+        state.career_state.intent_consulted = True
+        return profile_draft(state.career_state)
 
     try:
-        await mutate_state_atomically(
+        confirmed_profile = await mutate_state_atomically(
             session_id=session_id,
             mutator=persist_match_brief,
             status="match_brief_approved",
@@ -290,11 +351,98 @@ async def build_match_brief(
     except RunConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     await save_match_brief(run_id=run.run_id, brief=brief)
+    if user is not None:
+        await merge_profile(user.user_id, confirmed_profile)
     return MatchBriefResponse(
         run_id=run.run_id,
         session_id=session_id,
         brief=brief,
     )
+
+
+async def _execute_consult_round(
+    *,
+    session_id: str,
+    mode: str,
+    message: str,
+    expected_round: int,
+    status: str | None,
+    user_id: str | None = None,
+):
+    state = await load_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    if state.career_state.consult_rounds_used != expected_round:
+        raise HTTPException(status_code=409, detail="consultation round conflict")
+    if state.career_state.intent_consulted:
+        raise HTTPException(status_code=409, detail="consultation round conflict")
+
+    working = state.model_copy(deep=True)
+    remembered_profile = None
+    if user_id is not None and expected_round == 0:
+        stored_profile = await load_profile(user_id)
+        if stored_profile is not None and isinstance(
+            stored_profile.get("profile"), dict
+        ):
+            remembered_profile = dict(stored_profile["profile"])
+    try:
+        consult_kwargs = {}
+        if remembered_profile:
+            consult_kwargs["remembered_profile"] = remembered_profile
+        turn = await run_consult_round(
+            working,
+            mode=mode,
+            message=message,
+            **consult_kwargs,
+        )
+    except ConsultRoundLimitReached as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ConsultResponseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+
+    persisted_status = status or (
+        "intent_consulted" if turn.can_finalize else "intent_clarification"
+    )
+
+    def persist_turn(latest: SharedState) -> SharedState:
+        if (
+            latest.career_state.consult_rounds_used != expected_round
+            or latest.career_state.intent_consulted
+        ):
+            raise _ConsultRoundConflict(expected_round)
+        for field_name in _INTENT_CAREER_FIELDS:
+            setattr(
+                latest.career_state,
+                field_name,
+                deepcopy(getattr(working.career_state, field_name)),
+            )
+        return latest.model_copy(deep=True)
+
+    try:
+        persisted = await mutate_state_atomically(
+            session_id=session_id,
+            mutator=persist_turn,
+            status=persisted_status,
+        )
+    except _ConsultRoundConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="consultation round conflict",
+        ) from None
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session_id not found") from None
+    return turn, persisted
+
+
+def _legacy_consult_message(request: IntentConsultRequest) -> str:
+    if request.clarification_answer:
+        return request.clarification_answer
+    if request.goal_text:
+        return request.goal_text
+    parts = [*request.target_roles, *request.target_companies]
+    if parts:
+        return "、".join(parts)
+    return "请结合我的简历帮助我梳理职业方向。"
 
 
 async def _normalize_resume(

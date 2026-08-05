@@ -33,6 +33,8 @@ class CareerState(BaseModel):
     intent_needs_clarification: bool = False
     intent_clarification_question: str | None = None
     intent_clarification_used: int = Field(default=0, ge=0, le=1)
+    consult_transcript: list[dict] = Field(default_factory=list)
+    consult_rounds_used: int = Field(default=0, ge=0)
 
 
 class RetrievalState(BaseModel):

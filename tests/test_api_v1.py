@@ -212,6 +212,7 @@ def test_match_brief_persists_approved_career_state_before_run_snapshot(
             "preferred_companies": ["DeepMind"]
         }
         assert current.career_state.avoid_roles == ["sales"]
+        assert current.career_state.intent_consulted is True
         assert current.feedback_state.user_feedback[0]["feedback_id"] == 7
         return result
 

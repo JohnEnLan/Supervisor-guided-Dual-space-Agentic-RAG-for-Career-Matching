@@ -25,6 +25,8 @@ def test_career_state_has_bounded_durable_intent_consultation_fields() -> None:
     assert career.intent_needs_clarification is False
     assert career.intent_clarification_question is None
     assert career.intent_clarification_used == 0
+    assert career.consult_transcript == []
+    assert career.consult_rounds_used == 0
 
 
 def test_intent_consultation_fields_round_trip_through_shared_state() -> None:
@@ -111,6 +113,24 @@ def test_intent_projection_drops_unknown_resume_evidence_ids() -> None:
     serialized = projection.model_dump_json()
     assert "private-user" not in serialized
     assert "UNKNOWN" not in serialized
+
+
+def test_legacy_projection_maps_multi_round_count_to_old_boolean_counter() -> None:
+    from app.domain.intent import project_intent_consultation
+
+    state = SharedState(
+        session_id="session-1",
+        user_id="private-user",
+        career_state=CareerState(
+            intent_mode="targeted",
+            intent_assistant_message="继续咨询。",
+            consult_rounds_used=5,
+        ),
+    )
+
+    projection = project_intent_consultation(state)
+
+    assert projection.clarification_used == 1
 
 
 def test_targeted_consultation_enforces_company_semantics() -> None:
@@ -270,6 +290,7 @@ def test_get_intent_consultation_returns_404_before_first_consult(
 def test_intent_consult_route_persists_and_returns_safe_projection(
     monkeypatch,
 ) -> None:
+    from app.agents.consult_engine import ConsultTurn
     from app.api.v1 import sessions
 
     state = SharedState(
@@ -291,12 +312,26 @@ def test_intent_consult_route_persists_and_returns_safe_projection(
     async def load(_session_id: str):
         return state.model_copy(deep=True)
 
-    async def consult(current: SharedState, request: IntentConsultInput):
-        current.career_state.intent_mode = request.mode
-        current.career_state.intent_consulted = True
+    async def consult(current: SharedState, *, mode: str, message: str):
+        assert mode == "explore"
+        assert message == "请结合我的简历帮助我梳理职业方向。"
+        current.career_state.intent_mode = mode
         current.career_state.intent_assistant_message = "Evidence-backed direction."
         current.career_state.current_goal = ["Data analyst"]
-        return current
+        current.career_state.hard_constraints = {
+            "remote": True,
+            "need_visa_sponsor": False,
+        }
+        current.career_state.consult_rounds_used = 1
+        return ConsultTurn(
+            assistant_reply="Evidence-backed direction.",
+            next_question="你更看重哪项工作偏好？",
+            phase="explore",
+            completeness=0.6,
+            can_finalize=True,
+            round=1,
+            profile_draft={},
+        )
 
     async def mutate(*, session_id: str, mutator, status: str):
         assert session_id == "session-1"
@@ -313,7 +348,7 @@ def test_intent_consult_route_persists_and_returns_safe_projection(
 
     monkeypatch.setattr(sessions, "get_resume_metadata", metadata)
     monkeypatch.setattr(sessions, "load_state", load)
-    monkeypatch.setattr(sessions, "run_visible_intent_consultation", consult, raising=False)
+    monkeypatch.setattr(sessions, "run_consult_round", consult, raising=False)
     monkeypatch.setattr(
         sessions,
         "mutate_state_atomically",

@@ -83,5 +83,5 @@ def project_intent_consultation(
         directions=directions,
         needs_clarification=state.career_state.intent_needs_clarification,
         clarification_question=state.career_state.intent_clarification_question,
-        clarification_used=state.career_state.intent_clarification_used,
+        clarification_used=min(state.career_state.consult_rounds_used, 1),
     )

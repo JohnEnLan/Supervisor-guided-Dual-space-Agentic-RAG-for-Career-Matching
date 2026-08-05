@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     checkpoint_sweep_interval_seconds: int = Field(default=3600, ge=0)
 
     max_clarification_loops: int = 1
+    max_consult_rounds: int = Field(default=8, ge=1, le=15)
     max_reretrieval_loops: int = 1
     max_repair_loops: int = 1
 

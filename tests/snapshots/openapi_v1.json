@@ -153,6 +153,259 @@
         "title": "CaseEvidenceResponse",
         "type": "object"
       },
+      "ConsultBriefDraftResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "avoid_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Avoid Roles",
+            "type": "array"
+          },
+          "career_goal": {
+            "title": "Career Goal",
+            "type": "string"
+          },
+          "hard_constraints": {
+            "additionalProperties": true,
+            "title": "Hard Constraints",
+            "type": "object"
+          },
+          "result_count": {
+            "default": 5,
+            "maximum": 10.0,
+            "minimum": 3.0,
+            "title": "Result Count",
+            "type": "integer"
+          },
+          "soft_preferences": {
+            "additionalProperties": true,
+            "title": "Soft Preferences",
+            "type": "object"
+          }
+        },
+        "required": [
+          "career_goal"
+        ],
+        "title": "ConsultBriefDraftResponse",
+        "type": "object"
+      },
+      "ConsultProfileDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "avoid_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Avoid Roles",
+            "type": "array"
+          },
+          "current_goal": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Current Goal",
+            "type": "array"
+          },
+          "hard_constraints": {
+            "additionalProperties": true,
+            "title": "Hard Constraints",
+            "type": "object"
+          },
+          "long_term_goal": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Long Term Goal",
+            "type": "array"
+          },
+          "soft_preferences": {
+            "additionalProperties": true,
+            "title": "Soft Preferences",
+            "type": "object"
+          }
+        },
+        "title": "ConsultProfileDraft",
+        "type": "object"
+      },
+      "ConsultRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_round": {
+            "minimum": 0.0,
+            "title": "Expected Round",
+            "type": "integer"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "targeted",
+              "explore"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "message",
+          "expected_round"
+        ],
+        "title": "ConsultRequest",
+        "type": "object"
+      },
+      "ConsultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assistant_reply": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Assistant Reply",
+            "type": "string"
+          },
+          "can_finalize": {
+            "title": "Can Finalize",
+            "type": "boolean"
+          },
+          "completeness": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Completeness",
+            "type": "number"
+          },
+          "next_question": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Next Question",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "template",
+              "deepen",
+              "explore"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "profile_draft": {
+            "$ref": "#/components/schemas/ConsultProfileDraft"
+          },
+          "round": {
+            "minimum": 1.0,
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assistant_reply",
+          "next_question",
+          "phase",
+          "completeness",
+          "can_finalize",
+          "round",
+          "profile_draft"
+        ],
+        "title": "ConsultResponse",
+        "type": "object"
+      },
+      "ConsultStateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "can_finalize": {
+            "title": "Can Finalize",
+            "type": "boolean"
+          },
+          "completeness": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Completeness",
+            "type": "number"
+          },
+          "phase": {
+            "enum": [
+              "template",
+              "deepen",
+              "explore"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "profile_draft": {
+            "$ref": "#/components/schemas/ConsultProfileDraft"
+          },
+          "round": {
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/ConsultTranscriptEntry"
+            },
+            "title": "Transcript",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile_draft",
+          "round",
+          "phase",
+          "completeness",
+          "can_finalize"
+        ],
+        "title": "ConsultStateResponse",
+        "type": "object"
+      },
+      "ConsultTranscriptEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "assistant_reply": {
+            "maxLength": 120,
+            "title": "Assistant Reply",
+            "type": "string"
+          },
+          "next_question": {
+            "maxLength": 80,
+            "title": "Next Question",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "template",
+              "deepen",
+              "explore"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "round": {
+            "minimum": 1.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "user_message": {
+            "maxLength": 2000,
+            "title": "User Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "user_message",
+          "assistant_reply",
+          "next_question",
+          "phase"
+        ],
+        "title": "ConsultTranscriptEntry",
+        "type": "object"
+      },
       "ConversationMessageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2713,6 +2966,131 @@
           }
         },
         "summary": "Create Session"
+      }
+    },
+    "/api/v1/sessions/{session_id}/consult": {
+      "get": {
+        "operationId": "get_consultation_api_v1_sessions__session_id__consult_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsultStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Consultation"
+      },
+      "post": {
+        "operationId": "continue_consultation_api_v1_sessions__session_id__consult_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsultRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Continue Consultation"
+      }
+    },
+    "/api/v1/sessions/{session_id}/consult/finalize": {
+      "post": {
+        "operationId": "finalize_consultation_api_v1_sessions__session_id__consult_finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsultBriefDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalize Consultation"
       }
     },
     "/api/v1/sessions/{session_id}/intent-consult": {

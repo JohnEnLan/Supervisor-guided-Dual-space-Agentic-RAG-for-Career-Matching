@@ -277,6 +277,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{session_id}/consult": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Consultation */
+        get: operations["get_consultation_api_v1_sessions__session_id__consult_get"];
+        put?: never;
+        /** Continue Consultation */
+        post: operations["continue_consultation_api_v1_sessions__session_id__consult_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/consult/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finalize Consultation */
+        post: operations["finalize_consultation_api_v1_sessions__session_id__consult_finalize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{session_id}/intent-consult": {
         parameters: {
             query?: never;
@@ -434,6 +469,107 @@ export interface components {
             confidence?: number | null;
             /** Highest Stage */
             highest_stage: string;
+        };
+        /** ConsultBriefDraftResponse */
+        ConsultBriefDraftResponse: {
+            /** Avoid Roles */
+            avoid_roles?: string[];
+            /** Career Goal */
+            career_goal: string;
+            /** Hard Constraints */
+            hard_constraints?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Result Count
+             * @default 5
+             */
+            result_count: number;
+            /** Soft Preferences */
+            soft_preferences?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ConsultProfileDraft */
+        ConsultProfileDraft: {
+            /** Avoid Roles */
+            avoid_roles?: string[];
+            /** Current Goal */
+            current_goal?: string[];
+            /** Hard Constraints */
+            hard_constraints?: {
+                [key: string]: unknown;
+            };
+            /** Long Term Goal */
+            long_term_goal?: string[];
+            /** Soft Preferences */
+            soft_preferences?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ConsultRequest */
+        ConsultRequest: {
+            /** Expected Round */
+            expected_round: number;
+            /** Message */
+            message: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "targeted" | "explore";
+        };
+        /** ConsultResponse */
+        ConsultResponse: {
+            /** Assistant Reply */
+            assistant_reply: string;
+            /** Can Finalize */
+            can_finalize: boolean;
+            /** Completeness */
+            completeness: number;
+            /** Next Question */
+            next_question: string;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "template" | "deepen" | "explore";
+            profile_draft: components["schemas"]["ConsultProfileDraft"];
+            /** Round */
+            round: number;
+        };
+        /** ConsultStateResponse */
+        ConsultStateResponse: {
+            /** Can Finalize */
+            can_finalize: boolean;
+            /** Completeness */
+            completeness: number;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "template" | "deepen" | "explore";
+            profile_draft: components["schemas"]["ConsultProfileDraft"];
+            /** Round */
+            round: number;
+            /** Transcript */
+            transcript?: components["schemas"]["ConsultTranscriptEntry"][];
+        };
+        /** ConsultTranscriptEntry */
+        ConsultTranscriptEntry: {
+            /** Assistant Reply */
+            assistant_reply: string;
+            /** Next Question */
+            next_question: string;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "template" | "deepen" | "explore";
+            /** Round */
+            round: number;
+            /** User Message */
+            user_message: string;
         };
         /** ConversationMessageResponse */
         ConversationMessageResponse: {
@@ -1661,6 +1797,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_consultation_api_v1_sessions__session_id__consult_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsultStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_consultation_api_v1_sessions__session_id__consult_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsultRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    finalize_consultation_api_v1_sessions__session_id__consult_finalize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsultBriefDraftResponse"];
                 };
             };
             /** @description Validation Error */

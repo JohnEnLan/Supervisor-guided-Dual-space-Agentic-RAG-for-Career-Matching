@@ -178,6 +178,55 @@ class IntentConsultResponse(PublicDTO):
     clarification_used: int = Field(default=0, ge=0, le=1)
 
 
+class ConsultProfileDraft(PublicDTO):
+    current_goal: list[str] = Field(default_factory=list)
+    long_term_goal: list[str] = Field(default_factory=list)
+    hard_constraints: dict[str, Any] = Field(default_factory=dict)
+    soft_preferences: dict[str, Any] = Field(default_factory=dict)
+    avoid_roles: list[str] = Field(default_factory=list)
+
+
+class ConsultTranscriptEntry(PublicDTO):
+    round: int = Field(ge=1)
+    user_message: str = Field(max_length=2000)
+    assistant_reply: str = Field(max_length=120)
+    next_question: str = Field(max_length=80)
+    phase: Literal["template", "deepen", "explore"]
+
+
+class ConsultRequest(PublicDTO):
+    mode: Literal["targeted", "explore"]
+    message: str = Field(min_length=1, max_length=2000)
+    expected_round: int = Field(ge=0)
+
+
+class ConsultResponse(PublicDTO):
+    assistant_reply: str = Field(min_length=1, max_length=120)
+    next_question: str = Field(min_length=1, max_length=80)
+    phase: Literal["template", "deepen", "explore"]
+    completeness: float = Field(ge=0, le=1)
+    can_finalize: bool
+    round: int = Field(ge=1)
+    profile_draft: ConsultProfileDraft
+
+
+class ConsultStateResponse(PublicDTO):
+    transcript: list[ConsultTranscriptEntry] = Field(default_factory=list)
+    profile_draft: ConsultProfileDraft
+    round: int = Field(ge=0)
+    phase: Literal["template", "deepen", "explore"]
+    completeness: float = Field(ge=0, le=1)
+    can_finalize: bool
+
+
+class ConsultBriefDraftResponse(PublicDTO):
+    career_goal: str
+    hard_constraints: dict[str, Any] = Field(default_factory=dict)
+    soft_preferences: dict[str, Any] = Field(default_factory=dict)
+    avoid_roles: list[str] = Field(default_factory=list)
+    result_count: int = Field(default=5, ge=3, le=10)
+
+
 class MatchBriefRequest(PublicDTO):
     career_goal: str = Field(min_length=10, max_length=2000)
     hard_constraints: dict[str, Any] = Field(default_factory=dict)

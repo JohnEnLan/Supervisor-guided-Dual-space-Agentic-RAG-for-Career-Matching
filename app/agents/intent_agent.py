@@ -204,6 +204,8 @@ def _filter_hard_constraints(raw: dict[str, Any]) -> dict[str, Any]:
         "role_clusters",
         "degree_required",
         "companies",
+        "remote",
+        "work_mode",
     }
     cleaned = {key: value for key, value in raw.items() if key in allowed}
     if "locations" in cleaned:
