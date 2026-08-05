@@ -1,0 +1,23 @@
+{
+ "dataset": "linkedin_ml_cnuk_demo_v1",
+ "generated_on": "2026-08-05",
+ "queries_file": "data/eval/resume_queries.jsonl",
+ "query_cases": 15,
+ "pooling": {
+  "top_k_per_channel_pool": 30,
+  "channels": [
+   "bm25_only",
+   "dense_only",
+   "hybrid_rrf_biencoder",
+   "hybrid_with_raptor"
+  ]
+ },
+ "judged_pairs": 652,
+ "annotation_method": "llm_judged_pooled",
+ "judge_model": "deepseek_fast_json_mode",
+ "caveats": [
+  "pooled recall is optimistic (pool-relative)",
+  "labels are LLM-judged, not comparable to the human-annotated arshkon-1000 numbers"
+ ],
+ "metric_table_markdown": "| run | k | cases | precision | recall | mrr | ndcg |\n| --- | --- | --- | --- | --- | --- | --- |\n| hybrid_rrf_biencoder | 5 | 15 | 0.720000 | 0.186240 | 0.822222 | 0.726704 |\n| hybrid_rrf_biencoder | 10 | 15 | 0.713333 | 0.340319 | 0.822222 | 0.741772 |\n| bm25_only | 5 | 15 | 0.440000 | 0.076062 | 0.680000 | 0.476177 |\n| bm25_only | 10 | 15 | 0.520000 | 0.197085 | 0.705265 | 0.518786 |\n| dense_only | 5 | 15 | 0.720000 | 0.186167 | 0.900000 | 0.741412 |\n| dense_only | 10 | 15 | 0.673333 | 0.323969 | 0.900000 | 0.722007 |\n| hybrid_with_raptor | 5 | 15 | 0.853333 | 0.217918 | 0.966667 | 0.886508 |\n| hybrid_with_raptor | 10 | 15 | 0.813333 | 0.369875 | 0.966667 | 0.863948 |"
+}
