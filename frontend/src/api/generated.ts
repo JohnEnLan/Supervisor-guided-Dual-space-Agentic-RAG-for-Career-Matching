@@ -312,24 +312,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/sessions/{session_id}/intent-consult": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Intent Consultation */
-        get: operations["get_intent_consultation_api_v1_sessions__session_id__intent_consult_get"];
-        put?: never;
-        /** Consult Intent */
-        post: operations["consult_intent_api_v1_sessions__session_id__intent_consult_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/sessions/{session_id}/match-brief": {
         parameters: {
             query?: never;
@@ -427,27 +409,6 @@ export interface components {
             explain_enabled: boolean;
             /** Monitoring Enabled */
             monitoring_enabled: boolean;
-        };
-        /** CareerDirectionResponse */
-        CareerDirectionResponse: {
-            /**
-             * Entry Role
-             * @default
-             */
-            entry_role: string;
-            /**
-             * Primary Gap
-             * @default
-             */
-            primary_gap: string;
-            /** Rationale */
-            rationale: string;
-            /** Resume Evidence Span Ids */
-            resume_evidence_span_ids?: string[];
-            /** Role Family */
-            role_family: string;
-            /** Title */
-            title: string;
         };
         /** CareerPathItem */
         CareerPathItem: {
@@ -617,67 +578,6 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
-        };
-        /** IntentConsultRequest */
-        IntentConsultRequest: {
-            /** Clarification Answer */
-            clarification_answer?: string | null;
-            /**
-             * Company Exclusive
-             * @default false
-             */
-            company_exclusive: boolean;
-            /** Goal Text */
-            goal_text?: string | null;
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "targeted" | "explore";
-            /** Target Companies */
-            target_companies?: string[];
-            /** Target Roles */
-            target_roles?: string[];
-        };
-        /** IntentConsultResponse */
-        IntentConsultResponse: {
-            /** Assistant Message */
-            assistant_message: string;
-            /** Avoid Roles */
-            avoid_roles?: string[];
-            /** Clarification Question */
-            clarification_question?: string | null;
-            /**
-             * Clarification Used
-             * @default 0
-             */
-            clarification_used: number;
-            /** Current Goal */
-            current_goal?: string[];
-            /** Directions */
-            directions?: components["schemas"]["CareerDirectionResponse"][];
-            /** Hard Constraints */
-            hard_constraints?: {
-                [key: string]: unknown;
-            };
-            /** Long Term Goal */
-            long_term_goal?: string[];
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "targeted" | "explore";
-            /**
-             * Needs Clarification
-             * @default false
-             */
-            needs_clarification: boolean;
-            /** Session Id */
-            session_id: string;
-            /** Soft Preferences */
-            soft_preferences?: {
-                [key: string]: unknown;
-            };
         };
         /** MatchBrief */
         MatchBrief: {
@@ -1247,14 +1147,7 @@ export interface components {
             warning_codes?: string[];
         };
         /** SessionCreateRequest */
-        SessionCreateRequest: {
-            /**
-             * User Id
-             * @deprecated
-             * @description Deprecated compatibility user id; W4 removes this field. Authenticated requests always use the session Cookie owner.
-             */
-            user_id?: string | null;
-        };
+        SessionCreateRequest: Record<string, never>;
         /** SessionResponse */
         SessionResponse: {
             /** Session Id */
@@ -1784,9 +1677,9 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
-                "application/json": components["schemas"]["SessionCreateRequest"];
+                "application/json": components["schemas"]["SessionCreateRequest"] | null;
             };
         };
         responses: {
@@ -1894,72 +1787,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsultBriefDraftResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_intent_consultation_api_v1_sessions__session_id__intent_consult_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IntentConsultResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    consult_intent_api_v1_sessions__session_id__intent_consult_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IntentConsultRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IntentConsultResponse"];
                 };
             };
             /** @description Validation Error */

@@ -26,8 +26,6 @@ from app.api.v1.schemas import (
     ConsultRequest,
     ConsultResponse,
     ConsultStateResponse,
-    IntentConsultRequest,
-    IntentConsultResponse,
     MatchBriefRequest,
     MatchBriefResponse,
     ResumeAcceptedResponse,
@@ -61,7 +59,6 @@ from app.db.state_store import (
     save_state,
 )
 from app.domain.match_brief import create_match_brief
-from app.domain.intent import project_intent_consultation
 from app.normalization.resume_intake import intake_resume
 from app.state.schema import SharedState
 
@@ -91,20 +88,14 @@ class _ConsultRoundConflict(ValueError):
 
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(
-    request: SessionCreateRequest,
     user: Annotated[
         AuthedUser | None,
         Depends(optional_current_user),
     ],
+    request: SessionCreateRequest | None = None,
 ) -> SessionResponse:
-    legacy_user_id = request.model_dump()["user_id"]
-    resolved_user_id = user.user_id if user is not None else legacy_user_id
-    if resolved_user_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="user_id is required in compatibility mode",
-        )
     session_id = str(uuid.uuid4())
+    resolved_user_id = user.user_id if user is not None else session_id
     await save_state(
         SharedState(session_id=session_id, user_id=resolved_user_id),
         status="awaiting_resume",
@@ -189,24 +180,6 @@ async def resume_confirm(session_id: str) -> ResumeConfirmResponse:
 
 
 @router.get(
-    "/sessions/{session_id}/intent-consult",
-    response_model=IntentConsultResponse,
-    dependencies=[Depends(require_owned_session)],
-)
-async def get_intent_consultation(session_id: str) -> IntentConsultResponse:
-    state = await load_state(session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="session_id not found")
-    try:
-        projection = project_intent_consultation(state)
-    except ValueError:
-        raise HTTPException(
-            status_code=404, detail="intent consultation not found"
-        ) from None
-    return IntentConsultResponse.model_validate(projection.model_dump())
-
-
-@router.get(
     "/sessions/{session_id}/consult",
     response_model=ConsultStateResponse,
     dependencies=[Depends(require_owned_session)],
@@ -264,41 +237,6 @@ async def finalize_consultation(
     except ConsultError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return ConsultBriefDraftResponse.model_validate(draft)
-
-
-@router.post(
-    "/sessions/{session_id}/intent-consult",
-    response_model=IntentConsultResponse,
-    dependencies=[Depends(require_owned_session)],
-)
-async def consult_intent(
-    session_id: str,
-    request: IntentConsultRequest,
-    user: Annotated[AuthedUser | None, Depends(optional_current_user)],
-) -> IntentConsultResponse:
-    metadata = await get_resume_metadata(session_id)
-    if not metadata.get("exists"):
-        raise HTTPException(status_code=404, detail="session_id not found")
-    version = int(metadata.get("resume_version") or 0)
-    if version < 1 or metadata.get("confirmed_resume_version") != version:
-        raise HTTPException(status_code=409, detail="resume must be confirmed")
-
-    message = _legacy_consult_message(request)
-    state = await load_state(session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="session_id not found")
-    expected_round = state.career_state.consult_rounds_used
-    turn, persisted = await _execute_consult_round(
-        session_id=session_id,
-        mode=request.mode,
-        message=message,
-        expected_round=expected_round,
-        status=None,
-        user_id=user.user_id if user is not None else None,
-    )
-    persisted.career_state.intent_assistant_message = turn.assistant_reply
-    projection = project_intent_consultation(persisted)
-    return IntentConsultResponse.model_validate(projection.model_dump())
 
 
 @router.post(
@@ -432,17 +370,6 @@ async def _execute_consult_round(
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
     return turn, persisted
-
-
-def _legacy_consult_message(request: IntentConsultRequest) -> str:
-    if request.clarification_answer:
-        return request.clarification_answer
-    if request.goal_text:
-        return request.goal_text
-    parts = [*request.target_roles, *request.target_companies]
-    if parts:
-        return "、".join(parts)
-    return "请结合我的简历帮助我梳理职业方向。"
 
 
 async def _normalize_resume(

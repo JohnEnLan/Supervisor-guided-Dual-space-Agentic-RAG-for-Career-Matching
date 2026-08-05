@@ -80,11 +80,32 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   }
   headers.set("Accept", "application/json");
 
-  const response = await fetch(`${API_PREFIX}${path}`, { ...init, headers });
+  const response = await fetch(`${API_PREFIX}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
-    throw await toApiError(response);
+    const error = await toApiError(response);
+    if (response.status === 401) {
+      notifyUnauthorized(error);
+    }
+    throw error;
   }
   return (await response.json()) as T;
+}
+
+type UnauthorizedListener = (error: ApiError) => void;
+
+let unauthorizedListener: UnauthorizedListener | null = null;
+
+/** 全局 401 监听：AppShell 注册后，任何请求 401 都会统一跳回登录。 */
+export function onUnauthorized(listener: UnauthorizedListener | null): void {
+  unauthorizedListener = listener;
+}
+
+function notifyUnauthorized(error: ApiError): void {
+  unauthorizedListener?.(error);
 }
 
 export function jsonRequest<TRequest, TResponse>(

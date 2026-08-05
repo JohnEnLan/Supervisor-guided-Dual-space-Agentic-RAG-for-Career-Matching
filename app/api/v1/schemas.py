@@ -69,16 +69,7 @@ class MeSessionsResponse(PublicDTO):
 
 
 class SessionCreateRequest(PublicDTO):
-    user_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=200,
-        deprecated=True,
-        description=(
-            "Deprecated compatibility user id; W4 removes this field. "
-            "Authenticated requests always use the session Cookie owner."
-        ),
-    )
+    pass
 
 
 class SessionResponse(PublicDTO):
@@ -143,39 +134,6 @@ class ResumeConfirmResponse(PublicDTO):
     resume_version: int
     confirmed: bool
     confirmed_at: datetime | None = None
-
-
-class IntentConsultRequest(PublicDTO):
-    mode: Literal["targeted", "explore"]
-    goal_text: str | None = Field(default=None, max_length=2000)
-    target_roles: list[str] = Field(default_factory=list, max_length=10)
-    target_companies: list[str] = Field(default_factory=list, max_length=10)
-    company_exclusive: bool = False
-    clarification_answer: str | None = Field(default=None, max_length=1000)
-
-
-class CareerDirectionResponse(PublicDTO):
-    role_family: str
-    title: str
-    rationale: str
-    resume_evidence_span_ids: list[str] = Field(default_factory=list)
-    primary_gap: str = ""
-    entry_role: str = ""
-
-
-class IntentConsultResponse(PublicDTO):
-    session_id: str
-    mode: Literal["targeted", "explore"]
-    assistant_message: str
-    current_goal: list[str] = Field(default_factory=list)
-    long_term_goal: list[str] = Field(default_factory=list)
-    hard_constraints: dict[str, Any] = Field(default_factory=dict)
-    soft_preferences: dict[str, Any] = Field(default_factory=dict)
-    avoid_roles: list[str] = Field(default_factory=list)
-    directions: list[CareerDirectionResponse] = Field(default_factory=list)
-    needs_clarification: bool = False
-    clarification_question: str | None = None
-    clarification_used: int = Field(default=0, ge=0, le=1)
 
 
 class ConsultProfileDraft(PublicDTO):

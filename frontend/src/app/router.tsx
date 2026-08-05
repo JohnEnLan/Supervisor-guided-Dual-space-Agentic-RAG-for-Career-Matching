@@ -1,35 +1,40 @@
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { Navigate, createBrowserRouter } from "react-router-dom";
 
-import { NewSessionPage } from "../features/session/NewSessionPage";
-import { ResumeReviewPage } from "../features/session/ResumeReviewPage";
-import { MatchBriefPage } from "../features/brief/MatchBriefPage";
-import { RunPage } from "../features/run/RunPage";
-import { ChatPage } from "../features/chat/ChatPage";
-import { ResultsPage } from "../features/results/ResultsPage";
 import { EvaluationRunPage } from "../features/evaluation/EvaluationRunPage";
 import { MonitoringPage } from "../features/monitoring/MonitoringPage";
-import { CinematicOnboardingPage } from "../features/onboarding/CinematicOnboardingPage";
-import { App, RouteError } from "./App";
+import { AppShell } from "../v2/AppShell";
+import { LandingPage } from "../v2/LandingPage";
+import { ProfilePage } from "../v2/ProfilePage";
+import { WorkbenchPage } from "../v2/WorkbenchPage";
+import { RouteError } from "./App";
+
+function EmptyWorkbench() {
+  return (
+    <section className="v2-empty">
+      <h1>选择或新建一个咨询会话</h1>
+      <p>左侧「新的咨询」开始：上传简历 → 和顾问团队聊方向 → 拿到带证据的推荐。</p>
+    </section>
+  );
+}
 
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <CinematicOnboardingPage />,
+    element: <LandingPage />,
     errorElement: <RouteError />,
   },
   {
-    element: <App />,
+    path: "/app",
+    element: <AppShell />,
     errorElement: <RouteError />,
     children: [
-      { path: "workspace", element: <NewSessionPage /> },
-      { path: "sessions/:sessionId/resume", element: <ResumeReviewPage /> },
-      { path: "sessions/:sessionId/brief", element: <MatchBriefPage /> },
-      { path: "runs/:runId", element: <RunPage /> },
-      { path: "runs/:runId/chat", element: <ChatPage /> },
-      { path: "runs/:runId/results", element: <ResultsPage /> },
-      { path: "runs/:runId/evaluation", element: <EvaluationRunPage /> },
-      { path: "runs/:runId/explain", element: <Navigate replace to="../evaluation" /> },
-      { path: "monitoring", element: <MonitoringPage /> },
+      { index: true, element: <EmptyWorkbench /> },
+      { path: "sessions/:sessionId", element: <WorkbenchPage /> },
+      { path: "profile", element: <ProfilePage /> },
+      { path: "settings/evaluation", element: <EvaluationRunPage /> },
+      { path: "settings/evaluation/:runId", element: <EvaluationRunPage /> },
+      { path: "settings/monitoring", element: <MonitoringPage /> },
     ],
   },
+  { path: "*", element: <Navigate replace to="/" /> },
 ]);

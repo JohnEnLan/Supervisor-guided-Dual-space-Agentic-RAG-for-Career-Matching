@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 import pytest
@@ -56,7 +56,7 @@ def test_every_v1_resource_id_route_has_the_matching_ownership_dependency() -> N
         checked.append(route.path)
         assert expected in _dependency_calls(route.dependant), route.path
 
-    assert len(checked) == 15
+    assert len(checked) == 13
 
 
 class _Acquire:
@@ -71,7 +71,7 @@ class _Acquire:
 
 
 class _Connection:
-    def __init__(self, owner_user_id: str):
+    def __init__(self, owner_user_id: str | None):
         self.owner_user_id = owner_user_id
         self.queries = []
 
@@ -81,7 +81,7 @@ class _Connection:
 
 
 class _Pool:
-    def __init__(self, owner_user_id: str):
+    def __init__(self, owner_user_id: str | None):
         self.connection = _Connection(owner_user_id)
 
     def acquire(self):
@@ -98,12 +98,6 @@ class _Pool:
         ),
         ("get", "/api/v1/sessions/session-b/resume-preview", {}),
         ("post", "/api/v1/sessions/session-b/resume-confirm", {}),
-        ("get", "/api/v1/sessions/session-b/intent-consult", {}),
-        (
-            "post",
-            "/api/v1/sessions/session-b/intent-consult",
-            {"json": {"mode": "targeted"}},
-        ),
         ("get", "/api/v1/sessions/session-b/consult", {}),
         (
             "post",
@@ -182,7 +176,29 @@ async def test_compatibility_without_cookie_does_not_query_ownership(
     assert await deps.require_owned_run("legacy-run", None) is None
 
 
-def test_authenticated_session_creation_ignores_legacy_body_user_id(
+@pytest.mark.asyncio
+async def test_authenticated_user_cannot_claim_ownerless_session(
+    monkeypatch,
+) -> None:
+    from app.api.auth import deps
+
+    pool = _Pool(None)
+
+    async def get_pool():
+        return pool
+
+    monkeypatch.setattr(deps, "get_pool", get_pool)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.require_owned_session(
+            "ownerless-session",
+            _user("11111111-1111-1111-1111-111111111111"),
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+def test_authenticated_session_creation_uses_cookie_owner_and_rejects_legacy_field(
     monkeypatch,
 ) -> None:
     from app.api.auth.deps import optional_current_user
@@ -201,19 +217,21 @@ def test_authenticated_session_creation_ignores_legacy_body_user_id(
     app.dependency_overrides[optional_current_user] = lambda: user
 
     with TestClient(app) as client:
-        response = client.post(
+        response = client.post("/api/v1/sessions")
+        legacy = client.post(
             "/api/v1/sessions",
             json={"user_id": "attacker-controlled-legacy-id"},
         )
 
     assert response.status_code == 201
+    assert legacy.status_code == 422
     state, status, owner_user_id = saved[0]
     assert state.user_id == user.user_id
     assert owner_user_id == user.user_id
     assert status == "awaiting_resume"
 
 
-def test_compatibility_session_creation_still_accepts_legacy_user_id(
+def test_compatibility_session_creation_without_cookie_is_ownerless(
     monkeypatch,
 ) -> None:
     from app.api.v1 import sessions
@@ -229,12 +247,8 @@ def test_compatibility_session_creation_still_accepts_legacy_user_id(
     app.include_router(router)
 
     with TestClient(app) as client:
-        accepted = client.post(
-            "/api/v1/sessions", json={"user_id": "legacy-user"}
-        )
-        missing = client.post("/api/v1/sessions", json={})
+        accepted = client.post("/api/v1/sessions")
 
     assert accepted.status_code == 201
-    assert saved[0][0].user_id == "legacy-user"
+    assert saved[0][0].user_id == accepted.json()["session_id"]
     assert saved[0][1] is None
-    assert missing.status_code == 422

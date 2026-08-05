@@ -377,61 +377,6 @@ def test_finalize_requires_complete_profile_and_is_idempotent(monkeypatch) -> No
     }
 
 
-def test_legacy_intent_post_adapts_one_new_engine_round(monkeypatch) -> None:
-    from app.agents.consult_engine import ConsultTurn
-    from app.api.v1 import sessions
-
-    state = _complete_state(rounds=4)
-    state.career_state.intent_mode = "targeted"
-
-    async def metadata(_session_id: str):
-        return {
-            "exists": True,
-            "resume_version": 1,
-            "confirmed_resume_version": 1,
-        }
-
-    async def load(_session_id: str):
-        return state.model_copy(deep=True)
-
-    async def run(current, *, mode, message):
-        assert mode == "targeted"
-        assert message == "寻找平台工程岗位"
-        current.career_state.consult_rounds_used = 5
-        current.career_state.intent_assistant_message = "我理解你的目标。"
-        current.career_state.intent_clarification_question = "你优先考虑哪里？"
-        return ConsultTurn(
-            assistant_reply="我理解你的目标。",
-            next_question="你优先考虑哪里？",
-            phase="deepen",
-            completeness=0.7,
-            can_finalize=True,
-            round=5,
-            profile_draft={},
-        )
-
-    async def mutate(*, mutator, **_kwargs):
-        latest = state.model_copy(deep=True)
-        return mutator(latest)
-
-    monkeypatch.setattr(sessions, "get_resume_metadata", metadata)
-    monkeypatch.setattr(sessions, "load_state", load)
-    monkeypatch.setattr(sessions, "run_consult_round", run, raising=False)
-    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
-
-    with TestClient(_app()) as client:
-        response = client.post(
-            "/api/v1/sessions/session-1/intent-consult",
-            json={"mode": "targeted", "goal_text": "寻找平台工程岗位"},
-        )
-
-    assert response.status_code == 200
-    assert response.json()["assistant_message"] == "我理解你的目标。"
-    assert response.json()["clarification_used"] == 1
-    assert response.json()["current_goal"] == ["Data analyst"]
-    assert "profile_draft" not in response.json()
-
-
 def test_match_brief_confirmation_writes_authenticated_profile(monkeypatch) -> None:
     from app.api.v1 import sessions
 

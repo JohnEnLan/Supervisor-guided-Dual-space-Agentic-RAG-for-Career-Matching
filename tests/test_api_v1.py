@@ -19,7 +19,8 @@ PUBLIC_PATHS = {
     "/api/v1/sessions/{session_id}/resume",
     "/api/v1/sessions/{session_id}/resume-preview",
     "/api/v1/sessions/{session_id}/resume-confirm",
-    "/api/v1/sessions/{session_id}/intent-consult",
+    "/api/v1/sessions/{session_id}/consult",
+    "/api/v1/sessions/{session_id}/consult/finalize",
     "/api/v1/sessions/{session_id}/match-brief",
     "/api/v1/runs/{run_id}/execute",
     "/api/v1/runs/{run_id}/status",
@@ -151,6 +152,20 @@ def test_all_public_routes_have_response_models() -> None:
                 if code.startswith("2")
             )
             assert "schema" in success["content"]["application/json"]
+
+
+def test_w4_transition_contracts_are_absent_from_openapi() -> None:
+    schema = _app().openapi()
+
+    assert "/api/v1/sessions/{session_id}/intent-consult" not in schema["paths"]
+    component_schemas = schema["components"]["schemas"]
+    assert {
+        "CareerDirectionResponse",
+        "IntentConsultRequest",
+        "IntentConsultResponse",
+    }.isdisjoint(component_schemas)
+    session_create = component_schemas["SessionCreateRequest"]
+    assert "user_id" not in session_create.get("properties", {})
 
 
 def test_match_brief_requires_confirmed_resume(monkeypatch) -> None:
