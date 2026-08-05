@@ -19,8 +19,9 @@
 
 ## 读数
 
-- **完整单调阶梯**：BM25 单通道 < dense 单通道 < 混合 < +RAPTOR < +Cross <
-  +两者——四级消融矩阵完整，每一级增强都有独立可归因的增益。
+- **2×2 因子设计**（RAPTOR 与 Cross 为并列单因素 run，非顺序叠加）：
+  BM25 池内 < dense 池内 < 混合 base < RAPTOR-only < Cross-only < 两者同开——
+  两个增强各自相对 base 的增益独立可归因，组合有叠加收益。
 - **raptor_cross 的 MRR = 1.000**：15 条查询的**首位结果全部相关**——对"用户第一眼
   看到什么"这个体验指标是满分。
 - Cross 的主要贡献在精度端（P@5 +18.7pp vs base）；RAPTOR 的主要贡献在首位命中
@@ -38,6 +39,33 @@
 
 ## 生产建议
 
-演示/答辩配置：`RERANK_ENABLED=true` + RAPTOR 开启（retrieval_plan include_raptor）
-= 本表最优组合；每 run 增加 1–2 次精排调用（单次 135–237ms、约 2 分钱）。
-默认仓库配置保持双关（P2 纪律），一开关即得。
+本表最优组合 = RAPTOR + Cross 同开。注意两者启用方式不同：Cross 有环境开关
+（`RERANK_ENABLED=true` + `RERANK_ENDPOINT`）；**RAPTOR 无环境开关**——标准产品
+主链的 plan 固定 `include_raptor=False`（orchestrator.lock_approved_brief），
+目前仅评估脚本与直调检索可开，产品侧启用需在 plan 构造处改一行。
+每 run 增加 1–2 次精排调用（单次 135–237ms、约 2 分钱）。
+
+## 附录：实现验收证据摘要（2026-08-06；完整响应见工程线程执行报告，此处为可核对要点）
+
+探针（真实 DashScope key，经典公共端点）：
+
+- 英文 query + 5 文档：`200 / 237.1 ms`，results 按相关性降序、索引完整、分数 ∈[0,1]
+  （首名 0.6155…，usage 149 token，request_id 042534b8-…）
+- 中文 query + 5 文档：`200 / 134.5 ms`（首名 0.9088…，usage 92 token，
+  request_id 63dd4240-…）
+- workspace 形态端点以占位 ID 探测返回 `400 BadRequest.IllegalEndpoint`（本机无真实
+  WorkspaceId；官方文档以 workspace 形态为生产推荐，经典共享端点实测可用）。
+
+P1 persona 真机对比（同一简历与咨询路径）：
+
+- 开启精排（run 431866c1，203.5 s）：5 条结果 cross_score/cross_rank 全部落袋
+  （0.2702/0.1650/0.1576/0.1511/0.1473，rank 0–4），Top-5 变为
+  Senior Backend Python Developer / SQL Developer / Software Engineer /
+  Senior Software Engineer / Infrastructure Engineer IV；
+- 关闭回归（run 3340aef4，98.5 s）：cross 字段全 None，排序与基线一致
+  （Senior Backend Python Developer / Azure Data engineer / Cloud Infrastructure
+  Engineer / Principal Architect / Senior Java Software Engineer）。
+
+真机彩排还暴露并修复了 mock 覆盖不到的缺陷：`required_skills` 为 `TEXT[]`，
+不能与空字符串 COALESCE，已改 `array_to_string(COALESCE(..., ARRAY[]::TEXT[]), ', ')`
+并先行红测。

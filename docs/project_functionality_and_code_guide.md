@@ -18,8 +18,9 @@
 **小意**（意图顾问）负责多轮启发式咨询，把模糊想法聊成结构化目标；**小检**（岗位顾问）
 负责在 31,879 条岗位库里做混合检索与匹配；**小策**（策略顾问）负责简历修改建议、
 能力缺口与职业路径；**PM**（项目经理）在每个环节前后做质量把关，不合格就打回重做。
-最后交付：三层岗位推荐（现在就投 / 值得冲刺 / 跳板岗位），每条都附 JD 原文和简历
-原文的证据片段——系统的核心承诺是**不编造**：说你匹配，就指得出原文依据。
+最后交付：三层岗位推荐（现在就投 / 值得冲刺 / 跳板岗位），每条推荐都附 JD 原文
+证据片段，简历修改建议只能引用你的真实经历——系统的核心承诺是**不编造**：
+说你匹配，就指得出 JD 原文；给你改简历，只基于你写过的内容。
 
 ## 2. 一次完整的使用旅程（页面级）
 
@@ -33,15 +34,15 @@
    - 与小意多轮咨询：前几轮问必填槽位（目标、地点、签证），中段深挖偏好，
      信息够了 PM 提示可生成 **Match Brief 确认单**；继续聊会作废旧确认单（防过期确认）；
    - 点「确认无误，开始匹配」→ 后台跑完整管线，四角色在群里实时播报进度；
-   - 结果卡片：岗位分层、匹配解释、「查看证据」抽屉（JD 原文片段 + 简历原文片段）、
+   - 结果卡片：岗位分层、匹配解释、「查看证据」抽屉（JD 原文片段；抽屉留有简历证据槽位，当前主链按岗位填充的是 JD 证据）、
      反馈表单；演示语料岗位带「演示数据 · CN/UK」虚线徽章。
 4. **刷新恢复**：运行 id 写在 URL 里，中途刷新/换设备登录都能回到原进度。
 
 ## 3. 系统承诺（产品可信度的四根柱子）
 
 1. **硬条件不交给 AI**：签证、地点、岗位开放状态由 SQL WHERE 子句判定，模型无权放宽。
-2. **证据可追溯**：每条推荐的解释都锚定 JD 原文片段；每条简历建议只能引用真实经历
-   （evidence_spans 机制）；发布门检测到无证据推荐直接拦下。
+2. **证据可追溯**：每条岗位推荐锚定 JD 原文片段；每条简历建议受简历 evidence_spans
+   白名单约束、只能引用真实经历；发布门检测到无 JD 证据的推荐直接拦下。
 3. **过程受监督**：Supervisor 在规划与终核两个关口核查，允许一次有界的重检索/修复
    循环，全程留痕（supervisor_log），答辩可回放。
 4. **演示语料全程亮牌**：31,879 条岗位是真实 LinkedIn JD 经确定性变换的合成演示语料
@@ -80,34 +81,38 @@ loops 计数器 + stage_timing（存墙钟不存 perf_counter，跨进程续跑�
 |---|---|---|
 | Stage0 归一化 | `normalization/resume_intake.py` | PDF/DOCX/TXT 抽文本 → 切 evidence_spans（≤120 段）→ LLM 结构化（pydantic 白名单校验）→ 落库。这是"不编造"的地基 |
 | Stage1 意图 | `agents/intent_agent.py` | 咨询已完成时跳过（skip_agent=intent_consulted）；否则从 brief 目标文本抽取画像 |
-| Stage2 规划 | `agents/supervisor.py::plan_retrieval` | 构造 retrieval_plan（含 include_raptor / use_cross_encoder 等开关快照），写 planning 日志 |
+| Stage2 规划 | `graph/nodes.py::lock_brief` → `orchestrator.lock_approved_brief` | **确定性**锁定已批准的 Brief 并生成 retrieval_plan（含 use_cross_encoder 等开关快照）+ 审计日志——主链这里不再调 LLM；`supervisor.plan_retrieval` 属 legacy/直调路径 |
 | Stage3 检索匹配 | `agents/matching_agent.py` → `retrieval/` | 见 §6 |
-| Stage4 策略 | `agents/strategy_agent.py` | 简历修改计划 / 缺口 / 路径，每条建议过证据白名单（_filter_supported_items） |
+| Stage4 策略 | `agents/strategy_agent.py` | 简历修改计划（_filter_resume_revision_plan 证据白名单）/ 缺口与路径（_filter_supported_items） |
 | Stage5 终核 | `supervisor.py::final_verification` + `supervisor_harness.py` | 确定性核查（硬约束违例、证据缺失、demo 标记缺失即拦）+ 发布门；可触发一次 re-retrieval/repair |
 
 编排双轨：`agents/orchestrator.py` 是原生 harness（LangGraph 关闭时的回退与
 characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph 主轨——
-启动/续跑/幂等读一体，崩溃后从检查点续跑（tests/test_run_recovery 系列在真实 PG 验证）。
+启动/续跑/幂等读一体，崩溃后从检查点续跑（tests/test_langgraph_runner_recovery.py 在真实 PG 验证）。
 
 ## 6. 检索栈（app/retrieval）——本系统的技术心脏
 
 `hybrid_search.py::hybrid_search` 的完整流水：
 
-1. **硬过滤**（SQL）：`query_builder.py` 把 hard_constraints 翻译成 WHERE
-   （locations/role_clusters/visa/学历/年限/is_open），产出 allow_ids 白名单；
-2. **双路召回**（asyncio.gather 并行）：BM25（Postgres tsvector `ts_rank`）∥
+1. **硬过滤**（SQL）：`hybrid_search.py::_build_hard_filter_query` 把 hard_constraints
+   翻译成 WHERE（locations/role_clusters/visa/学历/年限/is_open），产出 allow_ids
+   白名单；`query_builder.py` 干的是另一件事——把简历画像拼成检索查询文本；
+2. **双路召回**（asyncio.gather 并行）：BM25（Postgres tsvector `ts_rank_cd`）∥
    dense（pgvector HNSW 余弦，Qwen embedding 1024 维）；开 RAPTOR 时第三路走
    摘要节点树（见下）；
-3. **RRF 融合**：`rrf.py`，倒数排名融合多路 chunk 命中，塌缩到 job 粒度；
+3. **RRF 融合**：每路先各自把 chunk 命中塌缩到 job 粒度（`_collapse_chunk_hits`），
+   再由 `rrf.py` 对 **job 级**排名列表做倒数排名融合；
 4. **bi-encoder 加权排序**（`_rerank_candidates`）：
-   `0.30×RRF + 0.10×BM25 + 0.60×max(dense, raptor) + 软偏好加分(≤0.28) + 字段加分(≤0.20)`；
+   `0.30×RRF + 0.10×BM25 + 0.60×max(dense, raptor) + 软偏好加分(≤0.20) + 字段加分(≤0.08)`；
 5. **cross-encoder 精排**（可选，默认关；`app/llm/reranker.py` + hybrid 集成）：
    DashScope `gte-rerank-v2` 把「查询+JD」拼一起打分（bi-encoder 是双塔各自编码，
    看不见词级交互；cross-encoder 能看出"要求 5 年 Java"≠"我有 5 年 Python"）。
    设计要点（经子 agent 与 Codex 四轮对抗评审双 APPROVE，docs/cross_encoder_plan.md）：
    - 只精排融合池前 N（默认 20）个候选，**applied_window 单调分数重映射**——
-     窗口内顺序完全由 cross 决定，但分数仍落在原区间内（与窗口外同尺度、全局单调，
-     双空间 β 混合语义不被破坏）；provider 全平分时保持基线惰性；平分场景靠新增
+     窗口内顺序完全由 cross 决定，但新分数仍均匀落在窗口原有分数区间内
+     （和窗口外的候选同一把尺子，整体从高到低不倒挂；后续第 6 步的双空间混合
+     拿到的仍是正常量纲的分数）；provider 打分全相同时不改变顺序与主分数、只记录 cross_score
+     （cross_rank 保持 None——没有区分信号就不动基线排序）；平分场景靠新增
      cross_rank 平局键；
    - **懒降级**：任何可降级失败（超时/5xx/预算不足/文档 SQL 异常）直接以关闭开关
      复跑同一检索路径——"降级 = 关闭路径"由构造保证，绝不让精排故障弄坏主线；
@@ -119,15 +124,19 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
      强相关岗被提前），关闭回归与基线一致。
 6. **双空间融合**（`dual_space_search.py`）：显式空间（JD 匹配）β 混合隐式空间
    （匿名案例库的相似简历成功轨迹），有案例证据时可调整排序并附 implicit 证据；
-7. **三分层**：matching_agent 按分数与缺口把 Top-K 标为 now_fit / stretch_fit /
-   bridge_role，并为 Top 岗位并行生成带证据的匹配解释（Semaphore 限流）。
+7. **三分层**：matching_agent 让 LLM 综合简历、候选证据与分数把 Top-K 分类为
+   now_fit / stretch_fit / bridge_role（非确定性公式；无效值回退 stretch_fit），
+   并为 Top 岗位并行生成带证据的匹配解释（Semaphore 限流）。
 
-**RAPTOR-lite**（`raptor.py`，674 行）：离线为每个岗位建"摘要节点"（标题+元数据+
+**RAPTOR-lite**（`raptor.py`）：离线为每个岗位建"摘要节点"（标题+元数据+
 关键职责的确定性压缩文本 + 向量），再按 role_cluster 建 7 个角色汇总节点；检索时
 先命中节点再展开到原文 chunk（propagate 时按层级衰减 0.65）。全量索引 31,886 节点。
 两个已修缺陷：全量重建做代际清理（旧语料节点不残留）；role 节点受 allow_ids
-交集约束（不绕硬过滤）。消融实测（15 查询 LLM 池化标注）：hybrid P@5 0.720 →
-+RAPTOR **0.853**，MRR 0.822 → **0.967**。
+交集约束（不绕硬过滤）。**口径注意**：标准产品主链的 plan 目前固定
+`include_raptor=False`（orchestrator.lock_approved_brief），RAPTOR 用于消融评估与
+直调检索；产品侧开启只是 plan 构造处的一行改动，是否默认开由消融数字与延迟预算定。消融实测（15 查询 LLM 池化标注，08-05 轮口径）：hybrid P@5 0.720 →
++RAPTOR **0.853**，MRR 0.822 → **0.967**。注意：§11 的 08-06 轮数字（+RAPTOR 0.800）
+口径不同（池更大、判定对更多），**两轮之间不可横向比较**，各自轮内的相对差才有意义。
 
 ## 7. 咨询引擎（agents/consult_engine.py）
 
@@ -135,7 +144,8 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
   签证布尔）→ deepen（偏好不足 2 项或未表态避雷时追问）→ explore（发散引导）。
   LLM 只提供话术，流程不交给它。
 - **完成度公式**：必填覆盖率×0.6 + min(软偏好数,4)/4×0.4；can_finalize=三槽全满。
-- **轮次有界**：软上限 8（可配）、硬上限 15；并发安全靠 expected_round CAS（409）。
+- **轮次有界**：软上限 8（可配）、硬上限 15；并发安全靠 expected_round CAS（409）——前端每次发言都带上"我以为现在是第 N 轮"，
+  对不上就拒绝，防止双开页面互相覆盖。
 - **真实 LLM 加固**（真机测试换来的三课）：①单复数键变体归一化（location:["上海"]
   不再炸整轮）；②role_clusters 锁定 11 词受控词表，词表外丢弃（防中文自由文本
   进 SQL 硬过滤清零结果）；③坏输出有界重试一次（CONSULT_LLM_ATTEMPTS=2），
@@ -159,7 +169,7 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
 ## 9. 数据与演示语料（scripts + migrations）
 
 - 迁移 0001–0007（读模型、运行生命周期、监控、RAPTOR 表、认证、演示语料列、
-  OTP 发送失败标志），全部幂等 + 带回滚脚本。
+  OTP 发送失败标志），全部幂等；0005–0007 附回滚脚本。
 - **W5 语料链**：`transform_jobs_cn_uk.py`（33,246 行源 → 31,879 接受，SHA-256 排序
   精确配额 CN 22,315/UK 9,564，公司/城市/签证确定性映射，薪资只存 source_metadata，
   两次运行字节一致）→ `import_cnuk_demo.py`（500 行窗口断点续跑、embedding 指纹
@@ -170,8 +180,9 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
 
 ## 10. 记忆与反馈（app/memory）
 
-- `private_memory.py`：用户简历画像私有记忆（咨询首轮可展示"上次确认过的画像"草稿，
-  需用户确认才生效）。
+- **产品画像记忆走 `user_profiles` 表**（`auth/routes.py` 的 load_profile/merge_profile）：
+  咨询首轮展示"上次确认过的画像"草稿、需用户确认才生效，finalize 后回写。
+  `private_memory.py` 是更早的 P1 私有简历记忆接口，目前无生产调用方（诚实标注）。
 - `feedback_loop.py`：投递反馈闭环——reaction 落库（幂等键）→ Supervisor 评估
   是否沉淀 → 去标识化后写匿名案例库（PII 检测拦截）；闭环失败记录错误可重试。
 - `case_base.py`：匿名案例的 embedding 检索（隐式空间数据源）。
@@ -184,9 +195,10 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
 - **演示语料口径**：`evaluate_demo_corpus.py`——同 15 查询在真实 31,879 库上
   TREC 池化 + DeepSeek 评审标注，Recall 为池内口径偏乐观、主要看通道相对差。
   指标实现在 `evaluation/metrics.py`（P/R/MRR/NDCG@K，宏平均）。
-  **四级消融阶梯**（2026-08-06，852 对判定）：BM25 池内 P@5 0.413 → dense 0.707 →
-  混合 0.720 → +RAPTOR 0.800 → +Cross 0.907 → **+两者 0.920（MRR 1.000，
-  15 查询首位全中）**——每级增强独立可归因，答辩最硬的一张表。
+  **2×2 因子消融**（2026-08-06，852 对判定；RAPTOR 与 Cross 是并列单因素 run，
+  非顺序叠加）：BM25 池内 P@5 0.413 / dense 0.707 / 混合 base 0.720 /
+  RAPTOR-only 0.800 / Cross-only 0.907 / **两者同开 0.920（MRR 1.000，15 查询
+  首位全中）**。注意 08-05 与 08-06 两轮池化口径不同，跨轮数字不可直接比较。
 
 ## 12. 前端（frontend/src）
 
@@ -194,7 +206,12 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
 - `v2/AppShell.tsx` 侧栏 + 付费墙弹窗 + 401 全局出口；
 - `v2/WorkbenchPage.tsx` 群聊工作台（上传/确认/咨询/确认单/播报/结果一条时间线；
   409 双义消歧、CAS 轮次、确认单作废、URL 携带 run id）；
+- `v2/ProfilePage.tsx` 账号信息 + 已确认画像记忆展示；
+- `api/client.ts` fetch 封装（credentials 携带 Cookie + 401 全局监听）、
+  `api/queries.ts` 全部 API 方法的类型化封装；
 - 复用件：EvidenceDrawer（证据抽屉）、ReactionForm（反馈）、评估/监控页（答辩模式）；
+- `app/router.tsx` 路由装配（/ 着陆、/app 壳、sessions/:sessionId 工作台、profile、
+  settings/*，未登录访问 /app 会被弹回登录页）；
 - `api/generated.ts` 由 OpenAPI 快照生成（不手改），`api:check` 门禁防漂移；
 - e2e（Playwright，mock 网络）：全流程之旅、未登录重定向、刷新恢复、付费墙、监控页。
 
@@ -212,17 +229,18 @@ characterization 基准），`graph/runner.py::run_graph_match` 是 LangGraph �
 |---|---|
 | 数据库 | DATABASE_URL、DB_POOL_MIN/MAX |
 | LLM | DEEPSEEK_API_KEY/BASE_URL/MODEL_FAST/PRO、LLM_MAX_CONCURRENCY |
-| Embedding | QWEN_API_KEY、QWEN_EMBED_MODEL、EMBED_DIM、EMBED_MAX_CONCURRENCY |
+| Embedding | QWEN_API_KEY、QWEN_EMBED_MODEL（**必须与语料指纹一致 = text-embedding-v4**；在线服务启动不做查询模型×语料指纹交叉校验，配错会静默劣化召回——导入流程有指纹校验会报错）、EMBED_DIM、EMBED_MAX_CONCURRENCY |
 | 精排 | RERANK_ENABLED(默认 false)/MODEL(gte-rerank-v2)/ENDPOINT(启用必填)/TOP_N(20)/TIMEOUT(5s)/MAX_CONCURRENCY(4)/DOC_MAX_CHARS(1500)/QUERY_MAX_CHARS(600) |
 | 认证 | APP_ENV、AUTH_ENFORCED、AUTH_SECRET_KEY、OTP_PEPPER、AUTH_COOKIE_INSECURE、EMAIL/SMS_OTP_PROVIDER、SMTP_* |
 | 产品 | SESSION_QUOTA_PER_USER、MAX_CONSULT_ROUNDS、DEMO_CORPUS_ENABLED |
+| 编排与双空间 | LANGGRAPH_ORCHESTRATOR_ENABLED（双轨切换）、DUAL_SPACE_ENABLED、IMPLICIT_MIN_CASES、IMPLICIT_MAX_WEIGHT、MONITORING_ENABLED、EVALUATION_CAPABILITY_ENABLED |
 | 有界循环 | MAX_CLARIFICATION/RERETRIEVAL/REPAIR_LOOPS（各默认 1） |
 
 ## 15. 运行手册
 
 ```
-.\start.ps1                     # 后端（-m app.serve，SelectorEventLoop）
-cd frontend ; npm run dev       # 前端（跨机器演示加 -- --host 并开 AUTH_COOKIE_INSECURE）
+.\start.ps1                     # 一键：环境校验 + 数据库迁移 + 后端 + 前端（都会启动，别再手动重复起前端）
+cd frontend ; npm run dev -- --host   # 仅跨机器演示单独起前端时用（配合 AUTH_COOKIE_INSECURE）
 .venv\Scripts\python -m pytest tests/ -q                  # 后端全量
 cd frontend ; npm run typecheck ; npm test ; npm run build ; npx playwright test
 $env:AUTH_ENFORCED="true" ; .venv\Scripts\python -u -m app.serve *> tmp\s.log   # 真机彩排前置

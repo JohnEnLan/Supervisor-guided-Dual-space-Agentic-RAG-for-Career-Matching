@@ -50,7 +50,10 @@ class Settings(BaseSettings):
     deepseek_model_pro: str = "deepseek-reasoner"
 
     qwen_api_key: str
-    qwen_embed_model: str = "text-embedding-v3"
+    # 必须与语料 embedding 指纹一致（W5 演示语料按 text-embedding-v4 构建）。
+    # 在线服务启动不做查询模型×语料指纹交叉校验，配错会静默劣化召回；
+    # 导入流程（import_cnuk_demo）有指纹强校验、配错会直接报错。
+    qwen_embed_model: str = "text-embedding-v4"
     embed_dim: int = 1024  # 必须与 schema.sql 里的 vector(N) 一致
 
     rerank_enabled: bool = False

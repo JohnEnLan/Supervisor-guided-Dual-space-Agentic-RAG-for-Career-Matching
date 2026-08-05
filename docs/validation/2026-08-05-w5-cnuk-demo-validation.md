@@ -47,3 +47,22 @@ After adding the shared enqueue/cutover advisory fence and per-job visibility sn
 ## Artifact location constraint
 
 The managed Codex sandbox denied writes to the requested external sibling directory. The real converted CSV and operational manifest therefore remain in the repository's already-untracked `outputs/w5/` directory for this run; neither is part of the git change set. The checked-in manifest above contains hashes/counts only, never source/JD contents or credentials.
+
+## Addendum (2026-08-05, post-acceptance): full import executed
+
+The "full import was not started" statement above described the state at task
+hand-off. The operator (Claude, supervising session) launched the full import
+the same day after acceptance:
+
+- Command: `scripts/import_cnuk_demo.py --input outputs/w5/cnuk_demo_v1.csv
+  --manifest outputs/w5/manifest.json --stage full`
+- Result: 31,879/31,879 jobs, 120,584/120,584 chunks, 64/64 windows
+  (58 new + 6 reused from preview), 1,929.579 s elapsed (32.2 min, within the
+  28–35 min budget). Final progress JSON preserved in `outputs/w5/full_import.log`
+  (untracked artifact directory).
+- Nine-point reconciliation, all exact: CN 22,315 / UK 9,564; 0 rows missing
+  demo_synthetic; 0 NULL vectors; 0 wrong-dimension vectors; visa true
+  CN 1,067 / UK 3,272; demo rows all closed pre-cutover; legacy open = 50.
+- Formal forward cutover executed the same day with the F2/F3-hardened script:
+  demo 31,879 open, legacy 0 open, 50-row visibility snapshot retained for
+  rollback.
