@@ -318,3 +318,45 @@ def test_me_profile_and_session_list_are_bound_to_current_user(monkeypatch) -> N
         "has_more": False,
     }
     assert oversized.status_code == 422
+
+
+def test_insecure_demo_cookie_switch_changes_name_and_secure_flag(monkeypatch):
+    # A.3：跨机器 http 演示时 __Host-（强制 Secure）在非 localhost 会被浏览器拒收
+    from fastapi.responses import Response
+
+    from app.api.auth import sessions as auth_sessions
+    from app.config import settings as runtime_settings
+
+    assert auth_sessions.session_cookie_name() == "__Host-app_session"
+    assert auth_sessions.session_cookie_secure() is True
+
+    monkeypatch.setattr(runtime_settings, "auth_cookie_insecure", True)
+    assert auth_sessions.session_cookie_name() == "app_session"
+    assert auth_sessions.session_cookie_secure() is False
+
+    response = Response()
+    auth_sessions.set_session_cookie(response, "token-value", ttl_days=1)
+    header = response.headers["set-cookie"]
+    assert header.startswith("app_session=")
+    assert "Secure" not in header
+    assert "HttpOnly" in header
+
+
+def test_production_refuses_insecure_cookie_switch():
+    from app.config import validate_runtime_security, Settings
+
+    runtime = Settings(
+        app_env="production",
+        auth_enforced=True,
+        auth_secret_key="a" * 32,
+        otp_pepper="b" * 32,
+        email_otp_provider="smtp",
+        sms_otp_provider="disabled",
+        smtp_host="smtp.example.com",
+        smtp_from_email="noreply@example.com",
+        auth_cookie_insecure=True,
+    )
+    import pytest as _pytest
+
+    with _pytest.raises(RuntimeError, match="AUTH_COOKIE_INSECURE"):
+        validate_runtime_security(runtime)

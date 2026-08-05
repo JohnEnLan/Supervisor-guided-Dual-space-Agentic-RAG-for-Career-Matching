@@ -36,8 +36,13 @@ class Settings(BaseSettings):
     smtp_start_tls: bool = True
     sms_otp_provider: Literal["console", "disabled"] = "console"
     auth_enforced: bool = False
+    # 跨机器 http 演示时置 true：改发无 __Host- 前缀、无 Secure 的会话 Cookie。
+    # 仅限 development/test；production 启动校验会拒绝。
+    auth_cookie_insecure: bool = False
     monitoring_admin_mode: bool = False
     demo_corpus_enabled: bool = False
+    # 每账号会话（对话）额度；超出返回 402 由前端弹付费墙
+    session_quota_per_user: int = Field(default=3, ge=1)
 
     deepseek_api_key: str
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -78,6 +83,11 @@ def validate_runtime_security(
         return
     if not runtime_settings.auth_enforced:
         raise RuntimeError("AUTH_ENFORCED must be true in production")
+    if runtime_settings.auth_cookie_insecure:
+        raise RuntimeError(
+            "AUTH_COOKIE_INSECURE is a demo-only switch and is forbidden "
+            "in production"
+        )
     if (
         len(runtime_settings.auth_secret_key.encode("utf-8")) < 32
         or runtime_settings.auth_secret_key.startswith("development-only-")

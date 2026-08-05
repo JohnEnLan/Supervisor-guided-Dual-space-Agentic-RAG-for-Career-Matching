@@ -302,6 +302,35 @@ test("unauthenticated /app visit returns to landing login", async ({ page }) => 
   await expect(page.getByRole("button", { name: "登录 / 注册" })).toBeVisible();
 });
 
+test("session quota exhaustion shows the paywall modal", async ({ page }) => {
+  const state: FlowState = {
+    loggedIn: true,
+    uploaded: false,
+    confirmed: false,
+    round: 0,
+    briefed: false,
+    executed: false,
+    reactions: 0,
+  };
+  await installV2Api(page, state);
+  await page.route("**/api/v1/sessions", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({
+          status: 402,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "session_quota_exceeded" }),
+        })
+      : route.fallback(),
+  );
+
+  await page.goto("/app");
+  await page.getByRole("button", { name: "新的咨询" }).click();
+  await expect(page.getByText("咨询额度已用完")).toBeVisible();
+  await expect(page.getByRole("button", { name: /升级额度/ })).toBeVisible();
+  await page.getByRole("button", { name: "稍后再说" }).click();
+  await expect(page.getByText("咨询额度已用完")).not.toBeVisible();
+});
+
 test("refresh mid-consultation restores transcript from GET consult", async ({ page }) => {
   const state: FlowState = {
     loggedIn: true,

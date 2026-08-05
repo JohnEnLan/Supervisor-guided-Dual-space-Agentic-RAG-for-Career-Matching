@@ -50,8 +50,10 @@ from app.agents.consult_engine import (
     run_consult_round,
 )
 from app.db.run_store import RunConflict, create_run, save_match_brief
+from app.config import settings
 from app.db.state_store import (
     confirm_resume,
+    count_owned_sessions,
     get_resume_metadata,
     load_state,
     mutate_state_atomically,
@@ -86,7 +88,12 @@ class _ConsultRoundConflict(ValueError):
     pass
 
 
-@router.post("/sessions", response_model=SessionResponse, status_code=201)
+@router.post(
+    "/sessions",
+    response_model=SessionResponse,
+    status_code=201,
+    responses={402: {"description": "session quota exhausted"}},
+)
 async def create_session(
     user: Annotated[
         AuthedUser | None,
@@ -94,6 +101,14 @@ async def create_session(
     ],
     request: SessionCreateRequest | None = None,
 ) -> SessionResponse:
+    # 每账号会话额度（默认 3）：超额返回 402，前端展示付费墙弹窗。
+    # 兼容模式的匿名会话不计额度（仅 development/test 存在）。
+    if user is not None:
+        owned = await count_owned_sessions(user.user_id)
+        if owned >= settings.session_quota_per_user:
+            raise HTTPException(
+                status_code=402, detail="session_quota_exceeded"
+            )
     session_id = str(uuid.uuid4())
     resolved_user_id = user.user_id if user is not None else session_id
     await save_state(

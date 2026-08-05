@@ -69,6 +69,21 @@ async def save_state(
             )
 
 
+async def count_owned_sessions(owner_user_id: str) -> int:
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        return int(
+            await connection.fetchval(
+                """
+                SELECT count(*)
+                FROM session_state
+                WHERE owner_user_id = $1::uuid
+                """,
+                owner_user_id,
+            )
+        )
+
+
 async def load_state(session_id: str) -> SharedState | None:
     pool = await get_pool()
     async with pool.acquire() as conn:

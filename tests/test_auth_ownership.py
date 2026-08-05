@@ -211,6 +211,11 @@ def test_authenticated_session_creation_uses_cookie_owner_and_rejects_legacy_fie
         saved.append((state, status, owner_user_id))
 
     monkeypatch.setattr(sessions, "save_state", save)
+
+    async def no_owned_sessions(owner_user_id: str) -> int:
+        return 0
+
+    monkeypatch.setattr(sessions, "count_owned_sessions", no_owned_sessions)
     app = FastAPI()
     app.include_router(router)
     user = _user("11111111-1111-1111-1111-111111111111")
@@ -252,3 +257,65 @@ def test_compatibility_session_creation_without_cookie_is_ownerless(
     assert accepted.status_code == 201
     assert saved[0][0].user_id == accepted.json()["session_id"]
     assert saved[0][1] is None
+
+
+def test_session_quota_returns_402_paywall_and_anonymous_is_exempt(
+    monkeypatch,
+) -> None:
+    # B.2 付费墙：每账号默认 3 个会话额度，超出 402；兼容模式匿名不计额度
+    from app.api.auth.deps import optional_current_user
+    from app.api.v1 import sessions
+    from app.api.v1.router import router
+
+    saved = []
+
+    async def save(state, *, status: str, owner_user_id: str | None = None):
+        saved.append(owner_user_id)
+
+    async def three_owned_sessions(owner_user_id: str) -> int:
+        return 3
+
+    monkeypatch.setattr(sessions, "save_state", save)
+    monkeypatch.setattr(sessions, "count_owned_sessions", three_owned_sessions)
+    app = FastAPI()
+    app.include_router(router)
+    user = _user("11111111-1111-1111-1111-111111111111")
+    app.dependency_overrides[optional_current_user] = lambda: user
+
+    with TestClient(app) as client:
+        blocked = client.post("/api/v1/sessions")
+
+    assert blocked.status_code == 402
+    assert blocked.json()["detail"] == "session_quota_exceeded"
+    assert saved == []
+
+    # 匿名（兼容模式）不查额度也不该被挡
+    app.dependency_overrides[optional_current_user] = lambda: None
+    with TestClient(app) as client:
+        anonymous = client.post("/api/v1/sessions")
+    assert anonymous.status_code == 201
+
+
+def test_session_quota_allows_creation_below_limit(monkeypatch) -> None:
+    from app.api.auth.deps import optional_current_user
+    from app.api.v1 import sessions
+    from app.api.v1.router import router
+
+    async def save(state, *, status: str, owner_user_id: str | None = None):
+        return None
+
+    async def two_owned_sessions(owner_user_id: str) -> int:
+        return 2
+
+    monkeypatch.setattr(sessions, "save_state", save)
+    monkeypatch.setattr(sessions, "count_owned_sessions", two_owned_sessions)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[optional_current_user] = lambda: _user(
+        "11111111-1111-1111-1111-111111111111"
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/sessions")
+
+    assert response.status_code == 201

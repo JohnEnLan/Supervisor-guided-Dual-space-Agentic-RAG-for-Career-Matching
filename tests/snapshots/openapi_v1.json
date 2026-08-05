@@ -2789,6 +2789,9 @@
             },
             "description": "Successful Response"
           },
+          "402": {
+            "description": "session quota exhausted"
+          },
           "422": {
             "content": {
               "application/json": {

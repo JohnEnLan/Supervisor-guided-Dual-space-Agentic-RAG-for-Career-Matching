@@ -25,6 +25,8 @@ ChatFunction = Callable[..., Awaitable[str]]
 MAX_USER_MESSAGE_CHARS = 2_000
 TRANSCRIPT_CONTEXT_ROUNDS = 4
 HARD_MAX_CONSULT_ROUNDS = 15
+# LLM 坏输出的有界重试次数（总尝试数，含首次）
+CONSULT_LLM_ATTEMPTS = 2
 
 CONSULT_PROMPT = """PHASE_C2_CONSULT_ADVISOR
 You are a warm, professional career consultant in a group chat. Current consultation phase: {phase} (template=structured slot questions; deepen=targeted follow-ups on given answers; explore=divergent career-development coaching). Ask exactly ONE heuristic question per turn, in Chinese, warm and concise (question max 80 Chinese characters). Never invent facts about the user. Extract profile updates ONLY from what the user actually said.
@@ -232,28 +234,44 @@ async def run_consult_round(
         remembered_profile=remembered_draft,
     )
     chat_function = chat or deepseek.chat
-    try:
-        raw = await chat_function(
-            format_consult_prompt(phase),
-            user_prompt,
-            json_mode=True,
-        )
-        parsed = _ConsultLLMResponse.model_validate(
-            deepseek.extract_json_response(raw)
-        )
-    except (json.JSONDecodeError, TypeError, ValidationError) as exc:
-        raise ConsultResponseError("invalid consultation response") from exc
-
-    if not showing_remembered_draft:
-        merged_career = career.model_copy(deep=True)
+    # 真实 LLM 偶发一次坏输出不该直接把 502 甩给用户：有界重试一次，
+    # 两次都不合法才报错（重试只覆盖 LLM 调用与解析，state 尚未被改动）。
+    parsed: _ConsultLLMResponse | None = None
+    merged_career: CareerState | None = None
+    last_error: Exception | None = None
+    for _attempt in range(CONSULT_LLM_ATTEMPTS):
+        try:
+            raw = await chat_function(
+                format_consult_prompt(phase),
+                user_prompt,
+                json_mode=True,
+            )
+            candidate = _ConsultLLMResponse.model_validate(
+                deepseek.extract_json_response(raw)
+            )
+        except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+            last_error = exc
+            continue
+        if showing_remembered_draft:
+            parsed = candidate
+            break
+        attempt_career = career.model_copy(deep=True)
         try:
             _merge_profile_updates(
-                merged_career,
-                updates=parsed.profile_updates.model_dump(),
+                attempt_career,
+                updates=candidate.profile_updates.model_dump(),
                 user_message=bounded_message,
             )
         except (TypeError, ValueError) as exc:
-            raise ConsultResponseError("invalid consultation response") from exc
+            last_error = exc
+            continue
+        parsed = candidate
+        merged_career = attempt_career
+        break
+    if parsed is None:
+        raise ConsultResponseError("invalid consultation response") from last_error
+
+    if merged_career is not None:
         for field_name in (
             "current_goal",
             "long_term_goal",

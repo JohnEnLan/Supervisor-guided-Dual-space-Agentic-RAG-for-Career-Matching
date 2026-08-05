@@ -22,6 +22,18 @@ except ModuleNotFoundError:  # pragma: no cover - dependency boundary
 
 
 SESSION_COOKIE = "__Host-app_session"
+# 答辩局域网演示专用：__Host- 前缀强制 Secure，浏览器只对 localhost 豁免；
+# 跨机器 http 访问时需 AUTH_COOKIE_INSECURE=true 切换到无前缀 Cookie。
+# production 环境由 validate_runtime_security 拒绝该开关。
+INSECURE_SESSION_COOKIE = "app_session"
+
+
+def session_cookie_name() -> str:
+    return INSECURE_SESSION_COOKIE if settings.auth_cookie_insecure else SESSION_COOKIE
+
+
+def session_cookie_secure() -> bool:
+    return not settings.auth_cookie_insecure
 JWT_ALGORITHM = "HS256"
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -120,11 +132,11 @@ def set_session_cookie(
 ) -> None:
     ttl = ttl_days if ttl_days is not None else settings.auth_session_ttl_days
     response.set_cookie(
-        key=SESSION_COOKIE,
+        key=session_cookie_name(),
         value=token,
         max_age=int(timedelta(days=ttl).total_seconds()),
         httponly=True,
-        secure=True,
+        secure=session_cookie_secure(),
         samesite="lax",
         path="/",
     )
@@ -132,9 +144,9 @@ def set_session_cookie(
 
 def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(
-        key=SESSION_COOKIE,
+        key=session_cookie_name(),
         path="/",
-        secure=True,
+        secure=session_cookie_secure(),
         httponly=True,
         samesite="lax",
     )

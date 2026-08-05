@@ -6,16 +6,16 @@ from fastapi import Depends, HTTPException, Request
 
 from app.api.auth.sessions import (
     AuthedUser,
-    SESSION_COOKIE,
     decode_session_token,
     load_user,
+    session_cookie_name,
 )
 from app.config import settings
 from app.db.pool import get_pool
 
 
 async def optional_current_user(request: Request) -> AuthedUser | None:
-    token = request.cookies.get(SESSION_COOKIE)
+    token = request.cookies.get(session_cookie_name())
     if token is None:
         if settings.auth_enforced:
             raise HTTPException(status_code=401, detail="authentication required")

@@ -532,3 +532,60 @@ def test_role_cluster_values_outside_vocabulary_are_dropped() -> None:
     assert _validated_consult_soft_preferences(
         {"preferred_role_clusters": ["平台工程", "finance"]}
     ) == {"preferred_role_clusters": ["finance"]}
+
+
+@pytest.mark.asyncio
+async def test_consult_retries_one_bad_llm_output_then_succeeds() -> None:
+    # B.1：一次坏输出不再直接 502，有界重试一次
+    from app.agents.consult_engine import run_consult_round
+
+    calls = []
+
+    async def flaky_chat(_system: str, _user: str, **_kwargs) -> str:
+        calls.append(1)
+        if len(calls) == 1:
+            return "这不是 JSON"
+        return json.dumps(
+            {
+                "assistant_reply": "明白了。",
+                "next_question": "你更看重什么？",
+                "profile_updates": {"current_goal": ["后端工程师"]},
+                "phase_suggestion": "template",
+            },
+            ensure_ascii=False,
+        )
+
+    state = SharedState(session_id="session-1", user_id="user-1")
+    turn = await run_consult_round(
+        state, mode="targeted", message="我想做后端", chat=flaky_chat
+    )
+
+    assert len(calls) == 2
+    assert turn.round == 1
+    assert state.career_state.current_goal == ["后端工程师"]
+
+
+@pytest.mark.asyncio
+async def test_consult_gives_up_after_bounded_attempts() -> None:
+    from app.agents.consult_engine import (
+        CONSULT_LLM_ATTEMPTS,
+        ConsultResponseError,
+        run_consult_round,
+    )
+
+    calls = []
+
+    async def broken_chat(_system: str, _user: str, **_kwargs) -> str:
+        calls.append(1)
+        return "永远不是 JSON"
+
+    state = SharedState(session_id="session-1", user_id="user-1")
+    with pytest.raises(ConsultResponseError):
+        await run_consult_round(
+            state, mode="targeted", message="我想做后端", chat=broken_chat
+        )
+
+    assert len(calls) == CONSULT_LLM_ATTEMPTS
+    # 失败的轮次不留任何 state 痕迹
+    assert state.career_state.consult_rounds_used == 0
+    assert state.career_state.consult_transcript == []

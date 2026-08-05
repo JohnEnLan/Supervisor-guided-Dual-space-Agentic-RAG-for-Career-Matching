@@ -1698,6 +1698,13 @@ export interface operations {
                     "application/json": components["schemas"]["SessionResponse"];
                 };
             };
+            /** @description session quota exhausted */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
