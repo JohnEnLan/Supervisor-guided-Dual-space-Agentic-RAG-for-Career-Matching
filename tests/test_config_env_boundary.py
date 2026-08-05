@@ -104,23 +104,70 @@ def test_w3_auth_defaults_are_compatibility_safe_and_documented() -> None:
         assert f"{name}=" in example
 
 
-def test_production_refuses_compatibility_or_console_otp() -> None:
+def _secure_production_settings(**overrides) -> Settings:
+    values = {
+        "app_env": "production",
+        "auth_enforced": True,
+        "auth_secret_key": "a" * 32,
+        "otp_pepper": "b" * 32,
+        "email_otp_provider": "smtp",
+        "sms_otp_provider": "disabled",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def test_production_refuses_compatibility_mode() -> None:
     from app.config import validate_runtime_security
 
     compatibility = Settings(app_env="production", auth_enforced=False)
     with pytest.raises(RuntimeError, match="AUTH_ENFORCED"):
         validate_runtime_security(compatibility)
 
-    console = Settings(
-        app_env="production",
-        auth_enforced=True,
-        auth_secret_key="a" * 32,
-        otp_pepper="b" * 32,
-        email_otp_provider="smtp",
-        sms_otp_provider="console",
-    )
+
+def test_production_accepts_smtp_with_sms_disabled() -> None:
+    from app.config import validate_runtime_security
+
+    validate_runtime_security(_secure_production_settings())
+
+
+@pytest.mark.parametrize(
+    "providers",
+    [
+        {"email_otp_provider": "console", "sms_otp_provider": "disabled"},
+        {"email_otp_provider": "smtp", "sms_otp_provider": "console"},
+    ],
+)
+def test_production_refuses_console_for_any_enabled_channel(providers) -> None:
+    from app.config import validate_runtime_security
+
+    console = _secure_production_settings(**providers)
     with pytest.raises(RuntimeError, match="console"):
         validate_runtime_security(console)
+
+
+def test_production_refuses_both_otp_channels_disabled() -> None:
+    from app.config import validate_runtime_security
+
+    runtime = _secure_production_settings(
+        email_otp_provider="disabled",
+        sms_otp_provider="disabled",
+    )
+    with pytest.raises(RuntimeError, match="at least one OTP"):
+        validate_runtime_security(runtime)
+
+
+def test_non_production_otp_provider_behavior_is_unchanged() -> None:
+    from app.config import validate_runtime_security
+
+    validate_runtime_security(Settings(app_env="development"))
+    validate_runtime_security(
+        Settings(
+            app_env="test",
+            email_otp_provider="disabled",
+            sms_otp_provider="disabled",
+        )
+    )
 
 
 def test_production_rejects_documented_development_secrets() -> None:
@@ -139,16 +186,7 @@ def test_production_rejects_documented_development_secrets() -> None:
 def test_production_requires_explicit_demo_switch_for_active_demo_rows() -> None:
     from app.config import validate_runtime_security
 
-    secure = Settings(
-        app_env="production",
-        auth_enforced=True,
-        auth_secret_key="a" * 32,
-        otp_pepper="b" * 32,
-        email_otp_provider="smtp",
-        sms_otp_provider="console",
-    )
-    # Isolate this gate from the existing console-provider production gate.
-    object.__setattr__(secure, "sms_otp_provider", "provider_for_test")
+    secure = _secure_production_settings()
 
     with pytest.raises(RuntimeError, match="DEMO_CORPUS_ENABLED"):
         validate_runtime_security(secure, active_demo_corpus=True)

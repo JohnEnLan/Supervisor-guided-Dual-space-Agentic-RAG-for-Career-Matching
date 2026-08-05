@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -70,6 +71,35 @@ def test_otp_request_returns_same_202_for_sent_and_rate_limited(
     assert sent.status_code == rate_limited.status_code == 202
     assert sent.json() == rate_limited.json() == {"status": "otp_accepted"}
     assert delivered == [("email", "person@example.com", "123456")]
+
+
+def test_otp_request_rejects_a_disabled_channel_before_creating_challenge(
+    monkeypatch,
+) -> None:
+    from app.api.auth import routes
+
+    async def forbidden_issue(**_kwargs):
+        raise AssertionError("disabled channel must not create an OTP challenge")
+
+    monkeypatch.setattr(
+        routes,
+        "settings",
+        SimpleNamespace(
+            email_otp_provider="disabled",
+            sms_otp_provider="console",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(routes, "issue_otp", forbidden_issue)
+
+    with TestClient(_app(), raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/v1/auth/otp/request",
+            json={"channel": "email", "target": "anyone@example.com"},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "otp_channel_disabled"}
 
 
 def test_otp_verify_logs_in_and_sets_host_cookie(monkeypatch) -> None:
@@ -155,8 +185,20 @@ def test_otp_delivery_failure_response_and_logs_do_not_expose_target_or_code(
     async def failed_delivery(**_kwargs):
         raise RuntimeError("private@example.com could not receive 987654")
 
+    invalidated: list[int] = []
+
+    async def invalidate(challenge_id: int):
+        invalidated.append(challenge_id)
+        return True
+
     monkeypatch.setattr(routes, "issue_otp", issued)
     monkeypatch.setattr(routes, "send_otp", failed_delivery)
+    monkeypatch.setattr(
+        routes,
+        "invalidate_otp_challenge",
+        invalidate,
+        raising=False,
+    )
     with TestClient(_app()) as client:
         response = client.post(
             "/api/v1/auth/otp/request",
@@ -164,6 +206,7 @@ def test_otp_delivery_failure_response_and_logs_do_not_expose_target_or_code(
         )
 
     assert response.status_code == 202
+    assert invalidated == [1]
     assert "private@example.com" not in caplog.text
     assert "987654" not in caplog.text
 

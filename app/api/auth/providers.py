@@ -7,6 +7,22 @@ from typing import Any
 from app.config import settings
 
 
+class OtpChannelDisabled(RuntimeError):
+    pass
+
+
+def otp_provider_for(*, channel: str, runtime_settings: Any = settings) -> str:
+    if channel == "email":
+        provider = runtime_settings.email_otp_provider
+    elif channel == "phone":
+        provider = runtime_settings.sms_otp_provider
+    else:
+        raise ValueError("unsupported OTP channel")
+    if provider == "disabled":
+        raise OtpChannelDisabled("OTP channel is disabled")
+    return str(provider)
+
+
 async def send_otp(
     *,
     channel: str,
@@ -14,8 +30,11 @@ async def send_otp(
     code: str,
     runtime_settings: Any = settings,
 ) -> None:
+    provider = otp_provider_for(
+        channel=channel,
+        runtime_settings=runtime_settings,
+    )
     if channel == "email":
-        provider = runtime_settings.email_otp_provider
         if provider == "smtp":
             await _send_email_smtp(
                 target=target,
@@ -26,11 +45,8 @@ async def send_otp(
         if provider != "console":
             raise RuntimeError("unsupported email OTP provider")
     elif channel == "phone":
-        provider = runtime_settings.sms_otp_provider
         if provider != "console":
             raise RuntimeError("unsupported SMS OTP provider")
-    else:
-        raise ValueError("unsupported OTP channel")
 
     if runtime_settings.app_env == "production":
         raise RuntimeError("console OTP providers are forbidden in production")

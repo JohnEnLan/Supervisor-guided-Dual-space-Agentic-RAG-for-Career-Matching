@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from app.db.corpus_lock import CORPUS_CUTOVER_LOCK_KEY
 from app.db.pool import get_pool
 from app.domain.match_brief import MatchBrief, compute_plan_hash
 from app.domain.run import (
@@ -161,26 +162,31 @@ async def queue_run(
 ) -> MatchRun:
     pool = await get_pool()
     async with pool.acquire() as connection:
-        row = await connection.fetchrow(
-            """
-            UPDATE match_runs
-            SET status = 'queued', stage = NULL, updated_at = now()
-            WHERE run_id = $1
-              AND status = 'plan_ready'
-              AND plan_version = $2
-              AND plan_hash = $3
-              AND COALESCE((approved_plan->>'needs_clarification')::boolean, false) = false
-              AND jsonb_array_length(COALESCE(approved_plan->'conflicts', '[]'::jsonb)) = 0
-            RETURNING run_id, session_id, confirmed_resume_version,
-                      status, stage, plan_version, plan_hash,
-                      approved_plan, result_snapshot, warning_codes, error_code,
-                      execution_durability, created_at, updated_at,
-                      started_at, finished_at
-            """,
-            run_id,
-            plan_version,
-            plan_hash,
-        )
+        async with connection.transaction():
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock_shared($1)",
+                CORPUS_CUTOVER_LOCK_KEY,
+            )
+            row = await connection.fetchrow(
+                """
+                UPDATE match_runs
+                SET status = 'queued', stage = NULL, updated_at = now()
+                WHERE run_id = $1
+                  AND status = 'plan_ready'
+                  AND plan_version = $2
+                  AND plan_hash = $3
+                  AND COALESCE((approved_plan->>'needs_clarification')::boolean, false) = false
+                  AND jsonb_array_length(COALESCE(approved_plan->'conflicts', '[]'::jsonb)) = 0
+                RETURNING run_id, session_id, confirmed_resume_version,
+                          status, stage, plan_version, plan_hash,
+                          approved_plan, result_snapshot, warning_codes, error_code,
+                          execution_durability, created_at, updated_at,
+                          started_at, finished_at
+                """,
+                run_id,
+                plan_version,
+                plan_hash,
+            )
     if row is None:
         raise RunConflict(
             "run must be plan_ready with a matching, executable plan"

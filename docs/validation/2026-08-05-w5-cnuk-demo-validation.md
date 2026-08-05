@@ -40,6 +40,10 @@ At preview throughput, the chunk-scaled estimate for 120,584 chunks is about 1,6
 
 With zero queued/running runs, a single transaction flipped the 3,000-row preview forward and then executed the rollback direction. Post-transaction state was verified as restored: 50 legacy rows open, 0 demo rows open, 3,000 demo rows closed.
 
+### Adversarial-review lossless rollback replay
+
+After adding the shared enqueue/cutover advisory fence and per-job visibility snapshot, the forward and rollback directions were replayed against PostgreSQL 17.10 using an isolated schema and unique source tags `fixrev_019fcdeb_legacy` / `fixrev_019fcdeb_demo`. The self-created legacy fixture contained one initially open row and one initially closed row; the demo fixture contained one closed job and one chunk. Forward cutover preserved both legacy values in `corpus_cutover_snapshot`, closed both legacy rows, and opened only the demo row. A separately committed rollback restored the open legacy row to open, the closed legacy row to closed, closed the demo row, and cleared the snapshot table. Runtime was 0.058 seconds, active runs were zero, and the isolated rehearsal schema was removed after verification. No global `jobs` count or W5 import-progress state was used.
+
 ## Artifact location constraint
 
 The managed Codex sandbox denied writes to the requested external sibling directory. The real converted CSV and operational manifest therefore remain in the repository's already-untracked `outputs/w5/` directory for this run; neither is part of the git change set. The checked-in manifest above contains hashes/counts only, never source/JD contents or credentials.

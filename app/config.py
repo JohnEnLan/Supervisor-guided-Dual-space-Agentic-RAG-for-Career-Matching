@@ -27,14 +27,14 @@ class Settings(BaseSettings):
     auth_secret_key: str = "development-only-auth-secret-key-change-me"
     otp_pepper: str = "development-only-otp-pepper-change-me"
     auth_session_ttl_days: int = Field(default=7, ge=1, le=30)
-    email_otp_provider: Literal["console", "smtp"] = "console"
+    email_otp_provider: Literal["console", "smtp", "disabled"] = "console"
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_from_email: str | None = None
     smtp_start_tls: bool = True
-    sms_otp_provider: Literal["console"] = "console"
+    sms_otp_provider: Literal["console", "disabled"] = "console"
     auth_enforced: bool = False
     monitoring_admin_mode: bool = False
     demo_corpus_enabled: bool = False
@@ -88,10 +88,13 @@ def validate_runtime_security(
         or runtime_settings.otp_pepper.startswith("development-only-")
     ):
         raise RuntimeError("OTP_PEPPER must be at least 32 bytes")
-    if "console" in {
+    otp_providers = {
         runtime_settings.email_otp_provider,
         runtime_settings.sms_otp_provider,
-    }:
+    }
+    if otp_providers == {"disabled"}:
+        raise RuntimeError("at least one OTP provider must be enabled")
+    if "console" in otp_providers:
         raise RuntimeError("console OTP providers are forbidden in production")
     if (
         runtime_settings.monitoring_enabled

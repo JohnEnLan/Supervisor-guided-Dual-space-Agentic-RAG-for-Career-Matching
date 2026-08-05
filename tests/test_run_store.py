@@ -49,11 +49,31 @@ class Pool:
         return Acquire(self.connection)
 
 
+class Transaction:
+    def __init__(self, connection) -> None:
+        self.connection = connection
+
+    async def __aenter__(self):
+        self.connection.calls.append(("BEGIN", ()))
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        self.connection.calls.append(("END", ()))
+        return False
+
+
 class Connection:
     def __init__(self, *, fetchrow_results=None, fetch_results=None) -> None:
         self.fetchrow_results = list(fetchrow_results or [])
         self.fetch_results = list(fetch_results or [])
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def transaction(self) -> Transaction:
+        return Transaction(self)
+
+    async def execute(self, sql: str, *args: object):
+        self.calls.append((sql, args))
+        return "SELECT 1"
 
     async def fetchrow(self, sql: str, *args: object):
         self.calls.append((sql, args))
@@ -231,10 +251,44 @@ async def test_save_match_brief_and_queue_use_cas(monkeypatch) -> None:
 
     assert saved.status is RunStatus.PLAN_READY
     assert queued.status is RunStatus.QUEUED
-    queue_sql, queue_args = connection.calls[1]
+    queue_sql, queue_args = next(
+        (sql, args)
+        for sql, args in connection.calls
+        if "SET status = 'queued'" in sql
+    )
     assert "status = 'plan_ready'" in queue_sql
     assert brief.plan_version in queue_args
     assert brief.plan_hash in queue_args
+
+
+@pytest.mark.asyncio
+async def test_queue_run_takes_shared_corpus_lock_before_queued_update(
+    monkeypatch,
+) -> None:
+    from app.db import run_store
+
+    connection = Connection(
+        fetchrow_results=[_run_row(status="queued", stage=None)]
+    )
+
+    async def fake_get_pool():
+        return Pool(connection)
+
+    monkeypatch.setattr(run_store, "get_pool", fake_get_pool)
+
+    await run_store.queue_run(
+        run_id="run-1",
+        plan_version=1,
+        plan_hash="a" * 64,
+    )
+
+    assert connection.calls[0] == ("BEGIN", ())
+    lock_sql, lock_args = connection.calls[1]
+    assert "pg_advisory_xact_lock_shared($1)" in lock_sql
+    assert lock_args == (4_851_018_008_693_645_601,)
+    queued_sql, _queued_args = connection.calls[2]
+    assert "SET status = 'queued'" in queued_sql
+    assert connection.calls[3] == ("END", ())
 
 
 @pytest.mark.asyncio

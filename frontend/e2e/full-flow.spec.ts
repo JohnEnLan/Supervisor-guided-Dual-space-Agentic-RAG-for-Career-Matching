@@ -255,9 +255,19 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await input.press("Enter");
   await expect(page.getByText("明白了（第 2 轮）。")).toBeVisible();
 
+  const confirmBriefButton = page.getByRole("button", { name: "确认无误，开始匹配" });
   await page.getByRole("button", { name: "生成确认单" }).click();
-  await expect(page.getByText("Match Brief 确认单")).toBeVisible();
-  await page.getByRole("button", { name: "确认无误，开始匹配" }).click();
+  await expect(confirmBriefButton).toBeVisible();
+
+  // 生成确认单后继续咨询：旧确认单必须作废，防止确认到过期画像
+  await input.fill("补充：我也接受苏州的机会");
+  await input.press("Enter");
+  await expect(page.getByText("明白了（第 3 轮）。")).toBeVisible();
+  await expect(confirmBriefButton).not.toBeVisible();
+  await page.getByRole("button", { name: "生成确认单" }).click();
+  await expect(confirmBriefButton).toBeVisible();
+
+  await confirmBriefButton.click();
 
   await expect(page.getByText("结果已通过发布核查。")).toBeVisible();
   await expect(page.getByText("Backend Engineer")).toBeVisible();

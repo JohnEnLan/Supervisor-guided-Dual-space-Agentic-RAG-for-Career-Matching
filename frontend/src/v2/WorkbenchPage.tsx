@@ -273,6 +273,8 @@ export function WorkbenchPage() {
       }),
     onSuccess: () => {
       setMessage("");
+      // 继续咨询会改画像：作废已生成的旧确认单，防止确认到过期内容
+      setBriefDraft(null);
       void queryClient.invalidateQueries({ queryKey: ["consult", sessionId] });
     },
   });

@@ -330,6 +330,23 @@ def _deleted_count(command_tag: str) -> int:
     return int(str(command_tag).rsplit(" ", 1)[-1])
 
 
+async def invalidate_otp_challenge(
+    challenge_id: int,
+    *,
+    pool: Any | None = None,
+) -> bool:
+    database_pool = pool or await get_pool()
+    async with database_pool.acquire() as connection:
+        result = await connection.execute(
+            """
+            DELETE FROM otp_challenges
+            WHERE id = $1
+            """,
+            challenge_id,
+        )
+    return _deleted_count(result) == 1
+
+
 async def cleanup_expired_otp_data(*, pool: Any | None = None) -> dict[str, int]:
     database_pool = pool or await get_pool()
     async with database_pool.acquire() as connection:

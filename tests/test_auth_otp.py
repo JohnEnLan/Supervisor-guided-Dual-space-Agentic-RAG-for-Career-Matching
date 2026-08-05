@@ -58,6 +58,12 @@ class _OtpConnection:
         if "pg_advisory_xact_lock" in sql:
             self.locks.append((int(args[0]), int(args[1])))
             return "SELECT 1"
+        if "DELETE FROM otp_challenges" in sql and "WHERE id = $1" in sql:
+            before = len(self.challenges)
+            self.challenges = [
+                item for item in self.challenges if item["id"] != int(args[0])
+            ]
+            return f"DELETE {before - len(self.challenges)}"
         if "DELETE FROM otp_challenges" in sql:
             self.challenges = [
                 item
@@ -400,6 +406,53 @@ async def test_consumed_newest_challenge_never_reactivates_older_code() -> None:
             pepper="pepper",
         )
     assert connection.challenges[0]["consumed_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_failed_delivery_challenge_removal_keeps_prior_code_verifiable() -> None:
+    from app.api.auth import otp
+
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    connection = _OtpConnection(now=now)
+    for challenge_id, code, created_at in (
+        (1, "111111", now - timedelta(minutes=1)),
+        (2, "222222", now),
+    ):
+        connection.challenges.append(
+            {
+                "id": challenge_id,
+                "channel": "email",
+                "normalized_target": "person@example.com",
+                "purpose": "login",
+                "code_hash": otp.hash_otp_code(
+                    channel="email",
+                    normalized_target="person@example.com",
+                    purpose="login",
+                    code=code,
+                    pepper="pepper",
+                ),
+                "attempts": 0,
+                "expires_at": now + timedelta(minutes=5),
+                "consumed_at": None,
+                "created_at": created_at,
+            }
+        )
+
+    removed = await otp.invalidate_otp_challenge(
+        2,
+        pool=_Pool(connection),
+    )
+
+    assert removed is True
+    assert [item["id"] for item in connection.challenges] == [1]
+    assert await otp.verify_otp(
+        channel="email",
+        target="person@example.com",
+        code="111111",
+        pool=_Pool(connection),
+        now=now,
+        pepper="pepper",
+    ) == "person@example.com"
 
 
 @pytest.mark.asyncio

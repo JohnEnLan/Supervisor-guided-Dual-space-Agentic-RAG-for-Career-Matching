@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.db.corpus_lock import CORPUS_CUTOVER_LOCK_KEY
 from app.db.pool import close_pool, get_pool
 from scripts.import_cnuk_demo import (
     FingerprintMismatch,
@@ -28,6 +29,18 @@ class CutoverBlocked(RuntimeError):
     pass
 
 
+async def _ensure_snapshot_table(connection) -> None:
+    await connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS corpus_cutover_snapshot (
+            job_id TEXT PRIMARY KEY,
+            was_open BOOLEAN NOT NULL,
+            cutover_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+
+
 async def _validate_offline_state(
     connection,
     *,
@@ -36,7 +49,8 @@ async def _validate_offline_state(
     expected_chunks: int,
 ) -> None:
     await connection.execute(
-        "SELECT pg_advisory_xact_lock(hashtext('cnuk_demo_cutover_v1'))"
+        "SELECT pg_advisory_xact_lock($1)",
+        CORPUS_CUTOVER_LOCK_KEY,
     )
     active_runs = int(
         await connection.fetchval(
@@ -81,7 +95,26 @@ async def _flip(
     source_tag: str,
     old_source_tags: tuple[str, ...],
 ) -> None:
+    await _ensure_snapshot_table(connection)
     if direction == "forward":
+        snapshot_rows = int(
+            await connection.fetchval(
+                "SELECT count(*) FROM corpus_cutover_snapshot"
+            )
+        )
+        if snapshot_rows:
+            raise CutoverBlocked(
+                "cutover snapshot is not empty; rollback before cutting over"
+            )
+        await connection.execute(
+            """
+            INSERT INTO corpus_cutover_snapshot (job_id, was_open)
+            SELECT job_id, is_open
+            FROM jobs
+            WHERE source_tag IS NULL OR source_tag = ANY($1::text[])
+            """,
+            list(old_source_tags),
+        )
         await connection.execute(
             """
             UPDATE jobs
@@ -96,18 +129,35 @@ async def _flip(
         )
         expected_open = True
     else:
+        snapshot_rows = int(
+            await connection.fetchval(
+                "SELECT count(*) FROM corpus_cutover_snapshot"
+            )
+        )
+        if not snapshot_rows:
+            raise CutoverBlocked("cutover snapshot is empty; cannot rollback")
+        await connection.execute(
+            """
+            UPDATE jobs AS target
+            SET is_open = snapshot.was_open
+            FROM corpus_cutover_snapshot AS snapshot
+            WHERE target.job_id = snapshot.job_id
+            """
+        )
         await connection.execute(
             "UPDATE jobs SET is_open = FALSE WHERE source_tag = $1",
             source_tag,
         )
-        await connection.execute(
+        restoration_matches = await connection.fetchval(
             """
-            UPDATE jobs
-            SET is_open = TRUE
-            WHERE source_tag IS NULL OR source_tag = ANY($1::text[])
-            """,
-            list(old_source_tags),
+            SELECT bool_and(target.is_open = snapshot.was_open)
+            FROM corpus_cutover_snapshot AS snapshot
+            JOIN jobs AS target ON target.job_id = snapshot.job_id
+            """
         )
+        if restoration_matches is not True:
+            raise CutoverBlocked("legacy visibility restoration verification failed")
+        await connection.execute("DELETE FROM corpus_cutover_snapshot")
         expected_open = False
     state_matches = await connection.fetchval(
         """

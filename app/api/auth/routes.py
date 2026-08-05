@@ -12,10 +12,15 @@ from app.api.auth.otp import (
     OtpExpired,
     OtpInvalid,
     OtpRateLimited,
+    invalidate_otp_challenge,
     issue_otp,
     verify_otp,
 )
-from app.api.auth.providers import send_otp
+from app.api.auth.providers import (
+    OtpChannelDisabled,
+    otp_provider_for,
+    send_otp,
+)
 from app.api.auth.sessions import (
     AuthedUser,
     clear_session_cookie,
@@ -33,6 +38,7 @@ from app.api.v1.schemas import (
     ProfilePatchRequest,
     ProfileResponse,
 )
+from app.config import settings
 from app.db.pool import get_pool
 
 
@@ -71,6 +77,13 @@ async def request_otp(
     http_request: Request,
 ) -> OtpRequestAccepted:
     try:
+        otp_provider_for(channel=payload.channel, runtime_settings=settings)
+    except OtpChannelDisabled:
+        raise HTTPException(
+            status_code=409,
+            detail="otp_channel_disabled",
+        ) from None
+    try:
         issued = await issue_otp(
             channel=payload.channel,
             target=payload.target,
@@ -88,6 +101,13 @@ async def request_otp(
             code=issued.code,
         )
     except Exception:
+        try:
+            await invalidate_otp_challenge(issued.challenge_id)
+        except Exception:
+            logger.error(
+                "otp_challenge_invalidation_failed channel=%s",
+                payload.channel,
+            )
         logger.warning(
             "otp_delivery_failed channel=%s",
             payload.channel,
