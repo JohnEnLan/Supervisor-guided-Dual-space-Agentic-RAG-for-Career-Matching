@@ -23,6 +23,7 @@ from docx.text.paragraph import Paragraph
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
+from app.config import settings
 from app.db.pool import close_pool
 from app.db.state_store import save_state
 from app.llm.deepseek import chat, extract_json_response
@@ -81,6 +82,7 @@ Return this JSON shape:
     {
       "issue": string,
       "severity": "low" | "medium" | "high",
+      "field_path": string (the closest path such as "experience[0]"),
       "evidence_span_ids": [string]
     }
   ],
@@ -115,6 +117,10 @@ class LLMResumePayload(BaseModel):
     skills: list[dict[str, Any] | str] = Field(default_factory=list)
     resume_quality_issues: list[dict[str, Any] | str] = Field(default_factory=list)
     normalized_base_resume: str = ""
+
+
+_QUALITY_SEVERITIES = frozenset({"low", "medium", "high"})
+_MIN_CLARIFICATION_DESCRIPTION_CHARS = 12
 
 
 def _compact_text(text: str) -> str:
@@ -270,6 +276,144 @@ def _normalize_quality_issues(values: list[dict[str, Any] | str]) -> list[str]:
         if text:
             issues.append(text)
     return issues
+
+
+def build_clarification_targets(
+    *,
+    quality_issues: list[dict[str, Any]],
+    experience: list[dict[str, Any]],
+    projects: list[dict[str, Any]],
+    max_targets: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Normalize quality signals and choose deterministic Feature-A targets."""
+    normalized_issues = [
+        _normalize_quality_issue(value, index=index)
+        for index, value in enumerate(quality_issues)
+        if isinstance(value, dict)
+    ]
+    candidates: list[dict[str, Any]] = []
+
+    for issue in sorted(
+        normalized_issues,
+        key=lambda item: 0 if item["severity"] == "high" else 1,
+    ):
+        if issue["severity"] not in {"high", "medium"}:
+            continue
+        candidates.append(_clarification_target_from_issue(issue))
+
+    for index, item in enumerate(experience):
+        if not isinstance(item, dict):
+            continue
+        missing_fields = [
+            label
+            for field_name, label in (
+                ("responsibilities", "职责"),
+                ("achievements", "成果"),
+            )
+            if _description_is_too_short(item.get(field_name))
+        ]
+        if missing_fields:
+            field_path = f"experience[{index}]"
+            candidates.append(
+                _new_clarification_target(
+                    field_path=field_path,
+                    severity="medium",
+                    issue=f"该段经历缺少充分的{'/'.join(missing_fields)}描述",
+                    evidence_span_ids=item.get("evidence_span_ids"),
+                )
+            )
+
+    for index, item in enumerate(projects):
+        if not isinstance(item, dict):
+            continue
+        linked_skills = _clean_string_list(
+            [
+                *(
+                    item.get("technologies")
+                    if isinstance(item.get("technologies"), list)
+                    else []
+                ),
+                *(
+                    item.get("skills")
+                    if isinstance(item.get("skills"), list)
+                    else []
+                ),
+            ]
+        )
+        if not linked_skills:
+            field_path = f"projects[{index}]"
+            candidates.append(
+                _new_clarification_target(
+                    field_path=field_path,
+                    severity="medium",
+                    issue="该项目没有关联所使用的技能或技术",
+                    evidence_span_ids=item.get("evidence_span_ids"),
+                )
+            )
+
+    selected: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for candidate in candidates:
+        field_path = candidate["field_path"]
+        if field_path in seen_paths:
+            continue
+        seen_paths.add(field_path)
+        selected.append(candidate)
+        if len(selected) >= max(0, int(max_targets)):
+            break
+    return normalized_issues, selected
+
+
+def _normalize_quality_issue(
+    value: dict[str, Any], *, index: int
+) -> dict[str, Any]:
+    normalized = dict(value)
+    severity = str(value.get("severity") or "medium").strip().casefold()
+    normalized["severity"] = (
+        severity if severity in _QUALITY_SEVERITIES else "medium"
+    )
+    normalized["issue"] = str(value.get("issue") or "").strip()
+    field_path = str(value.get("field_path") or "").strip()
+    normalized["field_path"] = field_path or f"resume_quality_issues[{index}]"
+    normalized["evidence_span_ids"] = _clean_string_list(
+        value.get("evidence_span_ids"),
+        max_items=20,
+    )
+    return normalized
+
+
+def _clarification_target_from_issue(issue: dict[str, Any]) -> dict[str, Any]:
+    return _new_clarification_target(
+        field_path=issue["field_path"],
+        severity=issue["severity"],
+        issue=issue["issue"],
+        evidence_span_ids=issue.get("evidence_span_ids"),
+    )
+
+
+def _new_clarification_target(
+    *,
+    field_path: str,
+    severity: str,
+    issue: str,
+    evidence_span_ids: Any,
+) -> dict[str, Any]:
+    return {
+        "target_ref": field_path,
+        "field_path": field_path,
+        "status": "open",
+        "severity": severity,
+        "issue": issue,
+        "evidence_span_ids": _clean_string_list(
+            evidence_span_ids,
+            max_items=20,
+        ),
+    }
+
+
+def _description_is_too_short(value: Any) -> bool:
+    text = "".join(_clean_string_list(value))
+    return len(re.sub(r"\s+", "", text)) < _MIN_CLARIFICATION_DESCRIPTION_CHARS
 
 
 def _validated_span_ids(values: Any, valid_ids: set[str]) -> list[str]:
@@ -451,6 +595,17 @@ async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan
         evidence_text_by_id,
         reject_unsupported=False,
     )
+    quality_issues_struct: list[dict[str, Any]] = []
+    clarification_targets: list[dict[str, Any]] = []
+    if settings.resume_clarify_enabled:
+        # Feature A is a runtime-gated augmentation. With the switch off,
+        # normalization keeps the pre-5B side effects and all A fields empty.
+        quality_issues_struct, clarification_targets = build_clarification_targets(
+            quality_issues=quality_issues,
+            experience=experience,
+            projects=projects,
+            max_targets=settings.resume_clarify_max,
+        )
     return ResumeState(
         education=education,
         experience=experience,
@@ -461,10 +616,12 @@ async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan
             evidence_text_by_id,
         ),
         resume_quality_issues=_normalize_quality_issues(quality_issues),
+        quality_issues_struct=quality_issues_struct,
         original_evidence_spans=[span.model_dump() for span in evidence_spans],
         normalized_base_resume=_compact_text(
             "\n".join(span.text for span in evidence_spans)
         ),
+        clarification_targets=clarification_targets,
     )
 
 
