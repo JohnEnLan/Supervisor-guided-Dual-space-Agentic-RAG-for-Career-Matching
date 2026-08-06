@@ -74,8 +74,11 @@ schema 批次（5A）做**新库建库 + 既有库 0007→新迁移升级**双�
 `tests/snapshots/openapi_v1.json` 与 `frontend/src/api/generated.ts`
 两个路径零 diff（无路径限制的 git diff 会被本批正常代码改动触红）+
 对侧审查通过 + Claude 终验，才提交并进下批。
-执行分工：前端批次默认 Codex 执行/Claude 审查，后端批次默认 Claude 执行/
-Codex 审查（可按批灵活对调，但**执行者与审查者必须不同**）。
+执行分工（**用户 2026-08-06 修正案**）：**所有批次（前端与后端）统一为
+Codex 执行 → Codex 自查（对照规格逐条核对 + 完整重跑本批门禁并出自查
+报告）→ Claude Code 独立审查终验**。执行者与终审者分离由"Codex 自查 +
+Claude 独立审查"两级保障；Claude 审查发现问题→打回 Codex 修复→重新
+自查→再审，循环至通过。
 
 | 批次 | 内容 | 规格来源 |
 |---|---|---|
