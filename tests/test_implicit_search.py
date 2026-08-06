@@ -71,6 +71,52 @@ def test_implicit_query_text_is_deterministic_and_deduplicated() -> None:
     assert "SQL" in first
 
 
+def test_implicit_query_text_ignores_all_clarification_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.retrieval.implicit_search import build_implicit_query_text
+
+    monkeypatch.setattr(settings, "resume_clarify_enabled", True)
+    baseline = ResumeState(
+        education=[{"degree": "MSc Data Science"}],
+        experience=[{"title": "Data Analyst"}],
+        projects=[{"technologies": ["Python"]}],
+        skills=["SQL"],
+    )
+    clarified = baseline.model_copy(deep=True)
+    clarified.clarifications = [
+        {
+            "target_ref": "experience[0]",
+            "answer_summary": (
+                "Clarification Person clarification@example.com "
+                "+44 7700 900456 https://private.example/profile"
+            ),
+            "span_id": "C001",
+            "round": 2,
+            "action": "answered",
+        }
+    ]
+    clarified.clarification_evidence_spans = [
+        {
+            "span_id": "C001",
+            "text": (
+                "Clarification Person clarification@example.com "
+                "+44 7700 900456 https://private.example/profile"
+            ),
+            "source": "user_clarification",
+        }
+    ]
+
+    baseline_query = build_implicit_query_text(baseline)
+    clarified_query = build_implicit_query_text(clarified)
+
+    assert clarified_query == baseline_query
+    assert "Clarification Person" not in clarified_query
+    assert "clarification@example.com" not in clarified_query
+    assert "900456" not in clarified_query
+    assert "https://private.example/profile" not in clarified_query
+
+
 @pytest.mark.asyncio
 async def test_case_search_uses_existing_embedding_and_public_tables(
     monkeypatch: pytest.MonkeyPatch,

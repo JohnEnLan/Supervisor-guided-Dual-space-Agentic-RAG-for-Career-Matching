@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any
 
+from app.state.resume_view import effective_resume_text
 from app.state.schema import ResumeState
 
 
@@ -38,7 +39,7 @@ DICT_VALUE_ORDER = (
 
 def build_resume_retrieval_query(resume_state: ResumeState) -> ResumeRetrievalQuery:
     field_texts = {
-        "summary": _clean_text(resume_state.normalized_base_resume),
+        "summary": _clean_text(effective_resume_text(resume_state)),
         "skills": _join_unique(resume_state.skills, max_chars=800),
         "experience": _join_unique(
             _flatten_values(resume_state.experience), max_chars=1800

@@ -12,6 +12,7 @@ from app.domain.results import (
     ResumeAdvice,
     SkillGap,
 )
+from app.state.resume_view import all_resume_evidence_spans
 from app.state.schema import SharedState
 
 
@@ -200,7 +201,7 @@ def _resume_evidence_for_role(
     if not requested_ids:
         return []
     result = []
-    for span in state.resume_state.original_evidence_spans:
+    for span in all_resume_evidence_spans(state):
         span_id = str(span.get("span_id") or span.get("id") or "").strip()
         text = str(span.get("text") or "").strip()
         if span_id in requested_ids and text:

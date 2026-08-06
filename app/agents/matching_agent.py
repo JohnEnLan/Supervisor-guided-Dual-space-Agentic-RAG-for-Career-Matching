@@ -16,6 +16,7 @@ from app.retrieval.hybrid_search import (
 )
 from app.retrieval.implicit_search import build_implicit_query_text
 from app.retrieval.query_builder import build_resume_retrieval_query
+from app.state.resume_view import effective_resume_text
 from app.state.schema import SharedState
 
 
@@ -77,7 +78,7 @@ Return strict JSON:
         return json.dumps(
             {
                 "resume": {
-                    "normalized_base_resume": state.resume_state.normalized_base_resume,
+                    "effective_resume_text": effective_resume_text(state),
                     "skills": state.resume_state.skills,
                 },
                 "career_state": state.career_state.model_dump(),
@@ -291,7 +292,7 @@ async def _explain_candidate_match(
 ) -> tuple[str, dict[str, Any]]:
     payload = {
         "resume": {
-            "normalized_base_resume": state.resume_state.normalized_base_resume,
+            "effective_resume_text": effective_resume_text(state),
             "skills": state.resume_state.skills,
         },
         "career_state": state.career_state.model_dump(),

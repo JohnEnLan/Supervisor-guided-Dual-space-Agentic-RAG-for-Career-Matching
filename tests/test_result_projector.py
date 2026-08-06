@@ -1,5 +1,6 @@
 from app.api.result_projector import project_product_result
-from app.state.schema import RetrievalState, SharedState, StrategyState
+from app.config import settings
+from app.state.schema import ResumeState, RetrievalState, SharedState, StrategyState
 
 
 def _state() -> SharedState:
@@ -241,3 +242,39 @@ def test_projector_drops_malformed_persisted_strategy_items_with_public_warnings
     assert "invalid_resume_advice_dropped" in result.warnings
     assert "invalid_skill_gap_dropped" in result.warnings
     assert "invalid_career_path_dropped" in result.warnings
+
+
+def test_projector_resolves_clarification_evidence_without_exposing_source(
+    monkeypatch,
+) -> None:
+    from app.api.v1.schemas import ResumeEvidencePreview, ResumePreviewResponse
+    from app.domain.results import EvidenceItem
+
+    monkeypatch.setattr(settings, "resume_clarify_enabled", True)
+    state = _state()
+    state.resume_state = ResumeState(
+        clarification_evidence_spans=[
+            {
+                "span_id": "C001",
+                "text": "Led the Python API delivery.",
+                "source": "user_clarification",
+            }
+        ]
+    )
+    state.strategy_state.recommended_roles[0]["resume_evidence_span_ids"] = [
+        "C001"
+    ]
+
+    payload = project_product_result(state).model_dump(mode="json")
+    resume_evidence = payload["recommended_roles"][0]["resume_evidence"]
+
+    assert resume_evidence == [
+        {
+            "evidence_span_id": "C001",
+            "field": "resume",
+            "content": "Led the Python API delivery.",
+        }
+    ]
+    assert "source" not in EvidenceItem.model_fields
+    assert "source" not in ResumeEvidencePreview.model_fields
+    assert "source" not in ResumePreviewResponse.model_fields

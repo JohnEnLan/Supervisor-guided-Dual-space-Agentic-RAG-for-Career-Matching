@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.agents.base import BaseAgent, coerce_list, resume_evidence_ids
+from app.agents.base import BaseAgent, coerce_list
+from app.state.resume_view import (
+    all_resume_evidence_spans,
+    effective_resume_text,
+    resume_evidence_ids,
+)
 from app.state.schema import SharedState
 
 
@@ -14,7 +19,7 @@ PHASE_C_STRATEGY_AGENT
 You are the Resume & Career Strategy Agent in a lightweight Agentic RAG system.
 Produce skill gaps, resume revision advice, and short/medium/long career path.
 Every strategy item must cite evidence_span_ids from the provided evidence contract.
-Resume advice must cite original resume evidence spans only.
+Resume advice must cite resume evidence and user-confirmed clarifications (source-tagged) only.
 Do not invent experience, employers, metrics, tools, or outcomes.
 
 Return strict JSON:
@@ -48,9 +53,9 @@ Return strict JSON:
         return json.dumps(
             {
                 "resume_state": {
-                    "normalized_base_resume": state.resume_state.normalized_base_resume,
+                    "effective_resume_text": effective_resume_text(state),
                     "skills": state.resume_state.skills,
-                    "original_evidence_spans": state.resume_state.original_evidence_spans,
+                    "resume_evidence_spans": all_resume_evidence_spans(state),
                 },
                 "recommended_roles": state.strategy_state.recommended_roles,
                 "retrieval_state": state.retrieval_state.model_dump(),

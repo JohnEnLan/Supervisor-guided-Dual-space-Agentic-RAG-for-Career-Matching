@@ -5,11 +5,12 @@ import re
 from hashlib import sha256
 from typing import Any
 
-from app.agents.base import coerce_dict, coerce_list, resume_evidence_ids
+from app.agents.base import coerce_dict, coerce_list
 from app.config import settings
 from app.llm import deepseek
 from app.memory.case_base import CareerCase
 from app.memory.feedback import is_positive_outcome, normalize_application_outcome
+from app.state.resume_view import effective_resume_text, resume_evidence_ids
 from app.state.schema import SharedState
 
 
@@ -35,7 +36,7 @@ FINAL_PROMPT = """
 PHASE_C_SUPERVISOR_FINAL
 You are the final verifier for a lightweight Agentic RAG career matching system.
 Check hard filter violations, missing job evidence, and resume advice fabrication.
-Resume advice is valid only when it cites original resume evidence span ids.
+Resume advice is valid only when it cites resume evidence and user-confirmed clarifications (source-tagged) only.
 
 Return strict JSON:
 {
@@ -493,7 +494,7 @@ def _planning_payload(
         {
             "user_goal_text": user_goal_text,
             "career_state": state.career_state.model_dump(),
-            "resume_summary": state.resume_state.normalized_base_resume[:1500],
+            "resume_summary": effective_resume_text(state)[:1500],
             "default_top_k": default_top_k,
             "read_only_context": {"include_raptor": include_raptor},
         },
