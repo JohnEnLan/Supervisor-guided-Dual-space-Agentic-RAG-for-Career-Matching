@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from app.api.v1.schemas import ConversationMessageResponse
@@ -55,14 +57,27 @@ _ERROR_TEXT = {
 }
 
 
+@dataclass(frozen=True)
+class ConversationProjectionContext:
+    """Privacy-safe checkpoint facts used by the conversation projector."""
+
+    matching_input_status: str | None = None
+    matching_output_status: str | None = None
+    candidate_count: int | None = None
+    ranking_count: int | None = None
+    evidence_count: int | None = None
+
+
 def project_run_conversation(
     *,
     run: MatchRun,
     recovery_events: list[dict[str, Any]],
     result: ProductResult | None,
+    context: ConversationProjectionContext | None = None,
 ) -> list[ConversationMessageResponse]:
     """Project public run data into a deterministic conversation timeline."""
     messages: list[ConversationMessageResponse] = []
+    projection_context = context or ConversationProjectionContext()
 
     def add(
         persona: str,
@@ -103,25 +118,31 @@ def project_run_conversation(
 
     if _has_reached(run, RunStage.RETRIEVAL):
         add(
-            "job_scout",
-            "progress",
-            (
-                "岗位检索正在执行：SQL 硬过滤 → BM25/Dense 并行 → "
-                "job_id 级 RRF 融合。硬约束由数据库严格执行，"
-                "不会交给模型猜测。"
-            ),
-            "retrieval",
-        )
-    if _has_completed_stage(run, RunStage.RETRIEVAL):
-        candidate_text = (
-            f"，最终形成 {len(result.recommended_roles)} 个可发布候选岗位"
-            if result is not None
-            else ""
+            "pm",
+            "checkpoint",
+            _matching_input_handoff(projection_context.matching_input_status),
+            "intent",
         )
         add(
             "job_scout",
             "progress",
-            f"检索与融合已完成{candidate_text}，现已交给规划师继续分析。",
+            _job_scout_start_message(run.approved_plan),
+            "retrieval",
+        )
+    if _has_completed_stage(run, RunStage.RETRIEVAL):
+        add(
+            "job_scout",
+            "progress",
+            "检索与融合已完成，候选集已提交 PM 进行交接检查。",
+            "retrieval",
+        )
+        add(
+            "pm",
+            "checkpoint",
+            _matching_output_handoff(
+                projection_context,
+                include_counts=not _has_controlled_reretrieval(recovery_events),
+            ),
             "retrieval",
         )
 
@@ -131,7 +152,7 @@ def project_run_conversation(
             "progress",
             (
                 "我正在基于候选岗位开展能力缺口分析，并生成有证据约束的"
-                "简历建议与职业路径；所有建议只基于已核验信息，"
+                "简历建议与职业路径；所有建议只引用简历已有证据，"
                 "不补写未经证实的经历。"
             ),
             "strategy",
@@ -140,7 +161,11 @@ def project_run_conversation(
         add(
             "strategist",
             "progress",
-            "缺口分析与简历建议已生成，现提交 PM 做最终发布核查。",
+            (
+                "缺口分析与简历建议已生成，现提交 PM 做最终发布核查。"
+                "如果你之后想让我基于某个岗位细化简历，可在结果卡提交反馈"
+                "或开启新咨询。"
+            ),
             "strategy",
         )
 
@@ -238,11 +263,88 @@ def _brief_message(approved_plan: dict[str, Any]) -> str:
     )
     result_count = approved_plan.get("result_count") or 5
     return (
-        f"我已复核本次 Match Brief：目标是“{career_goal}”。"
-        f"硬约束为 {hard_constraints}，已锁定并将由 SQL/metadata 严格过滤；"
+        f"本次 Match Brief 已确认：目标是“{career_goal}”。"
+        f"本次检索约束为 {hard_constraints}，已记录并传入检索计划；"
         f"软偏好为 {soft_preferences}，用于排序加权；"
         f"暂不考虑的岗位为 {avoid_roles}；计划返回最多 {result_count} 个结果。"
     )
+
+
+def _job_scout_start_message(approved_plan: dict[str, Any]) -> str:
+    message = (
+        "我已接手确认单，岗位检索正在执行：适用的 metadata 条件筛选 → "
+        "BM25/Dense 并行 → job_id 级 RRF 融合。"
+    )
+    hard_constraints = approved_plan.get("hard_constraints")
+    if not isinstance(hard_constraints, Mapping):
+        return message
+    if hard_constraints.get("remote") is True:
+        return f"{message}你选择了远程方向，我按此筛选。"
+    locations = _format_locations(hard_constraints.get("locations"))
+    if locations:
+        return f"{message}你要求的 {locations} 我已锁定为硬条件，绝不放宽。"
+    return message
+
+
+def _format_locations(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if not isinstance(value, list):
+        return ""
+    return "、".join(
+        location
+        for item in value
+        if (location := str(item).strip())
+    )
+
+
+def _matching_input_handoff(status: str | None) -> str:
+    if status == "passed":
+        return "我确认小检接收的约束与确认单一致，现交给小检执行。"
+    if status == "warning":
+        return (
+            "小检接收的检索输入检查带有提示；确认单已交给小检继续执行，"
+            "提示会保留供后续核查。"
+        )
+    return "需求确认阶段已完成，确认单已交给小检执行。"
+
+
+def _matching_output_handoff(
+    context: ConversationProjectionContext,
+    *,
+    include_counts: bool,
+) -> str:
+    count_text = "小检已完成本轮检索"
+    metrics_text = ""
+    if include_counts and context.candidate_count is not None:
+        count_text = f"小检返回了 {context.candidate_count} 个候选"
+    if (
+        include_counts
+        and context.ranking_count is not None
+        and context.evidence_count is not None
+    ):
+        metrics_text = (
+            f"（排序记录 {context.ranking_count} 条、"
+            f"证据记录 {context.evidence_count} 条）"
+        )
+
+    if context.matching_output_status == "passed":
+        return (
+            f"{count_text}；我核对了候选集、排序与证据完整性"
+            f"{metrics_text}，现交给小策。"
+        )
+    if context.matching_output_status == "warning":
+        return (
+            f"{count_text}；候选集、排序与证据完整性检查带有提示"
+            f"{metrics_text}，现交给小策继续分析。"
+        )
+    return f"{count_text}，候选集已交给小策继续分析。"
+
+
+def _has_controlled_reretrieval(
+    recovery_events: list[dict[str, Any]],
+) -> bool:
+    return any(event.get("stage") == "reretrieval_loop" for event in recovery_events)
 
 
 def _format_public_value(value: Any, *, empty_text: str) -> str:

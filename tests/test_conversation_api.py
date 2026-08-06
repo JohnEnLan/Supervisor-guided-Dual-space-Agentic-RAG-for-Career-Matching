@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -93,7 +94,26 @@ def test_completed_conversation_has_four_personas_and_stable_order(
         )
 
     async def snapshot(**_kwargs):
-        return {"supervisor_log": []}
+        return {
+            "supervisor_log": [
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_input",
+                    "status": "passed",
+                    "metrics": {"top_k": 5},
+                },
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_output",
+                    "status": "passed",
+                    "metrics": {
+                        "candidate_count": 7,
+                        "ranking_count": 7,
+                        "evidence_count": 6,
+                    },
+                },
+            ]
+        }
 
     monkeypatch.setattr(runs, "get_run", completed)
     monkeypatch.setattr(runs, "load_state_snapshot", snapshot)
@@ -117,15 +137,33 @@ def test_completed_conversation_has_four_personas_and_stable_order(
     assert [message["kind"] for message in messages] == [
         "intro",
         "brief",
+        "checkpoint",
         "progress",
         "progress",
+        "checkpoint",
         "progress",
         "progress",
         "checkpoint",
         "result",
     ]
-    assert "job_id 级 RRF 融合" in messages[2]["text"]
-    assert "3 个可发布候选岗位" in messages[3]["text"]
+    assert messages[2]["persona"] == "pm"
+    assert messages[2]["stage"] == "intent"
+    assert "小检接收的约束与确认单一致" in messages[2]["text"]
+    assert "job_id 级 RRF 融合" in messages[3]["text"]
+    assert "你要求的 Birmingham 我已锁定为硬条件，绝不放宽" in messages[3][
+        "text"
+    ]
+    assert messages[5]["persona"] == "pm"
+    assert messages[5]["stage"] == "retrieval"
+    assert "小检返回了 7 个候选" in messages[5]["text"]
+    assert "排序记录 7 条、证据记录 6 条" in messages[5]["text"]
+    assert "我核对了候选集、排序与证据完整性" in messages[5]["text"]
+    assert "3 个可发布候选岗位" not in response.text
+    assert "硬约束由数据库严格执行" not in response.text
+    assert "已锁定并将由 SQL/metadata 严格过滤" not in response.text
+    assert "我已复核本次 Match Brief" not in response.text
+    assert "所有建议只基于已核验信息" not in response.text
+    assert "基于某个岗位细化简历" in messages[7]["text"]
     assert "Now Fit 1 个、Stretch Fit 1 个、Bridge Role 1 个" in messages[-1][
         "text"
     ]
@@ -277,8 +315,11 @@ def test_nonterminal_conversation_returns_incremental_messages(monkeypatch) -> N
     assert [message["persona"] for message in payload["messages"]] == [
         "pm",
         "intent_consultant",
+        "pm",
         "job_scout",
     ]
+    assert payload["messages"][2]["kind"] == "checkpoint"
+    assert payload["messages"][2]["stage"] == "intent"
     serialized_messages = str(payload["messages"])
     assert "正在执行" in serialized_messages
     assert "检索与融合已完成" not in serialized_messages
@@ -310,10 +351,36 @@ def test_conversation_response_does_not_expose_private_state(monkeypatch) -> Non
             "resume_state": {
                 "normalized_base_resume": PRIVATE_RESUME_TEXT,
             },
+            "retrieval_state": {
+                "filter_log": [PRIVATE_RESUME_TEXT],
+            },
             "supervisor_log": [
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_input",
+                    "status": "passed",
+                    "metrics": {
+                        "top_k": 5,
+                        "private_metric": PRIVATE_RESUME_TEXT,
+                    },
+                    "private_prompt": PRIVATE_RESUME_TEXT,
+                },
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_output",
+                    "status": "passed",
+                    "metrics": {
+                        "candidate_count": 2,
+                        "ranking_count": 2,
+                        "evidence_count": 2,
+                        "private_metric": PRIVATE_RESUME_TEXT,
+                    },
+                    "private_resume": PRIVATE_RESUME_TEXT,
+                },
                 {
                     "stage": "final_verification",
                     "private_resume": PRIVATE_RESUME_TEXT,
+                    "metrics": {"candidate_count": 999},
                 }
             ],
         }
@@ -330,6 +397,248 @@ def test_conversation_response_does_not_expose_private_state(monkeypatch) -> Non
     assert "user_id" not in serialized
     assert "private-user-id" not in serialized
     assert PRIVATE_RESUME_TEXT not in serialized
+    assert "小检返回了 2 个候选" in serialized
+    assert "999 个候选" not in serialized
+    assert "filter_log" not in serialized
+
+
+def test_missing_snapshot_uses_count_free_architecture_handoff(monkeypatch) -> None:
+    from app.api.v1 import runs
+
+    async def running(**_kwargs):
+        return _run(status=RunStatus.RUNNING, stage=RunStage.STRATEGY)
+
+    async def missing_snapshot(**_kwargs):
+        return None
+
+    monkeypatch.setattr(runs, "get_run", running)
+    monkeypatch.setattr(runs, "load_state_snapshot", missing_snapshot)
+
+    with TestClient(_app()) as client:
+        response = client.get("/api/v1/runs/run-1/conversation")
+
+    handoff = next(
+        message
+        for message in response.json()["messages"]
+        if message["persona"] == "pm"
+        and message["kind"] == "checkpoint"
+        and message["stage"] == "retrieval"
+    )
+    assert handoff["text"] == "小检已完成本轮检索，候选集已交给小策继续分析。"
+    assert "个候选" not in handoff["text"]
+    assert "排序记录" not in handoff["text"]
+    assert "我核对了" not in handoff["text"]
+
+
+@pytest.mark.parametrize(
+    ("status", "metrics", "expected_count", "expected_metrics"),
+    [
+        ("passed", {}, None, None),
+        (
+            "warning",
+            {"candidate_count": 0, "ranking_count": 0, "evidence_count": 0},
+            "小检返回了 0 个候选",
+            "排序记录 0 条、证据记录 0 条",
+        ),
+        (
+            "passed",
+            {"candidate_count": 4, "ranking_count": 3, "evidence_count": 2},
+            "小检返回了 4 个候选",
+            "排序记录 3 条、证据记录 2 条",
+        ),
+    ],
+)
+def test_matching_output_checkpoint_preserves_missing_zero_and_positive_counts(
+    monkeypatch,
+    status,
+    metrics,
+    expected_count,
+    expected_metrics,
+) -> None:
+    from app.api.v1 import runs
+
+    async def running(**_kwargs):
+        return _run(status=RunStatus.RUNNING, stage=RunStage.STRATEGY)
+
+    async def snapshot(**_kwargs):
+        return {
+            "supervisor_log": [
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_input",
+                    "status": "passed",
+                    "metrics": {"top_k": 5},
+                },
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_output",
+                    "status": status,
+                    "metrics": metrics,
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runs, "get_run", running)
+    monkeypatch.setattr(runs, "load_state_snapshot", snapshot)
+
+    with TestClient(_app()) as client:
+        response = client.get("/api/v1/runs/run-1/conversation")
+
+    handoff = next(
+        message
+        for message in response.json()["messages"]
+        if message["persona"] == "pm"
+        and message["kind"] == "checkpoint"
+        and message["stage"] == "retrieval"
+    )
+    if expected_count is None:
+        assert "个候选" not in handoff["text"]
+        assert "排序记录" not in handoff["text"]
+    else:
+        assert expected_count in handoff["text"]
+        assert expected_metrics in handoff["text"]
+    if status == "warning":
+        assert "检查带有提示" in handoff["text"]
+        assert "我核对了候选集、排序与证据完整性" not in handoff["text"]
+    else:
+        assert "检查带有提示" not in handoff["text"]
+        assert "我核对了候选集、排序与证据完整性" in handoff["text"]
+
+
+def test_warning_matching_input_does_not_reuse_passed_handoff_copy(
+    monkeypatch,
+) -> None:
+    from app.api.v1 import runs
+
+    async def running(**_kwargs):
+        return _run(status=RunStatus.RUNNING, stage=RunStage.RETRIEVAL)
+
+    async def snapshot(**_kwargs):
+        return {
+            "supervisor_log": [
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_input",
+                    "status": "warning",
+                    "metrics": {"top_k": 5},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runs, "get_run", running)
+    monkeypatch.setattr(runs, "load_state_snapshot", snapshot)
+
+    with TestClient(_app()) as client:
+        response = client.get("/api/v1/runs/run-1/conversation")
+
+    handoff = next(
+        message
+        for message in response.json()["messages"]
+        if message["persona"] == "pm"
+        and message["kind"] == "checkpoint"
+        and message["stage"] == "intent"
+    )
+    assert handoff["kind"] == "checkpoint"
+    assert "检索输入检查带有提示" in handoff["text"]
+    assert "我确认小检接收的约束与确认单一致" not in handoff["text"]
+
+
+def test_controlled_reretrieval_handoff_omits_ambiguous_checkpoint_counts(
+    monkeypatch,
+) -> None:
+    from app.api.v1 import runs
+
+    async def running(**_kwargs):
+        return _run(status=RunStatus.RUNNING, stage=RunStage.VERIFICATION)
+
+    async def snapshot(**_kwargs):
+        return {
+            "supervisor_log": [
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_input",
+                    "status": "passed",
+                    "metrics": {"top_k": 5},
+                },
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_output",
+                    "status": "passed",
+                    "metrics": {
+                        "candidate_count": 8,
+                        "ranking_count": 8,
+                        "evidence_count": 8,
+                    },
+                },
+                {
+                    "stage": "reretrieval_loop",
+                    "reason": "too_few_results",
+                    "loop_used": 1,
+                    "max_loops": 1,
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runs, "get_run", running)
+    monkeypatch.setattr(runs, "load_state_snapshot", snapshot)
+
+    with TestClient(_app()) as client:
+        response = client.get("/api/v1/runs/run-1/conversation")
+
+    handoff = next(
+        message
+        for message in response.json()["messages"]
+        if message["persona"] == "pm"
+        and message["kind"] == "checkpoint"
+        and message["stage"] == "retrieval"
+    )
+    assert "8 个候选" not in handoff["text"]
+    assert "排序记录 8 条" not in handoff["text"]
+    assert "我核对了候选集、排序与证据完整性" in handoff["text"]
+
+
+def test_remote_retrieval_copy_does_not_call_remote_a_sql_hard_filter(
+    monkeypatch,
+) -> None:
+    from app.api.v1 import runs
+
+    run = _run(status=RunStatus.RUNNING, stage=RunStage.RETRIEVAL)
+    run.approved_plan["hard_constraints"] = {
+        "remote": True,
+        "locations": ["Birmingham"],
+    }
+
+    async def running(**_kwargs):
+        return run
+
+    async def snapshot(**_kwargs):
+        return {
+            "supervisor_log": [
+                {
+                    "stage": "supervisor_checkpoint",
+                    "checkpoint": "matching_input",
+                    "status": "passed",
+                    "metrics": {"top_k": 5},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runs, "get_run", running)
+    monkeypatch.setattr(runs, "load_state_snapshot", snapshot)
+
+    with TestClient(_app()) as client:
+        response = client.get("/api/v1/runs/run-1/conversation")
+
+    scout = next(
+        message
+        for message in response.json()["messages"]
+        if message["persona"] == "job_scout"
+    )
+    assert "你选择了远程方向，我按此筛选" in scout["text"]
+    assert "远程方向" in scout["text"]
+    assert "绝不放宽" not in scout["text"]
+    assert "硬约束为" not in response.text
+    assert "硬约束由数据库严格执行" not in response.text
 
 
 def test_failed_conversation_translates_unknown_error_code(monkeypatch) -> None:

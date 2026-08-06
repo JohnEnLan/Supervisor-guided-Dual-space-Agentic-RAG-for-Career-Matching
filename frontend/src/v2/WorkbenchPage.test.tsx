@@ -525,13 +525,13 @@ describe("protected timeline scrolling", () => {
     const firstConversation = apiFixtures.runConversation("running", null);
     vi.mocked(api.runConversation).mockResolvedValue(firstConversation);
     const { queryClient } = renderWorkbench("/app/sessions/sess-1?run=run-created");
-    await screen.findByText("硬过滤与双路召回完成。");
+    await screen.findByText("岗位检索正在执行：适用的 metadata 条件筛选与双路召回。");
 
     const timeline = document.querySelector<HTMLOListElement>(".v2-timeline");
     expect(timeline).not.toBeNull();
     setTimelineMetrics(timeline!, { scrollHeight: 1000, clientHeight: 400, scrollTop: 479 });
     const secondMessage = {
-      seq: 4,
+      seq: 5,
       persona: "strategist" as const,
       display_name: "规划师·小策",
       kind: "progress",
@@ -559,7 +559,7 @@ describe("protected timeline scrolling", () => {
           ...firstConversation.messages,
           secondMessage,
           {
-            seq: 5,
+            seq: 6,
             persona: "pm",
             display_name: "项目经理·PM",
             kind: "checkpoint",

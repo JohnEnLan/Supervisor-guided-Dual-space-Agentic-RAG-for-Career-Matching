@@ -8,7 +8,10 @@ from app.agents.trace import (
     build_public_explain,
     build_public_recovery_events,
 )
-from app.api.conversation_projector import project_run_conversation
+from app.api.conversation_projector import (
+    ConversationProjectionContext,
+    project_run_conversation,
+)
 from app.api.v1.schemas import (
     ExecuteRunRequest,
     RunConversationResponse,
@@ -104,6 +107,7 @@ async def run_conversation(run_id: str) -> RunConversationResponse:
         event for event in supervisor_log if isinstance(event, dict)
     ]
     recovery_events = build_public_recovery_events(public_log)
+    projection_context = _projection_context_from_snapshot(snapshot)
     result = (
         ProductResult.model_validate(run.result_snapshot)
         if run.result_snapshot is not None
@@ -118,6 +122,7 @@ async def run_conversation(run_id: str) -> RunConversationResponse:
             run=run,
             recovery_events=recovery_events,
             result=result,
+            context=projection_context,
         ),
     )
 
@@ -207,6 +212,62 @@ def _select_run_executor():
     if settings.langgraph_orchestrator_enabled:
         return run_graph_match
     return run_persisted_agentic_match_run
+
+
+def _projection_context_from_snapshot(
+    snapshot: object,
+) -> ConversationProjectionContext:
+    if not isinstance(snapshot, dict):
+        return ConversationProjectionContext()
+    raw_log = snapshot.get("supervisor_log")
+    if not isinstance(raw_log, list):
+        return ConversationProjectionContext()
+
+    matching_input_status = None
+    matching_output_status = None
+    candidate_count = None
+    ranking_count = None
+    evidence_count = None
+    input_found = False
+    output_found = False
+
+    for event in reversed(raw_log):
+        if not isinstance(event, dict) or event.get("stage") != "supervisor_checkpoint":
+            continue
+        checkpoint = event.get("checkpoint")
+        if checkpoint == "matching_input" and not input_found:
+            matching_input_status = _checkpoint_status(event.get("status"))
+            input_found = True
+        elif checkpoint == "matching_output" and not output_found:
+            matching_output_status = _checkpoint_status(event.get("status"))
+            metrics = event.get("metrics")
+            candidate_count = _checkpoint_count(metrics, "candidate_count")
+            ranking_count = _checkpoint_count(metrics, "ranking_count")
+            evidence_count = _checkpoint_count(metrics, "evidence_count")
+            output_found = True
+        if input_found and output_found:
+            break
+
+    return ConversationProjectionContext(
+        matching_input_status=matching_input_status,
+        matching_output_status=matching_output_status,
+        candidate_count=candidate_count,
+        ranking_count=ranking_count,
+        evidence_count=evidence_count,
+    )
+
+
+def _checkpoint_status(value: object) -> str | None:
+    return value if value in {"passed", "warning"} else None
+
+
+def _checkpoint_count(metrics: object, key: str) -> int | None:
+    if not isinstance(metrics, dict):
+        return None
+    value = metrics.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def public_progress(
