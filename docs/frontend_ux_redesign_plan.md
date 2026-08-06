@@ -1,8 +1,19 @@
-# 前端产品化优化方案（v2.3 终稿 — 三方评审通过）
+# 前端产品化优化方案（v3.2 终稿 — 群聊化修正三方评审通过）
 
-> **评审记录**：Claude Code（起草与合议）+ 子 agent 独立评审两轮（二审 APPROVE）
-> + Codex 独立评审四轮（四审 APPROVE）。合计处置 40+ 条意见，含三个现网真 bug
-> （反馈 422、cancelled 终态缺失、切侧栏丢结果）与一个后端语义冲突设计的撤回。
+> **v3 轮评审记录**：子 agent 三审 APPROVE（评价：三轮以来第一版事实层零瑕疵）
+> + Codex 六审 APPROVE。加上 v2.3 轮，本方案累计经受子 agent 三轮 + Codex 六轮
+> 独立评审，60+ 条意见全部处置。
+
+> **v2.3 → v3（用户定位反馈驱动）**：v2.3 已获三方通过，但用户指出两个方向性
+> 问题——①七阶段 RunRail 是工程流水线隐喻，没有体现"群聊服务"这个产品本体；
+> ②四个角色没有"演好自己"：执行 agent 应主动提问引导顾客，PM 应在**每个 agent
+> 交接点**出场确认质量并站在顾客侧引导。v3 据此重构 P0-1 为「PM 群公告·服务
+> 进度卡」、新增 P0-9「角色主动性」三段式设计，范围声明从"纯前端"修正为
+> "零 OpenAPI 变更 + 一项后端群聊投影增强（纯新增消息行，不改任何 DTO）"。
+> v2.3 的全部评审结论（诚实红线、契约映射、缺陷包）完整保留。
+>
+> **v2.3 评审记录**：子 agent 两轮（APPROVE）+ Codex 四轮（APPROVE），40+ 条
+> 意见处置，含三个现网真 bug 与一个后端语义冲突设计的撤回。
 
 > v1 → v2：子 agent 与 Codex 双路评审均 NEEDS_CHANGES，意见高度收敛。v2 修正：
 > ①两条"数据源现成"断言不成立（结果 DTO 无 score → 强度条出 P0；消息无时间戳 →
@@ -29,6 +40,17 @@ Cross）在 UI 上完全不可见。强制滚底（WorkbenchPage:342）、会话
 - 运行期已有常驻"团队正在处理下一阶段…"指示条（:485-489），真实缺口是
   **不具名、不分阶段**，不是"完全静止"。
 
+**v3 群聊化实查依据（conversation_projector.py 全文核对）**：
+- 播报骨架已存在：PM intro → 小意复核 Brief → 小检开工/完成（完成句含候选数）→
+  小策开工/完成交接 → PM 核查 checkpoint + recovery + 结果/警告——**交接叙事
+  是有的，但 PM 的运行期发言只有 intro、核查 checkpoint 与结果**——
+  **intent 完成、retrieval 完成两个交接点没有 PM 确认消息**（这正是
+  "没体现监督"体感的来源）；
+- 所有播报是"汇报语态"（"检索正在执行：SQL 硬过滤→…"），不是"对顾客说话"
+  的服务语态；执行 agent 全程零提问、零引导；
+- `runs.py::run_conversation` **已经加载 state 快照**（supervisor_log 取自
+  snapshot）——给投影传入检索摘要（真实候选数等）零 schema 改动即可做到。
+
 **v1 漏掉、双审补上的现状问题**：
 - **两套设计系统并存**：结果卡内嵌的 EvidenceDrawer/ReactionForm 走
   `styles/global.css + tokens.css`（navy/teal 旧皮肤），与 v2 米色系同屏混搭，
@@ -51,7 +73,7 @@ Cross）在 UI 上完全不可见。强制滚底（WorkbenchPage:342）、会话
 **UI 上的每个状态声明必须有真实数据源**——没有时间字段就不显示时间戳；
 拿不到运行期开关状态就不亮能力胶囊；推断不出"谁在线"就只说"当前阶段"。
 
-## 三、P0（全量 2.5–3 个工作日；2.5 天硬上限用 §五 P0.5 削减版；全部零 API 变更）
+## 三、P0（全量 3–3.5 个工作日；3 天硬上限用 §五 P0.5 削减版；**零 OpenAPI/DTO 变更**——P0-9B 为后端投影纯新增消息行，属唯一后端改动，schema 不变）
 
 ### P0-0 现网缺陷修复包（先于一切视觉工作）
 1. **反馈词表修正**：按钮组 = `被拒 / 过筛 / 面试 / Offer`（映射 rejected /
@@ -91,17 +113,24 @@ Cross）在 UI 上完全不可见。强制滚底（WorkbenchPage:342）、会话
    finalization；ReactionResponse 状态串是 reaction_recorded；
    session create 状态串是 awaiting_resume。
 
-### P0-1 七阶段 RunRail（本轮标志性交互）
-时间线内嵌任务卡（单一 DOM，**P0 全断点保持时间线内联**——右缘 sticky/侧板
-与"双栏出本期"矛盾，彻底归 P1）：
-- 七段**精确契约串**映射：`resume 简历 → intent 意图 → retrieval 检索 →
-  strategy 策略 → verification 核查 → finalization 整理 → result 发布`
-  （PUBLIC_STAGE_ORDER 逐字对应；不发明"锁定"伪阶段——Brief 锁定发生在 run 前，
-  由确认单卡片自身表达）；
-- 已完成实心勾 / 当前脉冲 / 未到灰点；**不显示耗时**（接口无历史翻转时间，
-  本地观测值会撒谎，删）；
-- `kind==="recovery"` 消息驱动轨上「↻ 质量把关：受控重检」标记——把有界循环
-  变成可见的质量叙事。
+### P0-1 PM 群公告·服务进度卡（本轮标志性交互，群聊隐喻版）
+**形态修正**：不做页面级"工程流水线轨"。进度卡是 **PM 在群里发出的一条
+群公告式消息**（PM 头像 + 气泡内清单，随时间线滚动、运行期在时间线内
+sticky 置顶一份，单一 DOM）——过程可视长在群聊里，而不是长在群聊上面。
+- **展示按四个角色分段**（群聊叙事单位）：
+  `小意 · 需求确认 → 小检 · 岗位筛选 → 小策 · 规划建议 → PM · 核查发布`；
+- **底层仍消费七段精确契约串**（诚实映射表写死）：
+  resume+intent → 小意段；retrieval → 小检段；strategy → 小策段；
+  verification+finalization+result → PM 段——分组只发生在显示层；
+- **责任段 ≠ 实时执行主体（诚实归属表，防止"小意正在工作"的虚构脉冲）**：
+  `resume` = 系统归一化流程（小意段内标"资料已就绪·系统处理"，不给小意
+  脉冲）；`intent` = 咨询已完成时是 Supervisor checkpoint 复用结果（进行中
+  文案"PM 正在复核小意已确认的需求"）；`retrieval`/`strategy` = 小检/小策
+  真实执行（脉冲归属正确）；`finalization` = 系统确定性整理（文案"系统正在
+  整理发布材料"）；`result` = PM 发布（非 RunStage 枚举，仅进度节点）；
+- 每段：完成勾 / 当前段脉冲按上表归属 / 未到灰；**不显示耗时**；
+- `kind==="recovery"` 驱动 PM 段上「↻ 质量把关：受控重检」标记；
+- 状态优先级映射五条（v2.3 版）原样保留。
 
 ### P0-2 状态指示（只说真话版）
 - 咨询期：`turn.isPending` 驱动小意 typing 气泡（真实信号）；
@@ -163,6 +192,60 @@ hover/聚焦显示元信息**分体裁**：运行消息显示阶段（有 stage 
   **登出与 401 统一出口清理全部 user-scoped 本地键（title 与 last_run 两类）**；
   无标题显示"咨询 · MM-DD"。
 
+### P0-9 角色主动性（群聊的灵魂，三段式）
+用户核心诉求：执行 agent 要像真顾问一样主动提问引导，PM 要在每个交接点
+确认质量并站在顾客侧。**能力边界如实声明**：运行是锁定 Brief 后的异步
+流程、中途不可接收用户回复——因此 P0 能诚实交付的是：**小意的真双向提问
+（咨询期）+ 小检/小策的主动说明与建议（单向）+ 结果后的行动引导**；
+"小检/小策运行中提问并等待回答"需要 run-input/状态机 API，**列入 P1 并
+向用户如实说明**。每句插话都必须由真实数据渲染（不做空话表演）：
+
+**A. 咨询期（真双向，前端确定性，零后端改动）**
+- 小意本就是提问引擎（每轮强制一个启发式问题）；
+- 新增 **PM 里程碑插话**（前端按数据确定性渲染，不调 LLM）：
+  ① 三槽位集齐（can_finalize 翻真）→ PM："小意已把必填信息收集齐：目标
+  {current_goal}、地点 {locations/远程}、签证{文案}。你可以继续补充偏好，
+  也可以让我安排匹配。"（数据全部来自 profile_draft）；
+  ② 确认单生成 → PM："确认单由你们的对话记录自动生成，请你核对无误后开始。"
+  （核对动作诚实地交还用户——前端并没有"核对"任何东西）；
+  实施注：PM 插话刷新后无法恢复原插入位（transcript 不记录翻转历史），
+  确定性追加在时间线末尾，文档如实声明。
+- 槽位 chips（P0-3）本身即引导；chip 点击预填 = 顾客侧引导动作。
+
+**B. 运行期（单向播报升级为服务语态 + PM 交接确认——后端投影增强）**
+改动面如实声明：`conversation_projector.py` 新增消息行 + **`runs.py` 从快照
+白名单提取 checkpoint 状态与候选计数、经内部 context dataclass 传给投影**
+（当前只提取 supervisor_log）；区分"字段缺失"与真实 0；继续禁止投影简历
+原文/user_id 等私有字段（隐私回归测试）。DTO/OpenAPI 零变化：
+- **PM 交接确认 ×2**（补齐用户点名的缺口；统一 `kind="checkpoint"`）：
+  文案**只锚定真实存在的 checkpoint 数据**（supervisor_harness 的
+  matching_input / matching_output.metrics）——注意：不得写"N 项硬条件由
+  数据库强制执行"（remote/work_mode 被接受为硬约束但不进 SQL、
+  need_visa_sponsor=false 不生成过滤子句）、不得引用 filter_log 当硬条件
+  执行日志（它只记 avoid-role 剔除）：
+  intent 完成 → PM："我确认小检接收的约束与确认单一致（matching_input
+  checkpoint 支撑），交给小检执行。"；
+  retrieval 完成 → PM："小检返回了 {候选数} 个候选，我核对了候选集、排序与
+  证据完整性（matching_output.metrics 支撑：{ranking 数}/{证据数}），
+  交给小策。"（快照缺失或受控重检场景不带数字；**checkpoint 为 warning 时
+  用带提示的交接句，不复用 passed 文案**）；
+- **执行 agent 播报改服务语态并带引导句**（内容由 approved_plan 真实数据
+  渲染）：小检开工句在 `locations` 非空时加"你要求的 {locations} 我已锁定为
+  硬条件，绝不放宽"（`remote=true` 路径换中性文案"你选择了远程方向，我按此
+  筛选"——remote 不进 SQL 子句，不得称硬条件）；
+  小策完成句加"如果你之后想让我基于某个岗位细化简历，可在结果卡提交反馈
+  或开启新咨询"；
+- 后端测试（现有锚点明确列出）：`test_conversation_api.py` 的三组序列锚定
+  断言须同步更新（:117 kind 全序列、:127 位置索引、:277 中间态 persona
+  序列）+ 新增：checkpoint passed/warning 双轨文案、候选数缺失/0/正数三态、
+  快照私有字段不泄漏回归、PM 消息顺序与 seq 连续性、前端 e2e mock 消息流
+  同步；**诚实约束**：数字只在快照有值时渲染，取不到用架构事实句。
+
+**C. 结果后（引导闭环，前端）**
+PM 结果消息下方渲染**行动 chips**：`查看第 1 名的证据 / 更新申请进展 /
+新建咨询细化方向`——把"接下来该干嘛"变成一次点击（全部映射到已有交互，
+零新端点）。
+
 ### P0-8 简历确认增强
 确认卡加「查看完整档案」内联展开：education / experience / **projects** /
 skills / resume_quality_issues / **evidence** 六类全量渲染（preview DTO 全集，
@@ -174,22 +257,26 @@ skills / resume_quality_issues / **evidence** 六类全量渲染（preview DTO �
 720 对话 + 300 面板 ≥ 1360px 才成立，或容器查询）；匹配强度条与 RAPTOR/Cross
 动态胶囊（依赖 explain / per-run `applied` 字段的 API 增量）；精确额度与标题
 落库；landing 产品缩影；离开页面提醒 / 取消 run；ProfilePage 的 JSON 裸奔
-chips 化；真流式（SSE）。
+chips 化；真流式（SSE）；**run-input/状态机 API（小检/小策运行中真提问的
+前置条件，Codex 六审确认归属）**。
 
-**工期口径（二轮复核后）**：全量 P0 约 2.5–3 天；若 2.5 天为硬上限，
+**工期口径（v3）**：全量 P0 约 3–3.5 天（P0-9 约 +0.5–1 天：projector 增强 +
+单测 + mock 同步 + PM 插话组件）；若 3 天为硬上限，
 延后「消息分组与 hover 元信息」「侧栏本地标题」「空态三步卡」三项为 P0.5，
-保住 P0-0、RunRail、槽位 chips、滚动保护、结果区证据/反馈、移动导航六件套。
+保住 P0-0、服务进度卡、槽位 chips、滚动保护、结果区证据/反馈、移动导航六件套。
 
-## 五、实施清单与测试（v2）
+## 五、实施清单与测试（v3）
 
-五个提交批次：
+六个提交批次：
 1. P0-0 缺陷包 + fixture 契约修正（先红后绿）；
-2. RunRail + 状态指示 + 滚动保护（plan_ready 的 stage="plan"、queued 的
+2. PM 群公告·服务进度卡 + 状态指示 + 滚动保护（plan_ready 的 stage="plan"、queued 的
    stage=null 分别映射，映射表按 status 优先并处理可空）；
 3. 槽位 chips + 消息质感；
 4. 结果区重构 + 简历展开 + 额度/空态（侧栏标题走自定义事件或 query
    invalidate 触发重渲——同 tab 无 storage 事件）；
-5. 移动抽屉导航（`role="dialog"` + `aria-modal`、打开即入焦、**focus trap 或
+5. **P0-9 角色主动性**（B 段后端投影 + projector 单测先行 → A/C 段前端
+   PM 插话与行动 chips → e2e 消息流断言更新）；
+6. 移动抽屉导航（`role="dialog"` + `aria-modal`、打开即入焦、**focus trap 或
    背景 inert**、Escape 关闭、焦点回归触发钮、背景滚动锁，配 Vitest/移动
    Playwright 断言）+
    Playwright 移动冒烟（**专用 spec/testMatch 只跑一条**，不让 mobile project
@@ -200,16 +287,22 @@ chips 化；真流式（SSE）。
   标题/last_run 本地键读写、手风琴 a11y 契约重写 ×3（净增 ~8）；
 - Playwright：现有 6 场景维护（查看证据/关闭证据 → 手风琴断言；反馈按钮组
   文案；确认单按钮保持 accessible name 不变以免动 :257-266）+ 新增 4 场景
-  （RunRail 七段推进、chips 随咨询翻绿含"不需担保"、failed/stale/cancelled →
+  （服务进度卡四段推进（底层七串）、chips 随咨询翻绿含"不需担保"、failed/stale/cancelled →
   「新建咨询重试」且断言产生新 session_id、侧栏切换后 run 恢复）+ 375px 移动旅程冒烟（新增 mobile project）；
 - 每批次跑 typecheck / vitest / build / e2e 四门；OpenAPI 与 generated.ts
   零变化为硬验收。
 
-## 六、验收标准（v2）
-1. 运行期 5 秒内可见"到了七段中的哪一段、当前阶段叫什么"；
+## 六、验收标准（v3）
+1. 运行期 5 秒内可见"四个角色谁在干活、到了哪一段"，且进度以 PM 群公告
+   消息形态存在于群聊内（不是页面顶部的工程轨）；
 2. 咨询任意时刻能说出"还差哪个槽位"，且"不需要签证担保"正确显示为已完成；
 3. 结果区不点按钮即见排名层次与可信能力胶囊（无一句不可证实的声明）；
 4. 运行中切侧栏再回来，运行轨与结果完好；失败后一键「新建咨询重试」；
 5. 反馈四个按钮均发送合法 outcome 并获 202（mock e2e 断言词表 + 真实服务
    彩排各验一次——「真实入库」以彩排为准）；
-6. Playwright 10 场景 + 移动冒烟全绿；OpenAPI/generated.ts 零字节变化。
+6. 全程 UI 至少出现 4 条 PM 消息（**intent 交接 / retrieval 交接 / 核查
+   checkpoint / 结果**——intro 被 P0-0 #5 跳过故不计入），两条新交接消息
+   统一 `kind="checkpoint"`（与 intro-skip、recovery 渲染逻辑互不干扰）；
+   执行 agent 播报含由真实数据渲染的引导句；
+7. Playwright 10+ 场景 + 移动冒烟全绿；OpenAPI/generated.ts 零字节变化
+   （projector 只新增消息行）。
