@@ -556,6 +556,8 @@ export interface components {
             phase: "template" | "resume_clarify" | "deepen" | "explore";
             /** Round */
             round: number;
+            /** Supervisor Notes */
+            supervisor_notes?: components["schemas"]["SupervisorNote"][];
             /** User Message */
             user_message: string;
         };
@@ -1225,6 +1227,28 @@ export interface components {
             p95_ms?: number | null;
             /** Stage */
             stage: string;
+        };
+        /** SupervisorNote */
+        SupervisorNote: {
+            /** Coach Attempt Id */
+            coach_attempt_id: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "coach";
+            /** Text */
+            text: string;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "deepen_entry" | "stagnation" | "finalizable";
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "pass" | "advise";
         };
         /** ValidationError */
         ValidationError: {

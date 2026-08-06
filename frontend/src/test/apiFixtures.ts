@@ -20,6 +20,7 @@ type RunConversation = Schemas["RunConversationResponse"];
 type RunResult = Schemas["RunResultResponse"];
 type RunStatus = Schemas["RunStatusResponse"];
 type Session = Schemas["SessionResponse"];
+type SupervisorNote = Schemas["SupervisorNote"];
 
 export const RUN_STAGES = [
   "resume",
@@ -213,6 +214,16 @@ export const apiFixtures = {
         questions_used: 0,
       },
     }) satisfies ConsultTurn,
+
+  supervisorNote: (overrides: Partial<SupervisorNote> = {}) =>
+    ({
+      kind: "coach",
+      trigger: "deepen_entry",
+      text: "方向已经明确，下一轮补充岗位取舍依据。",
+      verdict: "advise",
+      coach_attempt_id: "coach-e2e-1",
+      ...overrides,
+    }) satisfies SupervisorNote,
 
   consultFinalize: () =>
     ({

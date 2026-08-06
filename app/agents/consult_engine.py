@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 import re
@@ -245,8 +246,16 @@ def build_consult_user_prompt(
         "user_message": bounded_message,
         "profile_summary": profile_draft(state.career_state),
         "next_template_slot": _next_template_slot(state.career_state),
-        "recent_transcript": state.career_state.consult_transcript[
-            -TRANSCRIPT_CONTEXT_ROUNDS:
+        "recent_transcript": [
+            {
+                key: deepcopy(value)
+                for key, value in entry.items()
+                if key != "supervisor_notes"
+            }
+            for entry in state.career_state.consult_transcript[
+                -TRANSCRIPT_CONTEXT_ROUNDS:
+            ]
+            if isinstance(entry, dict)
         ],
     }
     remembered_draft = _remembered_profile_draft(remembered_profile)

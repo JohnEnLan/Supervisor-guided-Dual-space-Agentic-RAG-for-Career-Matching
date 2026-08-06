@@ -162,12 +162,23 @@ class ClarificationProgress(PublicDTO):
     questions_used: int = Field(default=0, ge=0)
 
 
+class SupervisorNote(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["coach"]
+    trigger: Literal["deepen_entry", "stagnation", "finalizable"]
+    text: str = Field(min_length=1, max_length=300)
+    verdict: Literal["pass", "advise"]
+    coach_attempt_id: str = Field(min_length=1)
+
+
 class ConsultTranscriptEntry(PublicDTO):
     round: int = Field(ge=1)
     user_message: str = Field(max_length=2000)
     assistant_reply: str = Field(max_length=120)
     next_question: str = Field(max_length=80)
     phase: Literal["template", "resume_clarify", "deepen", "explore"]
+    supervisor_notes: list[SupervisorNote] = Field(default_factory=list)
 
 
 class ConsultRequest(PublicDTO):

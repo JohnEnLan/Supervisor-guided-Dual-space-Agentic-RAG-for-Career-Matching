@@ -400,6 +400,13 @@
             "title": "Round",
             "type": "integer"
           },
+          "supervisor_notes": {
+            "items": {
+              "$ref": "#/components/schemas/SupervisorNote"
+            },
+            "title": "Supervisor Notes",
+            "type": "array"
+          },
           "user_message": {
             "maxLength": 2000,
             "title": "User Message",
@@ -2205,6 +2212,52 @@
           "stage"
         ],
         "title": "StageLatencyResponse",
+        "type": "object"
+      },
+      "SupervisorNote": {
+        "properties": {
+          "coach_attempt_id": {
+            "minLength": 1,
+            "title": "Coach Attempt Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "coach",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "trigger": {
+            "enum": [
+              "deepen_entry",
+              "stagnation",
+              "finalizable"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "pass",
+              "advise"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "trigger",
+          "text",
+          "verdict",
+          "coach_attempt_id"
+        ],
+        "title": "SupervisorNote",
         "type": "object"
       },
       "ValidationError": {

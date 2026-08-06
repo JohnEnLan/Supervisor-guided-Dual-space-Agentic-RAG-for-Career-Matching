@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 from copy import deepcopy
@@ -51,6 +52,16 @@ from app.agents.consult_engine import (
     determine_phase,
     profile_draft,
     run_consult_round,
+)
+from app.agents.consult_coach import (
+    CoachAttemptOutcome,
+    CoachReservationConflict,
+    evaluate_consult_l1,
+    finalize_coach_reservation,
+    merge_coach_reservations,
+    merge_consult_transcript,
+    reserve_coach_attempt,
+    run_consult_coach,
 )
 from app.db.run_store import RunConflict, create_run, save_match_brief
 from app.config import settings
@@ -229,6 +240,7 @@ async def resume_confirm(
 @router.get(
     "/sessions/{session_id}/consult",
     response_model=ConsultStateResponse,
+    response_model_exclude_unset=True,
     dependencies=[Depends(require_owned_session)],
 )
 async def get_consultation(session_id: str) -> ConsultStateResponse:
@@ -501,6 +513,7 @@ async def _execute_consult_round(
         current_resume_version: int = 0,
         current_resume_upload_generation: int = 0,
     ) -> SharedState:
+        completeness_before = calculate_completeness(latest.career_state)
         if settings.resume_clarify_enabled and (
             current_resume_version != expected_resume_version
             or current_resume_upload_generation
@@ -525,6 +538,12 @@ async def _execute_consult_round(
             # the LLM was outside the lock. Never revive that target or pending.
             raise _ConsultRoundConflict(expected_round)
         for field_name in _INTENT_CAREER_FIELDS:
+            if field_name == "consult_transcript":
+                latest.career_state.consult_transcript = merge_consult_transcript(
+                    latest.career_state.consult_transcript,
+                    working.career_state.consult_transcript,
+                )
+                continue
             setattr(
                 latest.career_state,
                 field_name,
@@ -541,6 +560,32 @@ async def _execute_consult_round(
                 pending_at_round_start=pending_at_round_start,
                 raw_answer=str(message).strip()[:2000],
             )
+        if settings.consult_coach_enabled:
+            # The working copy may predate CAS2 from the preceding round. Merge
+            # attempts monotonically before evaluating this turn so terminal
+            # reservations can never be overwritten by stale "reserved" data.
+            latest.coach_reservations = merge_coach_reservations(
+                latest.coach_reservations,
+                working.coach_reservations,
+            )
+            progress = _clarification_progress(latest).model_dump()
+            l1_facts = evaluate_consult_l1(
+                latest,
+                round_number=turn.round,
+                phase=turn.phase,
+                completeness_before=completeness_before,
+                completeness=calculate_completeness(latest.career_state),
+                can_finalize=turn.can_finalize,
+                clarification_turn_active=turn.clarification_turn_active,
+                clarification_progress=progress,
+                coach_max=settings.consult_coach_max,
+            )
+            reserve_coach_attempt(
+                latest,
+                l1_facts,
+                coach_max=settings.consult_coach_max,
+            )
+            latest.supervisor_log.append(deepcopy(l1_facts))
         return latest.model_copy(deep=True)
 
     try:
@@ -558,7 +603,85 @@ async def _execute_consult_round(
         raise HTTPException(status_code=409, detail="resume_changed") from None
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
+    if settings.consult_coach_enabled:
+        reservation = _reserved_coach_attempt_for_round(persisted, turn.round)
+        if reservation is not None:
+            l1_facts = _consult_l1_for_round(persisted, turn.round)
+            try:
+                outcome = await run_consult_coach(
+                    persisted,
+                    reservation=reservation,
+                    l1_facts=l1_facts,
+                )
+            except asyncio.CancelledError:
+                # CAS1 already burned the reservation. Cancellation must remain
+                # observable to the server and must not release or retry it.
+                raise
+            except Exception:
+                # Defensive fail-open boundary around the coach adapter itself;
+                # ordinary transport/parse/timeout failures are already mapped
+                # inside run_consult_coach.
+                outcome = CoachAttemptOutcome(
+                    status="unavailable",
+                    error_code="service",
+                )
+
+            def persist_coach_outcome(
+                latest: SharedState,
+                _current_resume_version: int = 0,
+                _current_resume_upload_generation: int = 0,
+            ) -> SharedState:
+                # CAS2 deliberately has no rounds_used equality check. It acts
+                # on the newest locked state and accepts later consultation
+                # rounds as long as the reservation identity still matches.
+                finalize_coach_reservation(
+                    latest,
+                    round_number=int(reservation["round"]),
+                    trigger=str(reservation["trigger"]),
+                    coach_attempt_id=str(reservation["coach_attempt_id"]),
+                    status=outcome.status,
+                    note=outcome.note,
+                    error_code=outcome.error_code,
+                )
+                return latest.model_copy(deep=True)
+
+            try:
+                persisted = await mutate_state_atomically(
+                    session_id=session_id,
+                    mutator=persist_coach_outcome,
+                    status=None,
+                )
+            except KeyError:
+                raise HTTPException(
+                    status_code=404,
+                    detail="session_id not found",
+                ) from None
     return turn, persisted
+
+
+def _reserved_coach_attempt_for_round(
+    state: SharedState,
+    round_number: int,
+) -> dict | None:
+    for reservation in state.coach_reservations:
+        if (
+            isinstance(reservation, dict)
+            and int(reservation.get("round") or 0) == int(round_number)
+            and reservation.get("status") == "reserved"
+        ):
+            return deepcopy(reservation)
+    return None
+
+
+def _consult_l1_for_round(state: SharedState, round_number: int) -> dict:
+    for entry in reversed(state.supervisor_log):
+        if (
+            isinstance(entry, dict)
+            and entry.get("stage") == "consult_coach_l1"
+            and int(entry.get("round") or 0) == int(round_number)
+        ):
+            return deepcopy(entry)
+    raise CoachReservationConflict("coach L1 facts not found")
 
 
 def _clarification_progress(state: SharedState) -> ClarificationProgress:
