@@ -436,7 +436,7 @@ async def _lock_approved_brief(
         "hard_constraints": dict(brief.hard_constraints),
         "soft_prefs": dict(brief.soft_preferences),
         "top_k": brief.result_count,
-        "include_raptor": False,
+        "include_raptor": settings.raptor_enabled,
         "use_cross_encoder": settings.rerank_enabled,
     }
     state.supervisor_log.append(

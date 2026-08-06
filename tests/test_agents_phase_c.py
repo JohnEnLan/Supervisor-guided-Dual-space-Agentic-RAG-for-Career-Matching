@@ -1932,3 +1932,35 @@ async def test_orchestrator_allows_only_one_repair_across_reretrieval(
     assert final_calls == 2
     assert len(repair_events) == 1
     assert repair_events[0]["repaired_resume_advice"] == 1
+
+
+@pytest.mark.asyncio
+async def test_locked_brief_plan_resolves_raptor_switch_from_settings(monkeypatch):
+    # RAPTOR_ENABLED 与 RERANK_ENABLED 同构：run 级一次解析进 plan 快照
+    from app.agents import orchestrator
+    from app.domain.match_brief import create_match_brief
+    from app.state.schema import SharedState
+
+    monkeypatch.setattr(orchestrator.settings, "raptor_enabled", True)
+    monkeypatch.setattr(orchestrator.settings, "rerank_enabled", True)
+
+    async def no_persist(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(orchestrator, "save_state_snapshot", no_persist)
+    state = SharedState(session_id="s-raptor", user_id="u-raptor")
+    brief = create_match_brief(
+        career_goal="backend roles",
+        hard_constraints={},
+        soft_preferences={},
+        avoid_roles=[],
+        result_count=5,
+        plan_version=1,
+    )
+
+    _state, plan = await orchestrator._lock_approved_brief(
+        state, brief, run_id="run-raptor"
+    )
+
+    assert plan["include_raptor"] is True
+    assert plan["use_cross_encoder"] is True

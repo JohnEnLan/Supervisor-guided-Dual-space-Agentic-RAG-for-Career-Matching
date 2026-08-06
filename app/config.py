@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     qwen_embed_model: str = "text-embedding-v4"
     embed_dim: int = 1024  # 必须与 schema.sql 里的 vector(N) 一致
 
+    # RAPTOR 检索通道（岗位/角色摘要节点树）：产品主链 plan 的 run 级快照来源。
+    # 消融实测与 Cross 同开为最优组合（docs/validation/2026-08-06）。
+    raptor_enabled: bool = False
     rerank_enabled: bool = False
     rerank_model: Literal["gte-rerank-v2"] = "gte-rerank-v2"
     rerank_endpoint: str | None = None
