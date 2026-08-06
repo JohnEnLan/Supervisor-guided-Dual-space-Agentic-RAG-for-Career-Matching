@@ -20,6 +20,7 @@ type FlowState = {
   reactions: number;
   reactionOutcomes: string[];
   statusPoll: number;
+  manualStatusStage: number | null;
   createdSessions: number;
 };
 
@@ -34,6 +35,7 @@ function createFlowState(overrides: Partial<FlowState> = {}): FlowState {
     reactions: 0,
     reactionOutcomes: [],
     statusPoll: 0,
+    manualStatusStage: null,
     createdSessions: 0,
     ...overrides,
   };
@@ -113,10 +115,11 @@ function installV2Api(page: Page, state: FlowState) {
             retryAfterMs: 50,
           }),
         );
-      const stageIndex = Math.min(state.statusPoll, RUN_STAGES.length - 1);
+      const stageIndex =
+        state.manualStatusStage ?? Math.min(state.statusPoll, RUN_STAGES.length - 1);
       const completed = RUN_STAGES.slice(0, stageIndex);
       const done = stageIndex === RUN_STAGES.length - 1;
-      state.statusPoll += 1;
+      if (state.manualStatusStage == null) state.statusPoll += 1;
       return json(
         apiFixtures.runStatus({
           status: done ? "completed" : "running",
@@ -127,13 +130,16 @@ function installV2Api(page: Page, state: FlowState) {
         }),
       );
     }
-    if (path.endsWith("/conversation"))
+    if (path.endsWith("/conversation")) {
+      const conversationDone =
+        state.manualStatusStage === RUN_STAGES.length - 1 || state.statusPoll >= RUN_STAGES.length;
       return json(
         apiFixtures.runConversation(
-          state.statusPoll >= RUN_STAGES.length ? "completed" : "running",
-          state.statusPoll >= RUN_STAGES.length ? null : 50,
+          conversationDone ? "completed" : "running",
+          conversationDone ? null : 50,
         ),
       );
+    }
     if (path.endsWith("/result")) return json(apiFixtures.runResult(VALID_OUTCOMES.length));
     if (path.endsWith("/reaction")) {
       const body = request.postDataJSON() as { outcome?: unknown };
@@ -269,6 +275,48 @@ test("refresh mid-consultation restores transcript from GET consult", async ({ p
   await expect(page.getByText("明白了（第 1 轮）。")).toBeVisible();
   await expect(page.getByText("明白了（第 2 轮）。")).toBeVisible();
   await expect(page.getByRole("button", { name: "生成确认单" })).toBeVisible();
+});
+
+test("PM service announcement advances four persona sections from all seven contract stages", async ({
+  page,
+}) => {
+  const state = createFlowState({
+    loggedIn: true,
+    uploaded: true,
+    confirmed: true,
+    executed: true,
+    manualStatusStage: 0,
+  });
+  await installV2Api(page, state);
+  await page.goto("/app/sessions/sess-e2e-1?run=run-e2e-1");
+
+  const card = page.getByRole("region", { name: "服务进度" });
+  await expect(card).toBeVisible();
+  await expect(page.getByRole("region", { name: "服务进度" })).toHaveCount(1);
+  await expect(card.locator(".v2-progress-list > li")).toHaveCount(4);
+  await expect(card).not.toContainText(/耗时|秒|分钟/);
+
+  const stages = [
+    ["资料已就绪·系统处理", "小意 · 需求确认"],
+    ["PM 正在复核小意已确认的需求", "小意 · 需求确认"],
+    ["小检正在筛选岗位", "小检 · 岗位筛选"],
+    ["小策正在整理规划建议", "小策 · 规划建议"],
+    ["PM 正在核查匹配结果", "PM · 核查发布"],
+    ["系统正在整理发布材料", "PM · 核查发布"],
+  ] as const;
+
+  for (const [index, [detail, section]] of stages.entries()) {
+    state.manualStatusStage = index;
+    const currentSection = card.locator('.v2-progress-list > li[data-state="current"]');
+    await expect(currentSection).toContainText(section);
+    await expect(currentSection).toContainText(detail);
+    await expect(page.locator(".v2-progress-message")).toHaveAttribute("data-sticky", "true");
+  }
+
+  state.manualStatusStage = RUN_STAGES.length - 1;
+  await expect(card.getByRole("status", { name: "服务运行状态" })).toHaveText("已发布");
+  await expect(card.locator('.v2-progress-list > li[data-state="complete"]')).toHaveCount(4);
+  await expect(page.locator(".v2-progress-message")).toHaveCount(0);
 });
 
 for (const terminalStatus of ["failed", "stale", "cancelled"] as const) {

@@ -17,6 +17,8 @@ import {
 import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
 import { ReactionForm } from "../features/feedback/ReactionForm";
 import { readLastRun, removeLastRun, writeLastRun } from "./localRunStorage";
+import { deriveServiceProgress, type ServiceProgressItem } from "./runProgress";
+import { useProtectedTimelineScroll } from "./useProtectedTimelineScroll";
 import "./theme.css";
 
 const TERMINAL = new Set(["completed", "completed_with_warnings", "failed", "stale", "cancelled"]);
@@ -121,15 +123,21 @@ function Bubble({
   persona,
   children,
   tone,
+  sticky = false,
 }: {
   persona: keyof typeof PERSONAS;
   children: React.ReactNode;
   tone?: "card";
+  sticky?: boolean;
 }) {
   const meta = PERSONAS[persona] ?? PERSONAS.pm;
   const mine = persona === "user";
   return (
-    <li className={mine ? "v2-msg mine" : "v2-msg"} data-persona={persona}>
+    <li
+      className={`${mine ? "v2-msg mine" : "v2-msg"}${sticky ? " v2-progress-message" : ""}`}
+      data-persona={persona}
+      data-sticky={sticky ? "true" : undefined}
+    >
       {!mine ? (
         <span className="v2-avatar" aria-hidden="true">
           {meta.short}
@@ -145,6 +153,57 @@ function Bubble({
         {children}
       </div>
     </li>
+  );
+}
+
+function progressMarker(item: ServiceProgressItem): string {
+  if (item.state === "complete") return "✓";
+  if (item.state === "interrupted") return "!";
+  if (item.state === "current") return "●";
+  return "—";
+}
+
+function ServiceProgressCard({
+  status,
+  hasRecovery,
+  sticky,
+}: {
+  status: RunStatus | undefined;
+  hasRecovery: boolean;
+  sticky: boolean;
+}) {
+  const progress = deriveServiceProgress(status, hasRecovery);
+  return (
+    <Bubble persona="pm" tone="card" sticky={sticky}>
+      <section className="v2-service-progress" aria-label="服务进度">
+        <div className="v2-progress-heading">
+          <strong>服务进度</strong>
+          <span role="status" aria-label="服务运行状态">
+            {progress.summary}
+          </span>
+        </div>
+        <ol className="v2-progress-list">
+          {progress.items.map((item) => (
+            <li
+              key={item.id}
+              data-state={item.state}
+              data-actor={item.actor ?? undefined}
+              data-pulsing={item.state === "current" ? String(item.pulsing) : undefined}
+              aria-current={item.state === "current" ? "step" : undefined}
+            >
+              <span className="v2-progress-marker" aria-hidden="true">
+                {progressMarker(item)}
+              </span>
+              <span className="v2-progress-copy">
+                <strong>{item.label}</strong>
+                <small>{item.detail}</small>
+                {item.recovery ? <small className="v2-progress-recovery">↻ 质量把关：受控重检</small> : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </section>
+    </Bubble>
   );
 }
 
@@ -200,7 +259,15 @@ function BriefCard({
   );
 }
 
-function ResultCards({ runId }: { runId: string }) {
+function ResultCards({
+  runId,
+  anchorRef,
+  highlighted,
+}: {
+  runId: string;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+  highlighted: boolean;
+}) {
   const result = useQuery({
     queryKey: ["v2-result", runId],
     queryFn: () => api.runResult(runId),
@@ -208,11 +275,30 @@ function ResultCards({ runId }: { runId: string }) {
   
   if (result.isPending)
     return (
-      <p className="v2-inline-loading">
-        <LoaderCircle className="spin" size={15} /> 正在整理结果…
-      </p>
+      <div
+        ref={anchorRef}
+        className={`v2-results${highlighted ? " is-highlighted" : ""}`}
+        role="region"
+        aria-label="匹配结果"
+        tabIndex={-1}
+      >
+        <p className="v2-inline-loading">
+          <LoaderCircle className="spin" size={15} /> 正在整理结果…
+        </p>
+      </div>
     );
-  if (result.isError) return <p className="v2-error">结果暂时无法读取，可稍后刷新。</p>;
+  if (result.isError)
+    return (
+      <div
+        ref={anchorRef}
+        className={`v2-results${highlighted ? " is-highlighted" : ""}`}
+        role="region"
+        aria-label="匹配结果"
+        tabIndex={-1}
+      >
+        <p className="v2-error">结果暂时无法读取，可稍后刷新。</p>
+      </div>
+    );
   const product = result.data.result;
   const resumeStrategy = product.resume_strategy ?? [];
   const skillGaps = product.skill_gaps ?? [];
@@ -224,9 +310,18 @@ function ResultCards({ runId }: { runId: string }) {
     bridge_role: "跳板岗位",
   };
   return (
-    <div className="v2-results">
-      {(product.recommended_roles ?? []).map((role: Recommendation) => (
-        <article key={role.job_id} className="v2-job-card">
+    <div
+      ref={anchorRef}
+      className="v2-results"
+      role="region"
+      aria-label="匹配结果"
+      tabIndex={-1}
+    >
+      {(product.recommended_roles ?? []).map((role: Recommendation, index: number) => (
+        <article
+          key={role.job_id}
+          className={`v2-job-card${highlighted && index === 0 ? " is-highlighted" : ""}`}
+        >
           <header>
             <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ?? role.tier}</span>
             {role.demo_synthetic ? (
@@ -308,6 +403,7 @@ export function WorkbenchPage() {
   // 避免旧实例卸载时的焦点归还 microtask 把焦点抢回背景（互审第 2 轮阻断）
   const [retryModal, setRetryModal] = useState<"confirm" | "quota" | null>(null);
   const timelineRef = useRef<HTMLOListElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
   const executeAttempted = useRef(false);
 
   const consult = useQuery({
@@ -463,12 +559,23 @@ export function WorkbenchPage() {
     status.data?.status === "completed" || status.data?.status === "completed_with_warnings";
   const retryableTerminal = ["failed", "stale", "cancelled"].includes(status.data?.status ?? "");
 
-  const messageCount =
-    transcript.length + runMessages.length + (briefDraft ? 1 : 0) + (completed ? 1 : 0);
-  useEffect(() => {
-    const timeline = timelineRef.current;
-    if (timeline) timeline.scrollTop = timeline.scrollHeight;
-  }, [messageCount, resumeReady]);
+  const timelineContentKey = [
+    resumeReady,
+    resumeProcessing,
+    transcript.length,
+    turn.isPending,
+    Boolean(briefDraft),
+    runMessages.map((item) => item.seq).join(","),
+    completed,
+    retryableTerminal,
+  ].join(":");
+  const timelineScroll = useProtectedTimelineScroll({
+    timelineRef,
+    resultRef,
+    contentKey: timelineContentKey,
+    resultReady: completed,
+    resetKey: `${sessionId}:${runId ?? "consult"}`,
+  });
 
   const canConsult = resumeConfirmed && !runId;
   const inputDisabled = !canConsult || turn.isPending;
@@ -510,7 +617,7 @@ export function WorkbenchPage() {
         ) : null}
       </header>
 
-      <ol className="v2-timeline" ref={timelineRef} aria-live="polite">
+      <ol className="v2-timeline" ref={timelineRef} onScroll={timelineScroll.onScroll} aria-live="polite">
         <Bubble persona="pm">
           <p>
             欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，
@@ -571,6 +678,14 @@ export function WorkbenchPage() {
           </Bubble>
         ))}
 
+        {turn.isPending ? (
+          <Bubble persona="intent_consultant">
+            <p className="v2-inline-loading">
+              <LoaderCircle className="spin" size={15} /> 小意正在回复…
+            </p>
+          </Bubble>
+        ) : null}
+
         {canConsult && consult.data?.can_finalize && !briefDraft ? (
           <Bubble persona="pm" tone="card">
             <p>
@@ -604,21 +719,27 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
 
+        {runId ? (
+          <ServiceProgressCard
+            status={status.data}
+            hasRecovery={runMessages.some((item) => item.kind === "recovery")}
+            sticky={running}
+          />
+        ) : null}
+
         {runMessages.map((item: ConversationMessage) => (
           <Bubble key={`run-${item.seq}`} persona={item.persona}>
             <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
           </Bubble>
         ))}
 
-        {running ? (
-          <li className="v2-typing">
-            <LoaderCircle className="spin" size={14} /> 团队正在处理下一阶段…
-          </li>
-        ) : null}
-
         {completed && runId ? (
           <Bubble persona="pm" tone="card">
-            <ResultCards runId={runId} />
+            <ResultCards
+              runId={runId}
+              anchorRef={resultRef}
+              highlighted={timelineScroll.resultHighlighted}
+            />
           </Bubble>
         ) : null}
 
@@ -635,6 +756,16 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
       </ol>
+
+      {timelineScroll.notice ? (
+        <button
+          type="button"
+          className={`v2-new-message${timelineScroll.notice === "result" ? " result-ready" : ""}`}
+          onClick={timelineScroll.followNotice}
+        >
+          {timelineScroll.notice === "result" ? "结果已生成 ↓" : "↓ 有新消息"}
+        </button>
+      ) : null}
 
       <footer className="v2-composer">
         <div className="v2-mode-toggle" role="tablist" aria-label="咨询模式">

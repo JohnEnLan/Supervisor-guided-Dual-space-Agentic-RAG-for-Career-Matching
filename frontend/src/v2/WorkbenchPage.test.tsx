@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../api/client";
 import { api, type Me } from "../api/queries";
+import { apiFixtures, RUN_STAGES } from "../test/apiFixtures";
 import { PERSONAS, conversationInterval, statusInterval } from "./WorkbenchPage";
 import { WorkbenchPage } from "./WorkbenchPage";
 
@@ -112,11 +113,12 @@ function renderWorkbench(initialEntry = "/app/sessions/sess-1") {
     ],
     { initialEntries: [initialEntry] },
   );
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { queryClient, ...view };
 }
 
 beforeEach(() => {
@@ -145,6 +147,279 @@ describe("v2 personas", () => {
       "strategist",
       "user",
     ]);
+  });
+});
+
+describe("PM service progress announcement", () => {
+  function mockRun(statusValue: string, stage: string | null, completedStages: readonly string[] = []) {
+    mockWorkbenchApi();
+    vi.mocked(api.runStatus).mockResolvedValue(
+      apiFixtures.runStatus({
+        status: statusValue,
+        stage,
+        completedStages,
+        resultReady: statusValue === "completed" || statusValue === "completed_with_warnings",
+        retryAfterMs: null,
+      }),
+    );
+    vi.mocked(api.runConversation).mockResolvedValue(apiFixtures.runConversation(statusValue, null));
+  }
+
+  it("renders one sticky PM announcement with four persona sections and no invented duration", async () => {
+    mockRun("running", "retrieval", ["resume", "intent"]);
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const card = await screen.findByRole("region", { name: "服务进度" });
+    expect(card.closest(".v2-msg")).toHaveAttribute("data-sticky", "true");
+    expect(screen.getAllByRole("region", { name: "服务进度" })).toHaveLength(1);
+    expect(within(card).getAllByRole("listitem")).toHaveLength(4);
+    for (const label of [
+      "小意 · 需求确认",
+      "小检 · 岗位筛选",
+      "小策 · 规划建议",
+      "PM · 核查发布",
+    ]) {
+      expect(within(card).getByText(label)).toBeVisible();
+    }
+    expect(card).not.toHaveTextContent(/耗时|秒|分钟/);
+  });
+
+  it.each([
+    ["resume", "小意 · 需求确认", "资料已就绪·系统处理", "system", false],
+    ["intent", "小意 · 需求确认", "PM 正在复核小意已确认的需求", "pm", true],
+    ["retrieval", "小检 · 岗位筛选", "小检正在筛选岗位", "job_scout", true],
+    ["strategy", "小策 · 规划建议", "小策正在整理规划建议", "strategist", true],
+    ["verification", "PM · 核查发布", "PM 正在核查匹配结果", "pm", true],
+    ["finalization", "PM · 核查发布", "系统正在整理发布材料", "system", false],
+    ["result", "PM · 核查发布", "PM 正在发布结果", "pm", true],
+  ])("maps exact stage %s to %s with honest actor copy", async (stage, section, detail, actor, pulsing) => {
+    const stageIndex = RUN_STAGES.indexOf(stage as (typeof RUN_STAGES)[number]);
+    mockRun("running", stage, RUN_STAGES.slice(0, Math.max(stageIndex, 0)));
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const card = await screen.findByRole("region", { name: "服务进度" });
+    expect((await within(card).findAllByText(detail)).at(-1)).toBeVisible();
+    const currentItem = within(card).getByText(section).closest("li");
+    expect(currentItem).toHaveAttribute("data-state", "current");
+    expect(currentItem).toHaveAttribute("data-actor", actor);
+    expect(currentItem).toHaveAttribute("data-pulsing", String(pulsing));
+    if (stage === "resume") expect(card).not.toHaveTextContent("小意正在");
+  });
+
+  it.each([
+    ["completed", "finalization", "已发布"],
+    ["completed_with_warnings", "finalization", "已发布"],
+    ["plan_ready", "plan", "确认单已锁定，准备执行"],
+    ["draft", "plan", "确认单已锁定，准备执行"],
+    ["queued", null, "已进入执行队列"],
+    ["running", null, "正在启动"],
+    ["unexpected", "unexpected", "处理中"],
+  ])("prioritizes status %s over stage %s", async (statusValue, stage, label) => {
+    mockRun(statusValue, stage);
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const statusIndicator = await screen.findByRole("status", { name: "服务运行状态" });
+    await waitFor(() => expect(statusIndicator).toHaveTextContent(label));
+    if (statusValue.startsWith("completed")) {
+      const card = screen.getByRole("region", { name: "服务进度" });
+      expect(within(card).getAllByRole("listitem").every((item) => item.dataset.state === "complete")).toBe(true);
+    }
+  });
+
+  it.each(["failed", "stale", "cancelled"])(
+    "stops pulsing and marks the reached section when status is %s",
+    async (statusValue) => {
+      mockRun(statusValue, "retrieval", ["resume", "intent"]);
+      renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+      const card = await screen.findByRole("region", { name: "服务进度" });
+      await waitFor(() =>
+        expect(within(card).getByText("小检 · 岗位筛选").closest("li")).toHaveAttribute(
+          "data-state",
+          "interrupted",
+        ),
+      );
+      expect(card.querySelector('[data-state="current"]')).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([null, "plan"])("shows a card-level pre-execution interruption at stage %s", async (stage) => {
+    mockRun("failed", stage);
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const statusIndicator = await screen.findByRole("status", { name: "服务运行状态" });
+    await waitFor(() => expect(statusIndicator).toHaveTextContent("执行前中断"));
+    expect(document.querySelector('[data-state="interrupted"]')).not.toBeInTheDocument();
+  });
+
+  it("marks controlled recovery on the PM section from a recovery conversation message", async () => {
+    mockRun("running", "verification", ["resume", "intent", "retrieval", "strategy"]);
+    vi.mocked(api.runConversation).mockResolvedValue({
+      ...apiFixtures.runConversation("running", null),
+      messages: [
+        {
+          seq: 4,
+          persona: "pm",
+          display_name: "项目经理·PM",
+          kind: "recovery",
+          stage: "verification",
+          text: "正在执行一次受控重检。",
+        },
+      ],
+    });
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const card = await screen.findByRole("region", { name: "服务进度" });
+    expect(await within(card).findByText("↻ 质量把关：受控重检")).toBeVisible();
+  });
+});
+
+describe("truthful consultation typing state", () => {
+  it("shows a Xiaoyi typing bubble only while a real consult turn is pending", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.spyOn(api, "consultTurn").mockImplementation(() => new Promise(() => undefined));
+    renderWorkbench();
+
+    const input = await screen.findByPlaceholderText(/告诉小意你的想法/);
+    await user.type(input, "我想找后端岗位");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("小意正在回复…")).toBeVisible();
+    expect(screen.queryByText("团队正在处理下一阶段…")).not.toBeInTheDocument();
+  });
+});
+
+describe("protected timeline scrolling", () => {
+  function setTimelineMetrics(
+    timeline: HTMLElement,
+    { scrollHeight, clientHeight, scrollTop }: { scrollHeight: number; clientHeight: number; scrollTop: number },
+  ) {
+    Object.defineProperties(timeline, {
+      scrollHeight: { configurable: true, value: scrollHeight },
+      clientHeight: { configurable: true, value: clientHeight },
+    });
+    timeline.scrollTop = scrollTop;
+    fireEvent.scroll(timeline);
+  }
+
+  it("protects a reader 121px from the bottom but resumes following at the 120px boundary", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.runStatus).mockResolvedValue(
+      apiFixtures.runStatus({
+        status: "running",
+        stage: "retrieval",
+        completedStages: ["resume", "intent"],
+        resultReady: false,
+        retryAfterMs: null,
+      }),
+    );
+    const firstConversation = apiFixtures.runConversation("running", null);
+    vi.mocked(api.runConversation).mockResolvedValue(firstConversation);
+    const { queryClient } = renderWorkbench("/app/sessions/sess-1?run=run-created");
+    await screen.findByText("硬过滤与双路召回完成。");
+
+    const timeline = document.querySelector<HTMLOListElement>(".v2-timeline");
+    expect(timeline).not.toBeNull();
+    setTimelineMetrics(timeline!, { scrollHeight: 1000, clientHeight: 400, scrollTop: 479 });
+    const secondMessage = {
+      seq: 4,
+      persona: "strategist" as const,
+      display_name: "规划师·小策",
+      kind: "progress",
+      stage: "strategy",
+      text: "规划建议已更新。",
+    };
+    act(() => {
+      queryClient.setQueryData(["v2-run-conv", "run-created"], {
+        ...firstConversation,
+        messages: [...firstConversation.messages, secondMessage],
+      });
+    });
+
+    const newMessageButton = await screen.findByRole("button", { name: "↓ 有新消息" });
+    expect(timeline!.scrollTop).toBe(479);
+    await user.click(newMessageButton);
+    expect(timeline!.scrollTop).toBe(1000);
+    expect(screen.queryByRole("button", { name: "↓ 有新消息" })).not.toBeInTheDocument();
+
+    setTimelineMetrics(timeline!, { scrollHeight: 1000, clientHeight: 400, scrollTop: 480 });
+    act(() => {
+      queryClient.setQueryData(["v2-run-conv", "run-created"], {
+        ...firstConversation,
+        messages: [
+          ...firstConversation.messages,
+          secondMessage,
+          {
+            seq: 5,
+            persona: "pm",
+            display_name: "项目经理·PM",
+            kind: "checkpoint",
+            stage: "strategy",
+            text: "规划建议已进入核查。",
+          },
+        ],
+      });
+    });
+    await screen.findByText("规划建议已进入核查。");
+    await waitFor(() => expect(timeline!.scrollTop).toBe(1000));
+    expect(screen.queryByRole("button", { name: "↓ 有新消息" })).not.toBeInTheDocument();
+  });
+
+  it("uses the result-ready marker and scrolls to a briefly highlighted result anchor only on click", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    const runningStatus = apiFixtures.runStatus({
+      status: "running",
+      stage: "finalization",
+      completedStages: ["resume", "intent", "retrieval", "strategy", "verification"],
+      resultReady: false,
+      retryAfterMs: null,
+    });
+    vi.mocked(api.runStatus).mockResolvedValue(runningStatus);
+    vi.mocked(api.runConversation).mockResolvedValue(apiFixtures.runConversation("running", null));
+    vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult());
+    const { queryClient } = renderWorkbench("/app/sessions/sess-1?run=run-created");
+    await screen.findAllByText("系统正在整理发布材料");
+
+    const timeline = document.querySelector<HTMLOListElement>(".v2-timeline");
+    expect(timeline).not.toBeNull();
+    setTimelineMetrics(timeline!, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 });
+    act(() => {
+      queryClient.setQueryData(
+        ["v2-run-status", "run-created"],
+        apiFixtures.runStatus({
+          status: "completed",
+          stage: "finalization",
+          completedStages: RUN_STAGES,
+          resultReady: true,
+          retryAfterMs: null,
+        }),
+      );
+    });
+
+    const resultButton = await screen.findByRole("button", { name: "结果已生成 ↓" });
+    expect(timeline!.scrollTop).toBe(200);
+    const resultAnchor = await screen.findByRole("region", { name: "匹配结果" });
+    const firstResultCard = resultAnchor.querySelector<HTMLElement>(".v2-job-card");
+    expect(firstResultCard).not.toBeNull();
+    const regionScrollIntoView = vi.fn();
+    const cardScrollIntoView = vi.fn();
+    Object.defineProperty(resultAnchor, "scrollIntoView", {
+      configurable: true,
+      value: regionScrollIntoView,
+    });
+    Object.defineProperty(firstResultCard!, "scrollIntoView", {
+      configurable: true,
+      value: cardScrollIntoView,
+    });
+    await user.click(resultButton);
+
+    expect(cardScrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(regionScrollIntoView).not.toHaveBeenCalled();
+    expect(firstResultCard).toHaveClass("is-highlighted");
+    expect(screen.queryByRole("button", { name: "结果已生成 ↓" })).not.toBeInTheDocument();
   });
 });
 
