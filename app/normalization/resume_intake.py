@@ -15,7 +15,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from docx import Document
 from docx.table import Table
@@ -105,7 +105,7 @@ class EvidenceSpan(BaseModel):
     span_id: str
     page: int | None = None
     text: str
-    source: str = "resume"
+    source: Literal["resume", "user_clarification"] = "resume"
 
 
 class LLMResumePayload(BaseModel):

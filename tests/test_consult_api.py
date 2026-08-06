@@ -123,14 +123,20 @@ def test_post_consult_uses_atomic_cas_and_returns_new_contract(monkeypatch) -> N
         "completeness": 0.2,
         "can_finalize": False,
         "round": 1,
-        "profile_draft": {
-            "current_goal": ["Data analyst"],
-            "long_term_goal": [],
-            "hard_constraints": {},
-            "soft_preferences": {},
-            "avoid_roles": [],
-        },
-    }
+            "profile_draft": {
+                "current_goal": ["Data analyst"],
+                "long_term_goal": [],
+                "hard_constraints": {},
+                "soft_preferences": {},
+                "avoid_roles": [],
+            },
+            "clarification_progress": {
+                "answered": 0,
+                "skipped": 0,
+                "total": 0,
+                "questions_used": 0,
+            },
+        }
     assert persisted[0].career_state.consult_rounds_used == 1
     assert persisted[0].career_state.consult_transcript[0]["round"] == 1
 

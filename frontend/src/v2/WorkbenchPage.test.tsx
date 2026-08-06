@@ -280,6 +280,26 @@ describe("resume confirmation profile", () => {
 
     expect(api.uploadResume).toHaveBeenCalledWith("sess-1", replacement);
   });
+
+  it("confirms the exact resume version shown in the preview", async () => {
+    const user = userEvent.setup();
+    mockUnconfirmedFullResume();
+    vi.spyOn(api, "confirmResume").mockResolvedValue({
+      session_id: "sess-1",
+      resume_version: 2,
+      confirmed: true,
+      confirmed_at: "2026-08-07T09:01:00Z",
+    });
+    renderWorkbench();
+
+    await user.click(await screen.findByRole("button", { name: "确认简历档案" }));
+
+    await waitFor(() =>
+      expect(api.confirmResume).toHaveBeenCalledWith("sess-1", {
+        expected_resume_version: 2,
+      }),
+    );
+  });
 });
 
 describe("PM service progress announcement", () => {

@@ -8,6 +8,7 @@ export type SessionCreateRequest = Schemas["SessionCreateRequest"];
 export type Session = Schemas["SessionResponse"];
 export type ResumeAccepted = Schemas["ResumeAcceptedResponse"];
 export type ResumePreview = Schemas["ResumePreviewResponse"];
+export type ResumeConfirmRequest = Schemas["ResumeConfirmRequest"];
 export type ResumeConfirm = Schemas["ResumeConfirmResponse"];
 export type MatchBriefRequest = Schemas["MatchBriefRequest"];
 export type MatchBriefResponse = Schemas["MatchBriefResponse"];
@@ -48,8 +49,8 @@ export const api = {
     uploadRequest(`/sessions/${id(sessionId)}/resume`, file),
   resumePreview: (sessionId: string): Promise<ResumePreview> =>
     apiRequest(`/sessions/${id(sessionId)}/resume-preview`),
-  confirmResume: (sessionId: string): Promise<ResumeConfirm> =>
-    apiRequest(`/sessions/${id(sessionId)}/resume-confirm`, { method: "POST" }),
+  confirmResume: (sessionId: string, body: ResumeConfirmRequest): Promise<ResumeConfirm> =>
+    jsonRequest(`/sessions/${id(sessionId)}/resume-confirm`, "POST", body),
   createMatchBrief: (sessionId: string, body: MatchBriefRequest): Promise<MatchBriefResponse> =>
     jsonRequest(`/sessions/${id(sessionId)}/match-brief`, "POST", body),
   executeRun: (runId: string, body: ExecuteRunRequest): Promise<RunStatus> =>

@@ -433,6 +433,29 @@ export interface components {
             /** Highest Stage */
             highest_stage: string;
         };
+        /** ClarificationProgress */
+        ClarificationProgress: {
+            /**
+             * Answered
+             * @default 0
+             */
+            answered: number;
+            /**
+             * Questions Used
+             * @default 0
+             */
+            questions_used: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
         /** ConsultBriefDraftResponse */
         ConsultBriefDraftResponse: {
             /** Avoid Roles */
@@ -488,6 +511,7 @@ export interface components {
             assistant_reply: string;
             /** Can Finalize */
             can_finalize: boolean;
+            clarification_progress?: components["schemas"]["ClarificationProgress"];
             /** Completeness */
             completeness: number;
             /** Next Question */
@@ -496,7 +520,7 @@ export interface components {
              * Phase
              * @enum {string}
              */
-            phase: "template" | "deepen" | "explore";
+            phase: "template" | "resume_clarify" | "deepen" | "explore";
             profile_draft: components["schemas"]["ConsultProfileDraft"];
             /** Round */
             round: number;
@@ -505,13 +529,14 @@ export interface components {
         ConsultStateResponse: {
             /** Can Finalize */
             can_finalize: boolean;
+            clarification_progress?: components["schemas"]["ClarificationProgress"];
             /** Completeness */
             completeness: number;
             /**
              * Phase
              * @enum {string}
              */
-            phase: "template" | "deepen" | "explore";
+            phase: "template" | "resume_clarify" | "deepen" | "explore";
             profile_draft: components["schemas"]["ConsultProfileDraft"];
             /** Round */
             round: number;
@@ -528,7 +553,7 @@ export interface components {
              * Phase
              * @enum {string}
              */
-            phase: "template" | "deepen" | "explore";
+            phase: "template" | "resume_clarify" | "deepen" | "explore";
             /** Round */
             round: number;
             /** User Message */
@@ -957,6 +982,11 @@ export interface components {
             /** Suggestion */
             suggestion: string;
         };
+        /** ResumeConfirmRequest */
+        ResumeConfirmRequest: {
+            /** Expected Resume Version */
+            expected_resume_version?: number | null;
+        };
         /** ResumeConfirmResponse */
         ResumeConfirmResponse: {
             /** Confirmed */
@@ -1032,6 +1062,14 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /** ResumeLifecycleConflictResponse */
+        ResumeLifecycleConflictResponse: {
+            /**
+             * Detail
+             * @enum {string}
+             */
+            detail: "resume_changed" | "resume_processing" | "resume_error";
         };
         /** ResumePreviewResponse */
         ResumePreviewResponse: {
@@ -1892,7 +1930,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ResumeConfirmRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1901,6 +1943,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResumeConfirmResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeLifecycleConflictResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1932,6 +1983,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResumePreviewResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeLifecycleConflictResponse"];
                 };
             };
             /** @description Validation Error */

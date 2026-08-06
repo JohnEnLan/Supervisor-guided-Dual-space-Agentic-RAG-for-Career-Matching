@@ -512,7 +512,15 @@ export function WorkbenchPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
   });
   const confirmResume = useMutation({
-    mutationFn: () => api.confirmResume(sessionId),
+    mutationFn: () => {
+      const expectedResumeVersion = preview.data?.resume_version;
+      if (expectedResumeVersion === undefined) {
+        throw new Error("resume preview version missing");
+      }
+      return api.confirmResume(sessionId, {
+        expected_resume_version: expectedResumeVersion,
+      });
+    },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
   });
   const turn = useMutation({

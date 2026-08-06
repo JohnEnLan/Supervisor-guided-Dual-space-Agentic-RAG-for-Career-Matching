@@ -506,7 +506,9 @@ async def test_mutate_state_atomically_locks_and_updates_state_without_status(
     def add_goal(state):
         state.career_state.current_goal.append("atomic goal")
 
-    def add_goal_with_result(state):
+    def add_goal_with_result(state, resume_version, resume_upload_generation):
+        assert resume_version == 0
+        assert resume_upload_generation == 0
         add_goal(state)
         return {"canonical_goal": state.career_state.current_goal[-1]}
 
@@ -565,7 +567,9 @@ async def test_mutate_state_atomically_can_update_status_in_same_transaction(
 
     await state_store.mutate_state_atomically(
         session_id="s1",
-        mutator=lambda state: state.career_state.current_goal.append("new"),
+        mutator=lambda state, _version, _generation: (
+            state.career_state.current_goal.append("new")
+        ),
         status="intent_consulted",
     )
 
@@ -601,7 +605,10 @@ async def test_save_normalized_resume_updates_state_and_version_under_one_lock(
         async def fetchrow(self, sql, *args):
             calls.append(("fetchrow", sql, args))
             if "FOR UPDATE" in sql:
-                return {"state": persisted.model_dump_json()}
+                return {
+                    "state": persisted.model_dump_json(),
+                    "resume_upload_generation": 4,
+                }
             written = json.loads(args[0])
             assert written["career_state"]["current_goal"] == [
                 "keep concurrent goal"
@@ -625,6 +632,7 @@ async def test_save_normalized_resume_updates_state_and_version_under_one_lock(
         session_id="s1",
         resume_state=ResumeState(skills=["Python"]),
         content_hash="sha256",
+        expected_generation=4,
     )
 
     assert calls[0] == "transaction_enter"

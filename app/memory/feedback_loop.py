@@ -145,7 +145,11 @@ async def record_feedback_closure_error(
     atomic_mutate = mutate_state or mutate_state_atomically
     try:
 
-        def append_error_log(state: SharedState) -> dict[str, Any]:
+        def append_error_log(
+            state: SharedState,
+            _resume_version: int = 0,
+            _resume_upload_generation: int = 0,
+        ) -> dict[str, Any]:
             case_written = known_case_written
             case_id = known_case_id
             for entry in state.feedback_state.user_feedback:
@@ -200,7 +204,11 @@ async def _persist_closure_result(
     soft_preference_updates = result["soft_preference_updates"]
     persisted_result: dict[str, Any] | None = None
 
-    def merge_closure_result(latest_state: SharedState) -> dict[str, Any]:
+    def merge_closure_result(
+        latest_state: SharedState,
+        _resume_version: int = 0,
+        _resume_upload_generation: int = 0,
+    ) -> dict[str, Any]:
         nonlocal persisted_result
         latest_feedback = _feedback_entry(
             latest_state, feedback.get("feedback_id")

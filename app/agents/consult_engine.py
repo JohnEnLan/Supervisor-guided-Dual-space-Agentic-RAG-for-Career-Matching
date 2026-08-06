@@ -19,7 +19,7 @@ from app.llm.context_budget import fit_user_prompt_to_budget
 from app.state.schema import CareerState, SharedState
 
 
-ConsultPhase = Literal["template", "deepen", "explore"]
+ConsultPhase = Literal["template", "resume_clarify", "deepen", "explore"]
 ConsultMode = Literal["targeted", "explore"]
 ChatFunction = Callable[..., Awaitable[str]]
 MAX_USER_MESSAGE_CHARS = 2_000

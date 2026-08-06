@@ -61,6 +61,16 @@
   内部逻辑**零 API diff**（否则 5B 开启开关的测试会因枚举缺失 500）；
 - 后续所有 W-A 验收口径 = "除已批准的 W-B diff 外零额外变化"。
 
+**执行期裁决 #1（2026-08-07，批次 5A）**：v10 §10 注 6（confirm 必核
+expected version/generation）与 §4（ResumePreview 不变、无公开 generation
+字段）内部矛盾——客户端拿不到 generation 就没法提交。裁决：
+`ResumeConfirmRequest` 加 **optional `expected_resume_version`** 一个字段；
+**generation 保持纯服务端内部**（resume_version 每次归一化成功严格 +1
+永不复用，version 已唯一标识用户看过的快照，多标签页误确认由 version
+核查即可封死；202 窗口由服务端 status+generation 全权处理）。开关关闭时
+服务端忽略该字段（等价承诺不破）；前端 confirm 调用点随 generated.ts
+再生同步传值。§4 的 ResumePreview 冻结保留。
+
 ## 1. 批次计划（批次 0–9，共 **13 个提交单元**（5 拆三、7 拆二），串行推进，每单元一提交）
 
 每批完成条件（"四门+"）：`pytest` 全绿 + `pyflakes` + 前端

@@ -189,6 +189,7 @@ async def test_visible_consultation_rejects_second_clarification_before_llm() ->
 
 def test_resume_preview_projects_allow_list_evidence(monkeypatch) -> None:
     from app.api.v1 import sessions
+    from app.db.state_store import ConsultContext
 
     state = SharedState(
         session_id="session-1",
@@ -202,18 +203,16 @@ def test_resume_preview_projects_allow_list_evidence(monkeypatch) -> None:
         ),
     )
 
-    async def load(_session_id: str):
-        return state
+    async def context(_session_id: str):
+        return ConsultContext(
+            state=state,
+            status="resume_ready",
+            resume_version=1,
+            confirmed_resume_version=1,
+            resume_upload_generation=1,
+        )
 
-    async def metadata(_session_id: str):
-        return {
-            "exists": True,
-            "resume_version": 1,
-            "confirmed_resume_version": 1,
-        }
-
-    monkeypatch.setattr(sessions, "load_state", load)
-    monkeypatch.setattr(sessions, "get_resume_metadata", metadata)
+    monkeypatch.setattr(sessions, "load_consult_context", context)
 
     with _client() as client:
         response = client.get("/api/v1/sessions/session-1/resume-preview")

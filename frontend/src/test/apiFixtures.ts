@@ -189,6 +189,12 @@ export const apiFixtures = {
       phase: round === 0 ? ("template" as const) : ("deepen" as const),
       completeness: consultCompleteness(round),
       can_finalize: round >= 2,
+      clarification_progress: {
+        answered: 0,
+        skipped: 0,
+        total: 0,
+        questions_used: 0,
+      },
     }) satisfies ConsultState,
 
   consultTurn: (round: number) =>
@@ -200,6 +206,12 @@ export const apiFixtures = {
       can_finalize: round >= 2,
       round,
       profile_draft: consultProfile(round),
+      clarification_progress: {
+        answered: 0,
+        skipped: 0,
+        total: 0,
+        questions_used: 0,
+      },
     }) satisfies ConsultTurn,
 
   consultFinalize: () =>

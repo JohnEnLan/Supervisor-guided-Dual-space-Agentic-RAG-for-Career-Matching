@@ -16,6 +16,19 @@ from app.state.schema import ResumeState, SharedState
 
 
 MutationResult = TypeVar("MutationResult")
+_RESUME_LIFECYCLE_DETAILS = {
+    "resume_changed",
+    "resume_processing",
+    "resume_error",
+}
+
+
+class ResumeLifecycleConflict(ValueError):
+    def __init__(self, detail: str):
+        if detail not in _RESUME_LIFECYCLE_DETAILS:
+            raise ValueError(f"unknown resume lifecycle detail: {detail}")
+        self.detail = detail
+        super().__init__(detail)
 
 
 class FeedbackIdempotencyConflict(ValueError):
@@ -27,6 +40,15 @@ class FeedbackWriteResult:
     feedback_id: int
     created: bool
     feedback: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ConsultContext:
+    state: SharedState
+    status: str
+    resume_version: int
+    confirmed_resume_version: int | None
+    resume_upload_generation: int
 
 
 async def save_state(
@@ -53,8 +75,8 @@ async def save_state(
                 owner_user_id,
             )
 
-            latest = await _load_locked_state(conn, state.session_id)
-            merged = _merge_feedback_owned_state(latest, state)
+            locked = await _load_locked_state(conn, state.session_id)
+            merged = _merge_feedback_owned_state(locked.state, state)
             await conn.execute(
                 """
                 UPDATE session_state
@@ -107,13 +129,30 @@ async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | N
     return SharedState.model_validate(json.loads(row["state"])), row["status"]
 
 
+async def load_consult_context(session_id: str) -> ConsultContext | None:
+    """Load state and resume lifecycle metadata from one database snapshot."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT state, status, resume_version, confirmed_resume_version,
+                   resume_upload_generation
+            FROM session_state
+            WHERE session_id = $1
+            """,
+            session_id,
+        )
+    return _consult_context_from_row(row)
+
+
 async def get_resume_metadata(session_id: str) -> dict[str, Any]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT resume_version, confirmed_resume_version,
-                   resume_content_hash, resume_confirmed_at
+            SELECT status, resume_version, confirmed_resume_version,
+                   resume_content_hash, resume_confirmed_at,
+                   resume_upload_generation
             FROM session_state
             WHERE session_id = $1
             """,
@@ -124,16 +163,42 @@ async def get_resume_metadata(session_id: str) -> dict[str, Any]:
     return {"exists": True, **dict(row)}
 
 
+async def accept_resume_upload(*, session_id: str) -> dict[str, Any]:
+    """Queue one upload without ever rewriting the SharedState JSON."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE session_state
+            SET status = 'resume_queued',
+                resume_upload_generation = resume_upload_generation + 1,
+                confirmed_resume_version = NULL,
+                resume_confirmed_at = NULL,
+                updated_at = now()
+            WHERE session_id = $1
+            RETURNING user_id, resume_upload_generation
+            """,
+            session_id,
+        )
+    if row is None:
+        raise KeyError(session_id)
+    return dict(row)
+
+
 async def save_normalized_resume(
     *,
     session_id: str,
     resume_state: ResumeState,
     content_hash: str,
-) -> dict[str, Any]:
+    expected_generation: int,
+) -> dict[str, Any] | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            state = await _load_locked_state(conn, session_id)
+            locked = await _load_locked_state(conn, session_id)
+            if locked.resume_upload_generation != expected_generation:
+                return None
+            state = locked.state
             state.resume_state = resume_state.model_copy(deep=True)
             row = await conn.fetchrow(
                 """
@@ -147,35 +212,73 @@ async def save_normalized_resume(
                     version = version + 1,
                     updated_at = now()
                 WHERE session_id = $3
+                  AND resume_upload_generation = $4
                 RETURNING resume_version, confirmed_resume_version,
-                          resume_content_hash, resume_confirmed_at
+                          resume_content_hash, resume_confirmed_at,
+                          resume_upload_generation, status
                 """,
                 state.model_dump_json(),
                 content_hash,
                 session_id,
+                expected_generation,
             )
     if row is None:
-        raise KeyError(session_id)
+        return None
     return {"exists": True, **dict(row)}
 
 
-async def confirm_resume(*, session_id: str) -> dict[str, Any]:
+async def mark_resume_error(
+    *, session_id: str, expected_generation: int
+) -> bool:
+    """Mark only the currently accepted upload as failed."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        result = await conn.execute(
             """
             UPDATE session_state
-            SET confirmed_resume_version = resume_version,
-                resume_confirmed_at = now(),
-                version = version + 1,
+            SET status = 'resume_error',
                 updated_at = now()
-            WHERE session_id = $1 AND resume_version > 0
-            RETURNING resume_version, confirmed_resume_version,
-                      resume_content_hash, resume_confirmed_at
+            WHERE session_id = $1
+              AND resume_upload_generation = $2
+              AND status = 'resume_queued'
             """,
             session_id,
+            expected_generation,
         )
-    if row is None:
+    return result == "UPDATE 1"
+
+
+async def confirm_resume(
+    *, session_id: str, expected_resume_version: int | None
+) -> dict[str, Any]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            locked = await _load_locked_state(conn, session_id)
+            if locked.status == "resume_error":
+                raise ResumeLifecycleConflict("resume_error")
+            if locked.status != "resume_ready" or locked.resume_version < 1:
+                raise ResumeLifecycleConflict("resume_processing")
+            if (
+                expected_resume_version is not None
+                and expected_resume_version != locked.resume_version
+            ):
+                raise ResumeLifecycleConflict("resume_changed")
+            row = await conn.fetchrow(
+                """
+                UPDATE session_state
+                SET confirmed_resume_version = resume_version,
+                    resume_confirmed_at = now(),
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = $1
+                RETURNING resume_version, confirmed_resume_version,
+                          resume_content_hash, resume_confirmed_at,
+                          resume_upload_generation, status
+                """,
+                session_id,
+            )
+    if row is None:  # pragma: no cover - row is locked above
         raise KeyError(session_id)
     return {"exists": True, **dict(row)}
 
@@ -183,15 +286,19 @@ async def confirm_resume(*, session_id: str) -> dict[str, Any]:
 async def mutate_state_atomically(
     *,
     session_id: str,
-    mutator: Callable[[SharedState], MutationResult],
+    mutator: Callable[[SharedState, int, int], MutationResult],
     status: str | None = None,
 ) -> MutationResult:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            state = await _load_locked_state(conn, session_id)
-            result = mutator(state)
-            await _write_locked_state(conn, state, status=status)
+            locked = await _load_locked_state(conn, session_id)
+            result = mutator(
+                locked.state,
+                locked.resume_version,
+                locked.resume_upload_generation,
+            )
+            await _write_locked_state(conn, locked.state, status=status)
             return result
 
 
@@ -208,7 +315,8 @@ async def add_feedback(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            state = await _load_locked_state(conn, session_id)
+            locked = await _load_locked_state(conn, session_id)
+            state = locked.state
             if idempotency_key:
                 existing_feedback = _feedback_for_idempotency_key(
                     state, idempotency_key
@@ -285,23 +393,54 @@ def _feedback_payload_matches(
     )
 
 
-async def _load_locked_state(conn: Any, session_id: str) -> SharedState:
-    state = await _load_locked_state_or_none(conn, session_id)
-    if state is None:
+async def _load_locked_state(conn: Any, session_id: str) -> ConsultContext:
+    context = await _load_locked_state_or_none(conn, session_id)
+    if context is None:
         raise KeyError(session_id)
-    return state
+    return context
 
 
 async def _load_locked_state_or_none(
     conn: Any, session_id: str
-) -> SharedState | None:
+) -> ConsultContext | None:
     row = await conn.fetchrow(
-        "SELECT state FROM session_state WHERE session_id = $1 FOR UPDATE",
+        """
+        SELECT state, status, resume_version, confirmed_resume_version,
+               resume_upload_generation
+        FROM session_state
+        WHERE session_id = $1
+        FOR UPDATE
+        """,
         session_id,
     )
+    return _consult_context_from_row(row)
+
+
+def _consult_context_from_row(row: Any | None) -> ConsultContext | None:
     if row is None:
         return None
-    return SharedState.model_validate(json.loads(row["state"]))
+    return ConsultContext(
+        state=SharedState.model_validate(json.loads(row["state"])),
+        status=str(_row_value(row, "status", "pending")),
+        resume_version=int(_row_value(row, "resume_version", 0) or 0),
+        confirmed_resume_version=_optional_int(
+            _row_value(row, "confirmed_resume_version", None)
+        ),
+        resume_upload_generation=int(
+            _row_value(row, "resume_upload_generation", 0) or 0
+        ),
+    )
+
+
+def _row_value(row: Any, key: str, default: Any) -> Any:
+    try:
+        return row[key]
+    except (KeyError, TypeError):
+        return default
+
+
+def _optional_int(value: Any) -> int | None:
+    return None if value is None else int(value)
 
 
 def _merge_feedback_owned_state(

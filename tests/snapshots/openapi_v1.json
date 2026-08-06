@@ -123,6 +123,37 @@
         "title": "CaseEvidenceResponse",
         "type": "object"
       },
+      "ClarificationProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "answered": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Answered",
+            "type": "integer"
+          },
+          "questions_used": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Questions Used",
+            "type": "integer"
+          },
+          "skipped": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "ClarificationProgress",
+        "type": "object"
+      },
       "ConsultBriefDraftResponse": {
         "additionalProperties": false,
         "properties": {
@@ -243,6 +274,9 @@
             "title": "Can Finalize",
             "type": "boolean"
           },
+          "clarification_progress": {
+            "$ref": "#/components/schemas/ClarificationProgress"
+          },
           "completeness": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -258,6 +292,7 @@
           "phase": {
             "enum": [
               "template",
+              "resume_clarify",
               "deepen",
               "explore"
             ],
@@ -292,6 +327,9 @@
             "title": "Can Finalize",
             "type": "boolean"
           },
+          "clarification_progress": {
+            "$ref": "#/components/schemas/ClarificationProgress"
+          },
           "completeness": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -301,6 +339,7 @@
           "phase": {
             "enum": [
               "template",
+              "resume_clarify",
               "deepen",
               "explore"
             ],
@@ -349,6 +388,7 @@
           "phase": {
             "enum": [
               "template",
+              "resume_clarify",
               "deepen",
               "explore"
             ],
@@ -1547,6 +1587,24 @@
         "title": "ResumeAdvice",
         "type": "object"
       },
+      "ResumeConfirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_resume_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Resume Version"
+          }
+        },
+        "title": "ResumeConfirmRequest",
+        "type": "object"
+      },
       "ResumeConfirmResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1696,6 +1754,25 @@
           }
         },
         "title": "ResumeExperiencePreview",
+        "type": "object"
+      },
+      "ResumeLifecycleConflictResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "enum": [
+              "resume_changed",
+              "resume_processing",
+              "resume_error"
+            ],
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ResumeLifecycleConflictResponse",
         "type": "object"
       },
       "ResumePreviewResponse": {
@@ -3043,6 +3120,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ResumeConfirmRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -3053,6 +3147,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeLifecycleConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -3092,6 +3196,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeLifecycleConflictResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

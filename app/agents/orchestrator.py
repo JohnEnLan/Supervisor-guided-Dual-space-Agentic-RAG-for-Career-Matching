@@ -365,7 +365,11 @@ async def _persist_stage_state(
     status: str,
     owned_fields: tuple[str, ...],
 ) -> SharedState:
-    def merge_stage(latest: SharedState) -> SharedState:
+    def merge_stage(
+        latest: SharedState,
+        _resume_version: int = 0,
+        _resume_upload_generation: int = 0,
+    ) -> SharedState:
         for field_name in owned_fields:
             setattr(latest, field_name, deepcopy(getattr(state, field_name)))
         for entry in state.supervisor_log:

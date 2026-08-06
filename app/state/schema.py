@@ -15,9 +15,15 @@ class ResumeState(BaseModel):
     projects: list[dict] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     resume_quality_issues: list[str] = Field(default_factory=list)
+    quality_issues_struct: list[dict] = Field(default_factory=list)
     # 禁止编造的依据：后续 Agent 写简历建议只能基于这里的原文片段
     original_evidence_spans: list[dict] = Field(default_factory=list)
     normalized_base_resume: str = ""
+    clarification_targets: list[dict] = Field(default_factory=list)
+    pending_clarification_question: dict | None = None
+    questions_used: int = Field(default=0, ge=0)
+    clarifications: list[dict] = Field(default_factory=list)
+    clarification_evidence_spans: list[dict] = Field(default_factory=list)
 
 
 class CareerState(BaseModel):
@@ -67,5 +73,7 @@ class SharedState(BaseModel):
     retrieval_state: RetrievalState = Field(default_factory=RetrievalState)
     strategy_state: StrategyState = Field(default_factory=StrategyState)
     feedback_state: FeedbackState = Field(default_factory=FeedbackState)
+    # Feature B（批次 6）使用；5A 只建立会话级状态契约。
+    coach_reservations: list[dict] = Field(default_factory=list)
     # 每次核查/触发 bounded loop 的记录，答辩时用来讲"Supervisor 做了什么"
     supervisor_log: list[dict] = Field(default_factory=list)

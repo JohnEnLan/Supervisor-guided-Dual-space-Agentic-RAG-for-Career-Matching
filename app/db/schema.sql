@@ -259,7 +259,8 @@ ALTER TABLE session_state
     ADD COLUMN IF NOT EXISTS resume_version INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS confirmed_resume_version INTEGER,
     ADD COLUMN IF NOT EXISTS resume_content_hash TEXT,
-    ADD COLUMN IF NOT EXISTS resume_confirmed_at TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS resume_confirmed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS resume_upload_generation BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS match_runs (
     run_id                   TEXT PRIMARY KEY,

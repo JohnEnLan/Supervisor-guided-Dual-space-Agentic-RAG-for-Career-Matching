@@ -78,11 +78,13 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
         session_id="session-1",
         user_id="user-1",
         resume_path=resume_path,
+        expected_generation=7,
     )
 
     assert calls[0]["session_id"] == "session-1"
     assert calls[0]["resume_state"].skills == ["Python"]
     assert len(calls[0]["content_hash"]) == 64
+    assert calls[0]["expected_generation"] == 7
     assert not resume_path.exists()
 
 
@@ -95,15 +97,15 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
     async def intake(*_args, **_kwargs):
         raise ValueError("bad resume")
 
-    async def mutate(*, session_id: str, mutator, status: str):
-        calls.append((session_id, status))
-        return None
+    async def mark_error(*, session_id: str, expected_generation: int):
+        calls.append((session_id, expected_generation))
+        return True
 
     async def forbidden(*_args, **_kwargs):
         raise AssertionError("failure fallback must not whole-save stale state")
 
     monkeypatch.setattr(sessions, "intake_resume", intake)
-    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
+    monkeypatch.setattr(sessions, "mark_resume_error", mark_error)
     monkeypatch.setattr(sessions, "load_state", forbidden)
     monkeypatch.setattr(sessions, "save_state", forbidden)
 
@@ -111,9 +113,10 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
         session_id="session-1",
         user_id="user-1",
         resume_path=Path("resume.txt"),
+        expected_generation=11,
     )
 
-    assert calls == [("session-1", "resume_error")]
+    assert calls == [("session-1", 11)]
 
 
 def _app() -> FastAPI:
@@ -339,10 +342,10 @@ async def test_execute_graph_path_passes_lifespan_checkpointer_to_runner(
 def test_resume_confirm_distinguishes_missing_session(monkeypatch) -> None:
     from app.api.v1 import sessions
 
-    async def missing(_session_id: str):
-        return {"exists": False}
+    async def missing(**_kwargs):
+        raise KeyError("missing")
 
-    monkeypatch.setattr(sessions, "get_resume_metadata", missing)
+    monkeypatch.setattr(sessions, "confirm_resume", missing)
 
     with TestClient(_app()) as client:
         response = client.post(

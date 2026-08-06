@@ -85,6 +85,14 @@ class ResumeAcceptedResponse(PublicDTO):
     status: Literal["resume_queued"] = "resume_queued"
 
 
+class ResumeConfirmRequest(PublicDTO):
+    expected_resume_version: int | None = None
+
+
+class ResumeLifecycleConflictResponse(PublicDTO):
+    detail: Literal["resume_changed", "resume_processing", "resume_error"]
+
+
 class ResumeEducationPreview(PublicDTO):
     institution: str = ""
     degree: str = ""
@@ -147,12 +155,19 @@ class ConsultProfileDraft(PublicDTO):
     avoid_roles: list[str] = Field(default_factory=list)
 
 
+class ClarificationProgress(PublicDTO):
+    answered: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    total: int = Field(default=0, ge=0)
+    questions_used: int = Field(default=0, ge=0)
+
+
 class ConsultTranscriptEntry(PublicDTO):
     round: int = Field(ge=1)
     user_message: str = Field(max_length=2000)
     assistant_reply: str = Field(max_length=120)
     next_question: str = Field(max_length=80)
-    phase: Literal["template", "deepen", "explore"]
+    phase: Literal["template", "resume_clarify", "deepen", "explore"]
 
 
 class ConsultRequest(PublicDTO):
@@ -164,20 +179,26 @@ class ConsultRequest(PublicDTO):
 class ConsultResponse(PublicDTO):
     assistant_reply: str = Field(min_length=1, max_length=120)
     next_question: str = Field(min_length=1, max_length=80)
-    phase: Literal["template", "deepen", "explore"]
+    phase: Literal["template", "resume_clarify", "deepen", "explore"]
     completeness: float = Field(ge=0, le=1)
     can_finalize: bool
     round: int = Field(ge=1)
     profile_draft: ConsultProfileDraft
+    clarification_progress: ClarificationProgress = Field(
+        default_factory=ClarificationProgress
+    )
 
 
 class ConsultStateResponse(PublicDTO):
     transcript: list[ConsultTranscriptEntry] = Field(default_factory=list)
     profile_draft: ConsultProfileDraft
     round: int = Field(ge=0)
-    phase: Literal["template", "deepen", "explore"]
+    phase: Literal["template", "resume_clarify", "deepen", "explore"]
     completeness: float = Field(ge=0, le=1)
     can_finalize: bool
+    clarification_progress: ClarificationProgress = Field(
+        default_factory=ClarificationProgress
+    )
 
 
 class ConsultBriefDraftResponse(PublicDTO):

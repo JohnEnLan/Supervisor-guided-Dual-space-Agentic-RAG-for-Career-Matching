@@ -85,6 +85,10 @@ class Settings(BaseSettings):
 
     max_clarification_loops: int = 1
     max_consult_rounds: int = Field(default=8, ge=1, le=15)
+    resume_clarify_enabled: bool = False
+    resume_clarify_max: int = Field(default=2, ge=1, le=5)
+    consult_coach_enabled: bool = False
+    consult_coach_max: int = Field(default=3, ge=1, le=5)
     max_reretrieval_loops: int = 1
     max_repair_loops: int = 1
 

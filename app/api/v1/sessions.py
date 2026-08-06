@@ -29,12 +29,14 @@ from app.api.v1.schemas import (
     MatchBriefRequest,
     MatchBriefResponse,
     ResumeAcceptedResponse,
+    ResumeConfirmRequest,
     ResumeConfirmResponse,
     ResumeEducationPreview,
     ResumeEvidencePreview,
     ResumeExperiencePreview,
     ResumePreviewResponse,
     ResumeProjectPreview,
+    ResumeLifecycleConflictResponse,
     SessionCreateRequest,
     SessionResponse,
 )
@@ -52,11 +54,15 @@ from app.agents.consult_engine import (
 from app.db.run_store import RunConflict, create_run, save_match_brief
 from app.config import settings
 from app.db.state_store import (
+    ResumeLifecycleConflict,
+    accept_resume_upload,
     confirm_resume,
     count_owned_sessions,
     get_resume_metadata,
+    load_consult_context,
     load_state,
     mutate_state_atomically,
+    mark_resume_error,
     save_normalized_resume,
     save_state,
 )
@@ -85,6 +91,10 @@ _INTENT_CAREER_FIELDS = (
 
 
 class _ConsultRoundConflict(ValueError):
+    pass
+
+
+class _ResumeChangedConflict(ValueError):
     pass
 
 
@@ -130,16 +140,21 @@ async def upload_resume(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ) -> ResumeAcceptedResponse:
-    state = await load_state(session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="session_id not found")
     resume_path = await persist_upload(session_id, file)
-    await save_state(state, status="resume_queued")
+    try:
+        accepted = await accept_resume_upload(session_id=session_id)
+    except KeyError:
+        resume_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="session_id not found") from None
+    except Exception:
+        resume_path.unlink(missing_ok=True)
+        raise
     background_tasks.add_task(
         _normalize_resume,
         session_id=session_id,
-        user_id=state.user_id,
+        user_id=str(accepted["user_id"]),
         resume_path=resume_path,
+        expected_generation=int(accepted["resume_upload_generation"]),
     )
     return ResumeAcceptedResponse(session_id=session_id)
 
@@ -147,21 +162,25 @@ async def upload_resume(
 @router.get(
     "/sessions/{session_id}/resume-preview",
     response_model=ResumePreviewResponse,
+    responses={409: {"model": ResumeLifecycleConflictResponse}},
     dependencies=[Depends(require_owned_session)],
 )
 async def resume_preview(session_id: str) -> ResumePreviewResponse:
-    state = await load_state(session_id)
-    metadata = await get_resume_metadata(session_id)
-    if state is None or not metadata.get("exists"):
+    context = await load_consult_context(session_id)
+    if context is None:
         raise HTTPException(status_code=404, detail="session_id not found")
-    version = int(metadata.get("resume_version") or 0)
+    if context.status == "resume_queued":
+        raise HTTPException(status_code=409, detail="resume_processing")
+    if context.status == "resume_error":
+        raise HTTPException(status_code=409, detail="resume_error")
+    version = context.resume_version
     if version < 1:
-        raise HTTPException(status_code=409, detail="resume is not ready")
-    resume = state.resume_state
+        raise HTTPException(status_code=409, detail="resume_processing")
+    resume = context.state.resume_state
     return ResumePreviewResponse(
         session_id=session_id,
         resume_version=version,
-        confirmed=metadata.get("confirmed_resume_version") == version,
+        confirmed=context.confirmed_resume_version == version,
         education=[_education_preview(item) for item in resume.education],
         experience=[_experience_preview(item) for item in resume.experience],
         projects=[_project_preview(item) for item in resume.projects],
@@ -174,18 +193,30 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
 @router.post(
     "/sessions/{session_id}/resume-confirm",
     response_model=ResumeConfirmResponse,
+    responses={409: {"model": ResumeLifecycleConflictResponse}},
     dependencies=[Depends(require_owned_session)],
 )
-async def resume_confirm(session_id: str) -> ResumeConfirmResponse:
-    current = await get_resume_metadata(session_id)
-    if not current.get("exists"):
-        raise HTTPException(status_code=404, detail="session_id not found")
-    if int(current.get("resume_version") or 0) < 1:
-        raise HTTPException(status_code=409, detail="resume is not ready")
+async def resume_confirm(
+    session_id: str,
+    request: ResumeConfirmRequest | None = None,
+) -> ResumeConfirmResponse:
+    # Feature-A's client version CAS is intentionally scoped to the resume
+    # clarification switch. With the switch off, legacy no-body confirmation
+    # and all 00/01 runtime behavior remain equivalent to the baseline.
+    expected_resume_version = (
+        request.expected_resume_version
+        if settings.resume_clarify_enabled and request is not None
+        else None
+    )
     try:
-        metadata = await confirm_resume(session_id=session_id)
+        metadata = await confirm_resume(
+            session_id=session_id,
+            expected_resume_version=expected_resume_version,
+        )
     except KeyError:
-        raise HTTPException(status_code=409, detail="resume is not ready") from None
+        raise HTTPException(status_code=404, detail="session_id not found") from None
+    except ResumeLifecycleConflict as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from None
     return ResumeConfirmResponse(
         session_id=session_id,
         resume_version=int(metadata["resume_version"]),
@@ -283,7 +314,11 @@ async def build_match_brief(
         clarification_question=request.clarification_question,
         plan_version=1,
     )
-    def persist_match_brief(state: SharedState) -> dict:
+    def persist_match_brief(
+        state: SharedState,
+        _resume_version: int = 0,
+        _resume_upload_generation: int = 0,
+    ) -> dict:
         state.career_state.current_goal = [request.career_goal]
         state.career_state.hard_constraints = dict(request.hard_constraints)
         state.career_state.soft_preferences = dict(request.soft_preferences)
@@ -322,9 +357,29 @@ async def _execute_consult_round(
     status: str | None,
     user_id: str | None = None,
 ):
-    state = await load_state(session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="session_id not found")
+    expected_resume_version: int | None = None
+    expected_resume_upload_generation: int | None = None
+    if settings.resume_clarify_enabled:
+        # Feature-A lifecycle checks apply only while clarification is on;
+        # keeping this branch scoped preserves the 00/01 baseline behavior.
+        context = await load_consult_context(session_id)
+        if context is None:
+            raise HTTPException(status_code=404, detail="session_id not found")
+        if context.status == "resume_error":
+            raise HTTPException(status_code=409, detail="resume_error")
+        if (
+            context.status == "resume_queued"
+            or context.resume_version < 1
+            or context.confirmed_resume_version != context.resume_version
+        ):
+            raise HTTPException(status_code=409, detail="resume_processing")
+        state = context.state
+        expected_resume_version = context.resume_version
+        expected_resume_upload_generation = context.resume_upload_generation
+    else:
+        state = await load_state(session_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="session_id not found")
     if state.career_state.consult_rounds_used != expected_round:
         raise HTTPException(status_code=409, detail="consultation round conflict")
     if state.career_state.intent_consulted:
@@ -357,7 +412,17 @@ async def _execute_consult_round(
         "intent_consulted" if turn.can_finalize else "intent_clarification"
     )
 
-    def persist_turn(latest: SharedState) -> SharedState:
+    def persist_turn(
+        latest: SharedState,
+        current_resume_version: int = 0,
+        current_resume_upload_generation: int = 0,
+    ) -> SharedState:
+        if settings.resume_clarify_enabled and (
+            current_resume_version != expected_resume_version
+            or current_resume_upload_generation
+            != expected_resume_upload_generation
+        ):
+            raise _ResumeChangedConflict(expected_round)
         if (
             latest.career_state.consult_rounds_used != expected_round
             or latest.career_state.intent_consulted
@@ -382,13 +447,19 @@ async def _execute_consult_round(
             status_code=409,
             detail="consultation round conflict",
         ) from None
+    except _ResumeChangedConflict:
+        raise HTTPException(status_code=409, detail="resume_changed") from None
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
     return turn, persisted
 
 
 async def _normalize_resume(
-    *, session_id: str, user_id: str, resume_path: Path
+    *,
+    session_id: str,
+    user_id: str,
+    resume_path: Path,
+    expected_generation: int,
 ) -> None:
     try:
         result = await intake_resume(
@@ -404,13 +475,13 @@ async def _normalize_resume(
             session_id=session_id,
             resume_state=result.state.resume_state,
             content_hash=digest,
+            expected_generation=expected_generation,
         )
     except Exception:
         try:
-            await mutate_state_atomically(
+            await mark_resume_error(
                 session_id=session_id,
-                mutator=lambda _state: None,
-                status="resume_error",
+                expected_generation=expected_generation,
             )
         except KeyError:
             pass
