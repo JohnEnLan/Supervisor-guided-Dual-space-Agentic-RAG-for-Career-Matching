@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, Paperclip, Send, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import {
@@ -16,9 +16,84 @@ import {
 } from "../api/queries";
 import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
 import { ReactionForm } from "../features/feedback/ReactionForm";
+import { readLastRun, removeLastRun, writeLastRun } from "./localRunStorage";
 import "./theme.css";
 
-const TERMINAL = new Set(["completed", "completed_with_warnings", "failed", "stale"]);
+const TERMINAL = new Set(["completed", "completed_with_warnings", "failed", "stale", "cancelled"]);
+
+/**
+ * 焦点管理弹窗：初始焦点落在容器（避免默认聚焦到会消耗额度的确认按钮）、
+ * Escape 关闭、Tab 循环约束、关闭后焦点归还打开前的触发元素。
+ * 模式与 EvidenceDrawer 保持一致。
+ */
+function FocusModal({
+  label,
+  onClose,
+  closeDisabled = false,
+  modeKey,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  closeDisabled?: boolean;
+  /** 同一实例内切换内容（如 confirm→quota）时变化，触发容器重新聚焦 */
+  modeKey?: string;
+  children: ReactNode;
+}) {
+  const container = useRef<HTMLDivElement>(null);
+  const restoreTo = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    restoreTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      const target = restoreTo.current;
+      queueMicrotask(() => target?.focus());
+    };
+  }, []);
+
+  useEffect(() => {
+    container.current?.focus();
+  }, [modeKey]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (!closeDisabled) onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        container.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === container.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || active === container.current)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeDisabled, onClose]);
+
+  return (
+    <div className="v2-modal-backdrop" role="dialog" aria-modal="true" aria-label={label}>
+      <div className="v2-modal" ref={container} tabIndex={-1}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export const PERSONAS: Record<string, { short: string; name: string; role: string }> = {
   intent_consultant: { short: "意", name: "需求顾问·小意", role: "需求对接" },
@@ -220,13 +295,18 @@ function ResultCards({ runId }: { runId: string }) {
 
 export function WorkbenchPage() {
   const { sessionId = "" } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("run");
   const queryClient = useQueryClient();
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<"targeted" | "explore">("targeted");
   const [briefDraft, setBriefDraft] = useState<ConsultFinalize | null>(null);
   const [brief, setBrief] = useState<MatchBriefResponse | null>(null);
+  // 单一 modal 状态：confirm→quota 的 402 切换保持同一 FocusModal 实例，
+  // 避免旧实例卸载时的焦点归还 microtask 把焦点抢回背景（互审第 2 轮阻断）
+  const [retryModal, setRetryModal] = useState<"confirm" | "quota" | null>(null);
   const timelineRef = useRef<HTMLOListElement>(null);
   const executeAttempted = useRef(false);
 
@@ -296,6 +376,7 @@ export function WorkbenchPage() {
       });
     },
     onSuccess: (created) => {
+      if (me.data?.user_id) writeLastRun(me.data.user_id, sessionId, created.run_id);
       setBrief(created);
       executeAttempted.current = false;
       setSearchParams({ run: created.run_id }, { replace: true });
@@ -307,10 +388,56 @@ export function WorkbenchPage() {
         plan_version: payload.plan_version,
         plan_hash: payload.plan_hash,
       }),
+    onSuccess: (_, payload) => {
+      if (me.data?.user_id) writeLastRun(me.data.user_id, sessionId, payload.runId);
+    },
     onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) void status.refetch();
+      if (error instanceof ApiError && error.status === 409) {
+        if (me.data?.user_id && runId) writeLastRun(me.data.user_id, sessionId, runId);
+        void status.refetch();
+      }
     },
   });
+  const createSession = useMutation({
+    mutationFn: () => api.createSession({}),
+    onSuccess: (session) => {
+      setBriefDraft(null);
+      setBrief(null);
+      setRetryModal(null);
+      executeAttempted.current = false;
+      queryClient.removeQueries({ queryKey: ["consult", sessionId], exact: true });
+      queryClient.removeQueries({ queryKey: ["resume-preview", sessionId], exact: true });
+      if (runId) {
+        queryClient.removeQueries({ queryKey: ["v2-run-status", runId], exact: true });
+        queryClient.removeQueries({ queryKey: ["v2-run-conv", runId], exact: true });
+        queryClient.removeQueries({ queryKey: ["v2-result", runId], exact: true });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["me-sessions"] });
+      navigate(`/app/sessions/${session.session_id}`);
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 402) {
+        setRetryModal("quota");
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (runId || !me.data?.user_id || !sessionId) return;
+    const storedRunId = readLastRun(me.data.user_id, sessionId);
+    if (storedRunId) setSearchParams({ run: storedRunId }, { replace: true });
+  }, [me.data?.user_id, runId, sessionId, setSearchParams]);
+
+  useEffect(() => {
+    if (!runId || !me.data?.user_id || !(status.error instanceof ApiError)) return;
+    if (status.error.status !== 403 && status.error.status !== 404) return;
+    removeLastRun(me.data.user_id, sessionId);
+    setBrief(null);
+    executeAttempted.current = false;
+    queryClient.removeQueries({ queryKey: ["v2-run-status", runId], exact: true });
+    queryClient.removeQueries({ queryKey: ["v2-run-conv", runId], exact: true });
+    setSearchParams({}, { replace: true });
+  }, [me.data?.user_id, queryClient, runId, sessionId, setSearchParams, status.error]);
 
   const resumeReady = preview.isSuccess;
   // 后端对"未上传"与"归一化中"同为 409（known_issues #6）：
@@ -330,10 +457,11 @@ export function WorkbenchPage() {
   }, [status.data, runId, execute]);
 
   const transcript = consult.data?.transcript ?? [];
-  const runMessages = conversation.data?.messages ?? [];
+  const runMessages = (conversation.data?.messages ?? []).filter((item) => item.kind !== "intro");
   const running = Boolean(runId) && !TERMINAL.has(status.data?.status ?? "");
   const completed =
     status.data?.status === "completed" || status.data?.status === "completed_with_warnings";
+  const retryableTerminal = ["failed", "stale", "cancelled"].includes(status.data?.status ?? "");
 
   const messageCount =
     transcript.length + runMessages.length + (briefDraft ? 1 : 0) + (completed ? 1 : 0);
@@ -494,11 +622,16 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
 
-        {status.data?.status === "failed" || status.data?.status === "stale" ? (
+        {retryableTerminal ? (
           <Bubble persona="pm">
             <p className="v2-error">
-              本次运行没有完成（{status.data.error_code ?? "RUN_FAILED"}）。可以重新生成确认单再试。
+              {status.data?.status === "cancelled" ? "本次运行已取消" : "本次运行没有完成"}
+              {status.data?.error_code ? `（${status.data.error_code}）` : null}。当前会话不能重新生成确认单，
+              需要新建咨询后重试。
             </p>
+            <button type="button" className="v2-btn primary" onClick={() => setRetryModal("confirm")}>
+              新建咨询重试
+            </button>
           </Bubble>
         ) : null}
       </ol>
@@ -552,6 +685,50 @@ export function WorkbenchPage() {
           </p>
         ) : null}
       </footer>
+      {retryModal ? (
+        <FocusModal
+          label={retryModal === "confirm" ? "新建咨询确认" : "额度已用完"}
+          modeKey={retryModal}
+          closeDisabled={retryModal === "confirm" && createSession.isPending}
+          onClose={() => setRetryModal(null)}
+        >
+          {retryModal === "confirm" ? (
+            <>
+              <h2>新建咨询后重试</h2>
+              <p>新建咨询会消耗一次咨询额度。创建成功后才会离开当前终态页面。</p>
+              <div className="v2-modal-actions">
+                <button
+                  type="button"
+                  className="v2-btn primary"
+                  disabled={createSession.isPending}
+                  onClick={() => createSession.mutate()}
+                >
+                  {createSession.isPending ? "创建中…" : "确认新建咨询"}
+                </button>
+                <button
+                  type="button"
+                  className="v2-btn ghost"
+                  disabled={createSession.isPending}
+                  onClick={() => setRetryModal(null)}
+                >
+                  保留当前页面
+                </button>
+              </div>
+              {createSession.isError && !(createSession.error instanceof ApiError && createSession.error.status === 402) ? (
+                <p className="v2-error">新咨询暂时无法创建，请重试。</p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <h2>咨询额度已用完</h2>
+              <p>当前账户的咨询额度已用完。原终态页面已保留。</p>
+              <button type="button" className="v2-btn ghost" onClick={() => setRetryModal(null)}>
+                返回当前页面
+              </button>
+            </>
+          )}
+        </FocusModal>
+      ) : null}
     </section>
   );
 }

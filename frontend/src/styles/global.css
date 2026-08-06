@@ -150,6 +150,11 @@ h2 { font-size: 1.1rem; }
 .evidence-list li { margin: 10px 0; padding: 12px; background: var(--surface-muted); border-radius: 7px; }
 .evidence-list p { margin: 6px 0; }
 .reaction-form { margin-top: 22px; padding: 18px; background: var(--surface-muted); border-radius: var(--radius-small); }
+.reaction-outcomes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.reaction-outcomes button[aria-pressed="true"] { color: white; background: var(--teal); }
+.reaction-notes-toggle { margin-bottom: 10px; background: transparent; }
+.reaction-notes { display: grid; gap: 6px; margin-bottom: 10px; font-weight: 650; }
+.reaction-notes textarea { width: 100%; min-height: 72px; padding: 10px 12px; border: 1px solid #abb7c2; border-radius: 7px; }
 .feedback-note { color: var(--muted); font-size: .82rem; }
 .feedback-success { margin-top: 20px; padding: 14px; display: flex; gap: 8px; color: var(--teal); background: var(--teal-soft); border-radius: 7px; }
 .metric-strip { margin: 20px 0; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: var(--radius-small); }

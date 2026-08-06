@@ -5,6 +5,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { ApiError, onUnauthorized } from "../api/client";
 import { api } from "../api/queries";
+import { clearLastRuns } from "./localRunStorage";
 import "./theme.css";
 
 export function AppShell() {
@@ -21,11 +22,12 @@ export function AppShell() {
   // 任意请求 401 → 清缓存回登录页（会话过期的统一出口）
   useEffect(() => {
     onUnauthorized(() => {
+      clearLastRuns(me.data?.user_id);
       queryClient.clear();
       navigate("/", { replace: true });
     });
     return () => onUnauthorized(null);
-  }, [navigate, queryClient]);
+  }, [me.data?.user_id, navigate, queryClient]);
 
   useEffect(() => {
     if (me.isError) navigate("/", { replace: true });
@@ -47,6 +49,7 @@ export function AppShell() {
   const logout = useMutation({
     mutationFn: api.logout,
     onSettled: () => {
+      clearLastRuns(me.data?.user_id);
       queryClient.clear();
       navigate("/", { replace: true });
     },

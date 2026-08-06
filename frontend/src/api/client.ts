@@ -92,6 +92,10 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     }
     throw error;
   }
+  // 204（如 logout）无响应体，response.json() 会抛 SyntaxError
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 

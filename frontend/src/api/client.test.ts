@@ -27,6 +27,15 @@ describe("apiRequest", () => {
     );
   });
 
+  it("returns undefined for a 204 response instead of parsing an empty body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+    );
+
+    await expect(apiRequest("/auth/logout", { method: "POST" })).resolves.toBeUndefined();
+  });
+
   it("projects a recoverable FastAPI conflict into ApiError", async () => {
     vi.stubGlobal(
       "fetch",
