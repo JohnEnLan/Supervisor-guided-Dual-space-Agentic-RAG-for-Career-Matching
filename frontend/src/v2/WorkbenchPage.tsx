@@ -7,6 +7,7 @@ import { ApiError } from "../api/client";
 import {
   api,
   type ConsultFinalize,
+  type ConsultState,
   type ConsultTranscriptEntry,
   type ConversationMessage,
   type MatchBriefResponse,
@@ -24,6 +25,20 @@ import { useProtectedTimelineScroll } from "./useProtectedTimelineScroll";
 import "./theme.css";
 
 const TERMINAL = new Set(["completed", "completed_with_warnings", "failed", "stale", "cancelled"]);
+type ResumeRecoveryState = "processing" | "updated" | "error";
+
+function resumeRecoveryState(error: unknown): ResumeRecoveryState | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  if (error.message === "resume_error") return "error";
+  if (error.message === "resume_changed" || error.message === "resume_processing") return "processing";
+  return null;
+}
+
+function resumeRecoveryMessage(state: ResumeRecoveryState): string {
+  if (state === "processing") return "新简历处理中";
+  if (state === "error") return "旧档案已作废，请重传";
+  return "简历已更新，本轮未提交；请确认新档案后重试";
+}
 
 /**
  * 焦点管理弹窗：初始焦点落在容器（避免默认聚焦到会消耗额度的确认按钮）、
@@ -234,6 +249,37 @@ function ServiceProgressCard({
   );
 }
 
+function FinalizeAction({
+  disabled,
+  pending,
+  onFinalize,
+}: {
+  disabled: boolean;
+  pending: boolean;
+  onFinalize: () => void;
+}) {
+  return (
+    <div className="v2-finalize-action">
+      <button
+        type="button"
+        className="v2-btn primary"
+        aria-label="生成确认单"
+        disabled={disabled}
+        onClick={onFinalize}
+      >
+        <Sparkles size={16} />
+        {pending ? "生成中…" : "生成确认单"}
+      </button>
+    </div>
+  );
+}
+
+function finalizationMilestoneText(profile: ConsultState["profile_draft"]): string {
+  const [goal, location, visa] = deriveConsultSlots(profile);
+  const value = (label: string) => label.replace(/^[^：]+：/, "");
+  return `小意已把必填信息收集齐：目标 ${value(goal.label)}、地点 ${value(location.label)}、签证${value(visa.label)}。你可以继续补充偏好，也可以让我安排匹配。`;
+}
+
 function BriefCard({
   draft,
   brief,
@@ -251,6 +297,7 @@ function BriefCard({
   return (
     <div className="v2-brief">
       <p className="v2-brief-title">Match Brief 确认单</p>
+      <p className="v2-brief-guidance">确认单由你们的对话记录自动生成，请你核对无误后开始。</p>
       <dl>
         <div>
           <dt>目标</dt>
@@ -308,10 +355,12 @@ function ResultCards({
   runId,
   anchorRef,
   highlighted,
+  onNewConsult,
 }: {
   runId: string;
   anchorRef: React.RefObject<HTMLDivElement | null>;
   highlighted: boolean;
+  onNewConsult: () => void;
 }) {
   const result = useQuery({
     queryKey: ["v2-result", runId],
@@ -367,6 +416,12 @@ function ResultCards({
     } catch {
       return null;
     }
+  };
+  const activateResultControl = (selector: string, click = false) => {
+    const control = anchorRef.current?.querySelector<HTMLButtonElement>(selector);
+    if (!control) return;
+    if (click) control.click();
+    control.focus();
   };
   return (
     <div
@@ -458,6 +513,20 @@ function ResultCards({
       {warnings.length ? (
         <p className="v2-warnings">提示：{warnings.join("、")}</p>
       ) : null}
+      <div className="v2-result-actions" role="group" aria-label="结果后续行动">
+        <button type="button" onClick={() => activateResultControl(".v2-evidence-trigger", true)}>
+          查看第 1 名的证据
+        </button>
+        <button
+          type="button"
+          onClick={() => activateResultControl('.v2-job-card .reaction-outcomes button')}
+        >
+          更新申请进展
+        </button>
+        <button type="button" onClick={onNewConsult}>
+          新建咨询细化方向
+        </button>
+      </div>
     </div>
   );
 }
@@ -473,9 +542,10 @@ export function WorkbenchPage() {
   const [mode, setMode] = useState<"targeted" | "explore">("targeted");
   const [briefDraft, setBriefDraft] = useState<ConsultFinalize | null>(null);
   const [brief, setBrief] = useState<MatchBriefResponse | null>(null);
-  // 单一 modal 状态：confirm→quota 的 402 切换保持同一 FocusModal 实例，
+  const [resumeRecovery, setResumeRecovery] = useState<ResumeRecoveryState | null>(null);
+  // 单一 modal 状态：retry/refine→quota 的 402 切换保持同一 FocusModal 实例，
   // 避免旧实例卸载时的焦点归还 microtask 把焦点抢回背景（互审第 2 轮阻断）
-  const [retryModal, setRetryModal] = useState<"confirm" | "quota" | null>(null);
+  const [retryModal, setRetryModal] = useState<"retry" | "refine" | "quota" | null>(null);
   const timelineRef = useRef<HTMLOListElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -532,9 +602,20 @@ export function WorkbenchPage() {
       }),
     onSuccess: () => {
       setMessage("");
+      setResumeRecovery(null);
       // 继续咨询会改画像：作废已生成的旧确认单，防止确认到过期内容
       setBriefDraft(null);
       void queryClient.invalidateQueries({ queryKey: ["consult", sessionId] });
+    },
+    onError: (error) => {
+      const recovery = resumeRecoveryState(error);
+      if (!recovery) return;
+      setResumeRecovery(recovery);
+      setBriefDraft(null);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
+        queryClient.invalidateQueries({ queryKey: ["consult", sessionId] }),
+      ]);
     },
   });
   const finalize = useMutation({
@@ -585,6 +666,7 @@ export function WorkbenchPage() {
     onSuccess: (session) => {
       setBriefDraft(null);
       setBrief(null);
+      setResumeRecovery(null);
       setRetryModal(null);
       executeAttempted.current = false;
       queryClient.removeQueries({ queryKey: ["consult", sessionId], exact: true });
@@ -611,6 +693,10 @@ export function WorkbenchPage() {
   }, [me.data?.user_id, runId, sessionId, setSearchParams]);
 
   useEffect(() => {
+    setResumeRecovery(null);
+  }, [sessionId]);
+
+  useEffect(() => {
     if (!runId || !me.data?.user_id || !(status.error instanceof ApiError)) return;
     if (status.error.status !== 403 && status.error.status !== 404) return;
     removeLastRun(me.data.user_id, sessionId);
@@ -625,8 +711,19 @@ export function WorkbenchPage() {
   // 后端对"未上传"与"归一化中"同为 409（known_issues #6）：
   // 只有本次会话发起过上传时才把 409 解释为"处理中"，否则展示上传入口。
   const preview409 = preview.error instanceof ApiError && preview.error.status === 409;
-  const resumeProcessing = preview409 && (upload.isPending || upload.isSuccess);
+  const resumeProcessing =
+    preview409 && (upload.isPending || upload.isSuccess || resumeRecovery === "processing");
   const resumeConfirmed = resumeReady && Boolean(preview.data?.confirmed);
+
+  useEffect(() => {
+    if (!resumeRecovery || preview.isFetching) return;
+    if (preview.isSuccess) {
+      setResumeRecovery("updated");
+      return;
+    }
+    const recovery = resumeRecoveryState(preview.error);
+    if (recovery) setResumeRecovery(recovery);
+  }, [preview.error, preview.isFetching, preview.isSuccess, resumeRecovery]);
 
   // plan_ready 自动提交执行（幂等：409 视为已在执行）
   useEffect(() => {
@@ -645,11 +742,54 @@ export function WorkbenchPage() {
     status.data?.status === "completed" || status.data?.status === "completed_with_warnings";
   const retryableTerminal = ["failed", "stale", "cancelled"].includes(status.data?.status ?? "");
 
+  const consultBubbles = useMemo(
+    () =>
+      transcript.flatMap((entry: ConsultTranscriptEntry) => {
+        const items: {
+          key: string;
+          persona: keyof typeof PERSONAS;
+          text: string;
+          round: number;
+          finalizableNote: boolean;
+        }[] = [
+          {
+            key: `u-${entry.round}`,
+            persona: "user",
+            text: entry.user_message,
+            round: entry.round,
+            finalizableNote: false,
+          },
+          {
+            key: `a-${entry.round}`,
+            persona: "intent_consultant",
+            text: `${entry.assistant_reply}${entry.next_question ? `\n${entry.next_question}` : ""}`,
+            round: entry.round,
+            finalizableNote: false,
+          },
+        ];
+        for (const note of entry.supervisor_notes ?? []) {
+          items.push({
+            key: `n-${entry.round}-${note.coach_attempt_id}`,
+            persona: "pm",
+            text: note.text,
+            round: entry.round,
+            finalizableNote: note.trigger === "finalizable",
+          });
+        }
+        return items;
+      }),
+    [transcript],
+  );
+  const finalizableNoteKey = [...consultBubbles]
+    .reverse()
+    .find((item) => item.finalizableNote)?.key;
+
   const timelineContentKey = [
     resumeReady,
     resumeProcessing,
-    transcript
-      .map((entry) => [entry.round, entry.user_message, entry.assistant_reply, entry.next_question].join("~"))
+    consultBubbles.length,
+    consultBubbles
+      .map((item) => [item.key, item.persona, item.text].join("~"))
       .join("|"),
     turn.isPending,
     Boolean(briefDraft),
@@ -667,33 +807,15 @@ export function WorkbenchPage() {
     resetKey: `${sessionId}:${runId ?? "consult"}`,
   });
 
-  const canConsult = resumeConfirmed && !runId;
+  const canConsult =
+    resumeConfirmed && !runId && resumeRecovery !== "processing" && resumeRecovery !== "error";
   const inputDisabled = !canConsult || turn.isPending;
-  const consultSlots = deriveConsultSlots(consult.data?.profile_draft);
+  const consultSlots = deriveConsultSlots(
+    consult.data?.profile_draft,
+    consult.data?.clarification_progress,
+  );
   const completenessPercent = Math.round(
     Math.min(1, Math.max(0, consult.data?.completeness ?? 0)) * 100,
-  );
-
-  const consultBubbles = useMemo(
-    () =>
-      transcript.flatMap((entry: ConsultTranscriptEntry) => {
-        const items: {
-          key: string;
-          persona: keyof typeof PERSONAS;
-          text: string;
-          round: number;
-        }[] = [
-          { key: `u-${entry.round}`, persona: "user", text: entry.user_message, round: entry.round },
-          {
-            key: `a-${entry.round}`,
-            persona: "intent_consultant",
-            text: `${entry.assistant_reply}${entry.next_question ? `\n${entry.next_question}` : ""}`,
-            round: entry.round,
-          },
-        ];
-        return items;
-      }),
-    [transcript],
   );
 
   if (!sessionId) return null;
@@ -784,6 +906,13 @@ export function WorkbenchPage() {
             metadata={{ kind: "round", text: `第 ${item.round} 轮` }}
           >
             <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
+            {item.key === finalizableNoteKey && canConsult && consult.data?.can_finalize && !briefDraft ? (
+              <FinalizeAction
+                disabled={finalize.isPending || turn.isPending}
+                pending={finalize.isPending}
+                onFinalize={() => finalize.mutate()}
+              />
+            ) : null}
           </Bubble>
         ))}
 
@@ -795,21 +924,14 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
 
-        {canConsult && consult.data?.can_finalize && !briefDraft ? (
+        {canConsult && consult.data?.can_finalize && !briefDraft && !finalizableNoteKey ? (
           <Bubble persona="pm" tone="card">
-            <p>
-              信息已经足够完整（完成度 {Math.round((consult.data.completeness ?? 0) * 100)}%）。
-              可以继续深聊，也可以现在生成 Match Brief 确认单。
-            </p>
-            <button
-              type="button"
-              className="v2-btn primary"
-              disabled={finalize.isPending}
-              onClick={() => finalize.mutate()}
-            >
-              <Sparkles size={16} />
-              {finalize.isPending ? "生成中…" : "生成确认单"}
-            </button>
+            <p>{finalizationMilestoneText(consult.data.profile_draft)}</p>
+            <FinalizeAction
+              disabled={finalize.isPending || turn.isPending}
+              pending={finalize.isPending}
+              onFinalize={() => finalize.mutate()}
+            />
           </Bubble>
         ) : null}
 
@@ -865,6 +987,7 @@ export function WorkbenchPage() {
               runId={runId}
               anchorRef={resultRef}
               highlighted={timelineScroll.resultHighlighted}
+              onNewConsult={() => setRetryModal("refine")}
             />
           </Bubble>
         ) : null}
@@ -876,7 +999,7 @@ export function WorkbenchPage() {
               {status.data?.error_code ? `（${status.data.error_code}）` : null}。当前会话不能重新生成确认单，
               需要新建咨询后重试。
             </p>
-            <button type="button" className="v2-btn primary" onClick={() => setRetryModal("confirm")}>
+            <button type="button" className="v2-btn primary" onClick={() => setRetryModal("retry")}>
               新建咨询重试
             </button>
           </Bubble>
@@ -964,7 +1087,14 @@ export function WorkbenchPage() {
         >
           <Send size={17} />
         </button>
-        {turn.isError ? (
+        {resumeRecovery ? (
+          <p
+            className={`${resumeRecovery === "error" ? "v2-error" : "v2-notice"} v2-composer-error`}
+            role="status"
+          >
+            {resumeRecoveryMessage(resumeRecovery)}
+          </p>
+        ) : turn.isError ? (
           <p className="v2-error v2-composer-error">
             {turn.error instanceof ApiError && turn.error.status === 409
               ? "对话状态已更新，请刷新后继续。"
@@ -974,15 +1104,20 @@ export function WorkbenchPage() {
       </footer>
       {retryModal ? (
         <FocusModal
-          label={retryModal === "confirm" ? "新建咨询确认" : "额度已用完"}
+          label={retryModal === "quota" ? "额度已用完" : "新建咨询确认"}
           modeKey={retryModal}
-          closeDisabled={retryModal === "confirm" && createSession.isPending}
+          closeDisabled={retryModal !== "quota" && createSession.isPending}
           onClose={() => setRetryModal(null)}
         >
-          {retryModal === "confirm" ? (
+          {retryModal !== "quota" ? (
             <>
-              <h2>新建咨询后重试</h2>
-              <p>新建咨询会消耗一次咨询额度。创建成功后才会离开当前终态页面。</p>
+              <h2>{retryModal === "refine" ? "新建咨询细化方向" : "新建咨询后重试"}</h2>
+              <p>
+                新建咨询会消耗一次咨询额度。
+                {retryModal === "refine"
+                  ? "创建成功后可继续细化方向。"
+                  : "创建成功后才会离开当前终态页面。"}
+              </p>
               <div className="v2-modal-actions">
                 <button
                   type="button"

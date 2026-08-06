@@ -230,12 +230,20 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await expect(sourceLink).toHaveAttribute("href", "https://jobs.example.com/e2e-backend");
   await expect(sourceLink).toHaveAttribute("rel", "noopener noreferrer");
 
+  const resultActions = page.getByRole("group", { name: "结果后续行动" });
+  await expect(resultActions.getByRole("button")).toHaveCount(3);
+  await resultActions.getByRole("button", { name: "查看第 1 名的证据" }).click();
   const evidenceButton = page.getByRole("button", { name: "查看证据" }).first();
-  await evidenceButton.click();
   await expect(page.getByText("Python, SQL required.")).toBeVisible();
   await expect(page.getByText("出自 JD 原文").first()).toBeVisible();
   await evidenceButton.click();
   await expect(page.getByText("Python, SQL required.")).not.toBeVisible();
+
+  await resultActions.getByRole("button", { name: "更新申请进展" }).click();
+  await expect(page.getByRole("button", { name: "被拒" }).first()).toBeFocused();
+  await resultActions.getByRole("button", { name: "新建咨询细化方向" }).click();
+  await expect(page.getByRole("dialog", { name: "新建咨询确认" })).toBeVisible();
+  await page.getByRole("button", { name: "保留当前页面" }).click();
 
   const outcomeLabels = ["被拒", "过筛", "面试", "Offer"];
   const jobCards = page.locator(".v2-job-card");
@@ -345,6 +353,83 @@ test("required-slot chips follow consultation data and keep visa=false complete"
     "data-complete",
     "true",
   );
+});
+
+test("resume conflicts preserve the draft and recover through processing, updated, and error states", async ({
+  page,
+}) => {
+  const state = createFlowState({ loggedIn: true, uploaded: true, confirmed: true, round: 2 });
+  await installV2Api(page, state);
+  let previewState: "ready" | "processing" | "updated" | "error" = "ready";
+  let previewRefetches = 0;
+  let consultGets = 0;
+  let consultPosts = 0;
+
+  await page.route("**/api/v1/sessions/sess-e2e-1/resume-preview", async (route) => {
+    const json = (body: unknown, status = 200) =>
+      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (previewState === "processing") {
+      previewRefetches += 1;
+      previewState = "updated";
+      return json({ detail: "resume_processing" }, 409);
+    }
+    if (previewState === "error") {
+      previewRefetches += 1;
+      return json({ detail: "resume_error" }, 409);
+    }
+    return json(apiFixtures.resumePreview(state.confirmed));
+  });
+  await page.route("**/api/v1/sessions/sess-e2e-1/consult", async (route) => {
+    const method = route.request().method();
+    const json = (body: unknown, status = 200) =>
+      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (method === "GET") {
+      consultGets += 1;
+      return json(apiFixtures.consultState(state.round));
+    }
+    if (method === "POST") {
+      consultPosts += 1;
+      state.confirmed = false;
+      if (consultPosts === 1) {
+        previewState = "processing";
+        return json({ detail: "resume_changed" }, 409);
+      }
+      previewState = "error";
+      return json({ detail: "resume_error" }, 409);
+    }
+    return route.fallback();
+  });
+
+  await page.goto("/app/sessions/sess-e2e-1");
+  // 恢复期 placeholder 会切换（"请先上传并确认简历"），用稳定的结构定位器
+  // 贯穿全程，才能断言草稿在各恢复态之间保留。
+  const input = page.locator(".v2-composer textarea");
+  await expect(input).toBeVisible();
+  await expect(input).toHaveAttribute("placeholder", /告诉小意你的想法/);
+  const consultGetsBeforeConflict = consultGets;
+  await page.getByRole("button", { name: "生成确认单" }).click();
+  await expect(page.getByText("Match Brief 确认单")).toBeVisible();
+
+  await input.fill("这段输入需要由我确认后重试");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("新简历处理中")).toBeVisible();
+  await expect(input).toHaveValue("这段输入需要由我确认后重试");
+  await expect(page.getByText("Match Brief 确认单")).toHaveCount(0);
+  await expect.poll(() => previewRefetches).toBeGreaterThan(0);
+  await expect.poll(() => consultGets).toBeGreaterThan(consultGetsBeforeConflict);
+
+  await expect(page.getByText("简历已更新，本轮未提交；请确认新档案后重试")).toBeVisible({
+    timeout: 6000,
+  });
+  expect(consultPosts).toBe(1);
+  await page.getByRole("button", { name: "确认简历档案" }).click();
+  await expect(input).toBeEnabled();
+  expect(consultPosts).toBe(1);
+
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("旧档案已作废，请重传")).toBeVisible();
+  await expect(input).toHaveValue("这段输入需要由我确认后重试");
+  expect(consultPosts).toBe(2);
 });
 
 test("PM service announcement advances four persona sections from all seven contract stages", async ({

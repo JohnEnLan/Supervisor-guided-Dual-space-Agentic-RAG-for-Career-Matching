@@ -188,6 +188,93 @@ describe("consultation required-slot presentation", () => {
   });
 });
 
+describe("consultation supervisor notes and finalization", () => {
+  it("renders each PM note directly after that round's Xiaoyi bubble", async () => {
+    mockWorkbenchApi();
+    const note = apiFixtures.supervisorNote({ text: "请补充你选择岗位时最看重的依据。" });
+    vi.mocked(api.consultState).mockResolvedValue(
+      apiFixtures.consultState(1, { supervisor_notes: [note] }),
+    );
+
+    renderWorkbench();
+
+    const assistantBubble = (await screen.findByText(/明白了（第 1 轮）/)).closest(".v2-msg");
+    const noteBubble = screen.getByText(note.text).closest(".v2-msg");
+    expect(assistantBubble?.nextElementSibling).toBe(noteBubble);
+    expect(noteBubble).toHaveAttribute("data-persona", "pm");
+    expect(within(noteBubble as HTMLElement).getByText("第 1 轮")).toHaveAttribute(
+      "data-meta-kind",
+      "round",
+    );
+  });
+
+  it("keeps old transcript entries without supervisor_notes compatible and adds no PM node", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.consultState).mockResolvedValue(apiFixtures.consultState(1));
+
+    renderWorkbench();
+
+    await screen.findByText(/明白了（第 1 轮）/);
+    expect(document.querySelectorAll('.v2-msg[data-persona="pm"]')).toHaveLength(1);
+    expect(screen.queryByText(/方向已经明确/)).not.toBeInTheDocument();
+  });
+
+  it("mounts the only finalization CTA under a finalizable PM note and keeps its accessible name", async () => {
+    mockWorkbenchApi();
+    const note = apiFixtures.supervisorNote({
+      trigger: "finalizable",
+      text: "关键信息与简历补充已经齐全，可以生成确认单。",
+    });
+    vi.mocked(api.consultState).mockResolvedValue(
+      apiFixtures.consultState(2, { supervisor_notes: [note] }),
+    );
+
+    renderWorkbench();
+
+    const noteBubble = (await screen.findByText(note.text)).closest(".v2-msg");
+    const action = within(noteBubble as HTMLElement).getByRole("button", { name: "生成确认单" });
+    expect(action).toBeEnabled();
+    expect(action.closest(".v2-finalize-action")).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "生成确认单" })).toHaveLength(1);
+    expect(screen.queryByText(/小意已把必填信息收集齐/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the complete deterministic PM card and keeps the generated-brief interjection", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.consultState).mockResolvedValue(apiFixtures.consultState(2));
+
+    renderWorkbench();
+
+    expect(
+      await screen.findByText(
+        "小意已把必填信息收集齐：目标 backend engineer、地点 Shanghai、签证不需担保。你可以继续补充偏好，也可以让我安排匹配。",
+      ),
+    ).toBeVisible();
+    const finalizeButton = screen.getByRole("button", { name: "生成确认单" });
+    expect(finalizeButton).toBeEnabled();
+    await user.click(finalizeButton);
+    expect(
+      await screen.findByText("确认单由你们的对话记录自动生成，请你核对无误后开始。"),
+    ).toBeVisible();
+  });
+
+  it("disables finalization while a consult turn is pending", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.consultState).mockResolvedValue(apiFixtures.consultState(2));
+    vi.spyOn(api, "consultTurn").mockImplementation(() => new Promise(() => undefined));
+    renderWorkbench();
+
+    const input = await screen.findByPlaceholderText(/告诉小意你的想法/);
+    await user.type(input, "再补充一条偏好");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("小意正在回复…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "生成确认单" })).toBeDisabled();
+  });
+});
+
 describe("resume confirmation profile", () => {
   function mockUnconfirmedFullResume() {
     mockWorkbenchApi();
@@ -479,6 +566,28 @@ describe("truthful result cards", () => {
     await user.click(demoDisclosure);
     expect(within(cards[0]).getByText(/合成演示语料/)).toBeVisible();
   });
+
+  it("maps all three result actions to existing evidence, progress, and new-consult interactions", async () => {
+    const user = userEvent.setup();
+    mockCompletedResult();
+    vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult(1));
+
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const actions = await screen.findByRole("group", { name: "结果后续行动" });
+    expect(within(actions).getAllByRole("button")).toHaveLength(3);
+
+    await user.click(within(actions).getByRole("button", { name: "查看第 1 名的证据" }));
+    expect(await screen.findByText("Python, SQL required.")).toBeVisible();
+
+    await user.click(within(actions).getByRole("button", { name: "更新申请进展" }));
+    expect(screen.getByRole("button", { name: "被拒" })).toHaveFocus();
+
+    await user.click(within(actions).getByRole("button", { name: "新建咨询细化方向" }));
+    expect(screen.getByRole("dialog", { name: "新建咨询确认" })).toHaveTextContent(
+      "创建成功后可继续细化方向",
+    );
+  });
 });
 
 describe("truthful consultation typing state", () => {
@@ -494,6 +603,66 @@ describe("truthful consultation typing state", () => {
 
     expect(await screen.findByText("小意正在回复…")).toBeVisible();
     expect(screen.queryByText("团队正在处理下一阶段…")).not.toBeInTheDocument();
+  });
+});
+
+describe("resume-generation conflict recovery", () => {
+  it("keeps the turn draft, clears the stale brief, refetches both resources, and advances the two-stage copy", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    const initialPreview = apiFixtures.resumePreview(true);
+    let resolvePreview!: (value: typeof initialPreview) => void;
+    const refreshedPreview = new Promise<typeof initialPreview>((resolve) => {
+      resolvePreview = resolve;
+    });
+    vi.mocked(api.resumePreview)
+      .mockResolvedValueOnce(initialPreview)
+      .mockImplementation(() => refreshedPreview);
+    vi.spyOn(api, "consultTurn").mockRejectedValue(new ApiError(409, "resume_changed"));
+    const { queryClient } = renderWorkbench();
+    const input = await screen.findByPlaceholderText(/告诉小意你的想法/);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    await user.click(screen.getByRole("button", { name: "生成确认单" }));
+    expect(await screen.findByText("Match Brief 确认单")).toBeVisible();
+    await user.type(input, "保留这段尚未提交的输入");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("新简历处理中")).toBeVisible();
+    expect(input).toHaveValue("保留这段尚未提交的输入");
+    expect(screen.queryByText("Match Brief 确认单")).not.toBeInTheDocument();
+    expect(api.consultTurn).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["resume-preview", "sess-1"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["consult", "sess-1"] });
+
+    const updatedPreview = apiFixtures.resumePreview(false);
+    updatedPreview.resume_version = 2;
+    act(() => resolvePreview(updatedPreview));
+    expect(
+      await screen.findByText("简历已更新，本轮未提交；请确认新档案后重试"),
+    ).toBeVisible();
+    expect(api.consultTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["resume_processing", "新简历处理中"],
+    ["resume_error", "旧档案已作废，请重传"],
+  ])("routes %s without replaying the pending input", async (detail, expectedCopy) => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview)
+      .mockResolvedValueOnce(apiFixtures.resumePreview(true))
+      .mockRejectedValue(new ApiError(409, detail));
+    vi.spyOn(api, "consultTurn").mockRejectedValue(new ApiError(409, detail));
+    renderWorkbench();
+
+    const input = await screen.findByPlaceholderText(/告诉小意你的想法/);
+    await user.type(input, "这条输入不能自动重放");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(expectedCopy)).toBeVisible();
+    expect(input).toHaveValue("这条输入不能自动重放");
+    expect(api.consultTurn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -618,6 +787,29 @@ describe("protected timeline scrolling", () => {
       });
     });
 
+    expect(await screen.findByRole("button", { name: "↓ 有新消息" })).toBeVisible();
+    expect(timeline!.scrollTop).toBe(200);
+  });
+
+  it("treats a refetched note on the same transcript round as a new rendered bubble", async () => {
+    mockWorkbenchApi();
+    const initial = apiFixtures.consultState(1);
+    vi.mocked(api.consultState).mockResolvedValue(initial);
+    const { queryClient } = renderWorkbench();
+    await screen.findByText(/明白了（第 1 轮）/);
+
+    const timeline = document.querySelector<HTMLOListElement>(".v2-timeline");
+    expect(timeline).not.toBeNull();
+    setTimelineMetrics(timeline!, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 });
+    const note = apiFixtures.supervisorNote({ text: "同轮返回的 PM 督导建议。" });
+    act(() => {
+      queryClient.setQueryData(
+        ["consult", "sess-1"],
+        apiFixtures.consultState(1, { supervisor_notes: [note] }),
+      );
+    });
+
+    expect(await screen.findByText(note.text)).toBeVisible();
     expect(await screen.findByRole("button", { name: "↓ 有新消息" })).toBeVisible();
     expect(timeline!.scrollTop).toBe(200);
   });

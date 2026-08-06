@@ -40,4 +40,33 @@ describe("consultation required-slot derivation", () => {
       deriveConsultSlots({ hard_constraints: { need_visa_sponsor: "false" } })[2],
     ).toMatchObject({ complete: false, label: "签证：待补充" });
   });
+
+  it("adds resume clarification with answered, skipped, and remaining counts", () => {
+    const slots = deriveConsultSlots(undefined, {
+      answered: 1,
+      skipped: 1,
+      total: 3,
+      questions_used: 2,
+    });
+
+    expect(slots).toHaveLength(4);
+    expect(slots[3]).toEqual({
+      id: "resume_clarification",
+      complete: false,
+      label: "简历补充：已回答 1，已跳过 1，待补充 1",
+      prompt: "请继续帮我补充简历信息。",
+    });
+  });
+
+  it("hides empty clarification targets and completes only when answered plus skipped equals total", () => {
+    expect(
+      deriveConsultSlots(undefined, { answered: 0, skipped: 0, total: 0, questions_used: 0 }),
+    ).toHaveLength(3);
+    expect(
+      deriveConsultSlots(undefined, { answered: 1, skipped: 2, total: 3, questions_used: 2 })[3],
+    ).toMatchObject({ complete: true, label: "简历补充：已回答 1，已跳过 2，待补充 0" });
+    expect(
+      deriveConsultSlots(undefined, { answered: 1, skipped: 1, total: 3, questions_used: 2 })[3],
+    ).toMatchObject({ complete: false });
+  });
 });

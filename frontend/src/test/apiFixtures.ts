@@ -3,6 +3,7 @@ import type { components } from "../api/generated";
 type Schemas = components["schemas"];
 type Capabilities = Schemas["CapabilitiesResponse"];
 type ConsultFinalize = Schemas["ConsultBriefDraftResponse"];
+type ClarificationProgress = Schemas["ClarificationProgress"];
 type ConsultState = Schemas["ConsultStateResponse"];
 type ConsultTurn = Schemas["ConsultResponse"];
 type MatchBriefResponse = Schemas["MatchBriefResponse"];
@@ -21,6 +22,15 @@ type RunResult = Schemas["RunResultResponse"];
 type RunStatus = Schemas["RunStatusResponse"];
 type Session = Schemas["SessionResponse"];
 type SupervisorNote = Schemas["SupervisorNote"];
+
+type ConsultStateFixtureOptions = {
+  supervisor_notes?: SupervisorNote[];
+  clarification_progress?: Partial<ClarificationProgress>;
+};
+
+type ConsultTurnFixtureOptions = {
+  clarification_progress?: Partial<ClarificationProgress>;
+};
 
 export const RUN_STAGES = [
   "resume",
@@ -78,6 +88,18 @@ function consultCompleteness(round: number): number {
   if (round >= 2) return 0.6;
   if (round >= 1) return 0.4;
   return 0;
+}
+
+function clarificationProgress(
+  overrides: Partial<ClarificationProgress> = {},
+): ClarificationProgress {
+  return {
+    answered: 0,
+    skipped: 0,
+    total: 0,
+    questions_used: 0,
+    ...overrides,
+  };
 }
 
 export const apiFixtures = {
@@ -176,7 +198,7 @@ export const apiFixtures = {
       confirmed_at: "2026-08-05T09:01:00Z",
     }) satisfies ResumeConfirm,
 
-  consultState: (round: number) =>
+  consultState: (round: number, options: ConsultStateFixtureOptions = {}) =>
     ({
       transcript: Array.from({ length: round }, (_, index) => ({
         round: index + 1,
@@ -184,21 +206,19 @@ export const apiFixtures = {
         assistant_reply: `明白了（第 ${index + 1} 轮）。`,
         next_question: index + 1 >= 2 ? "还有想补充的吗？" : "你更看重地点还是方向？",
         phase: index === 0 ? ("template" as const) : ("deepen" as const),
+        ...(index + 1 === round && options.supervisor_notes
+          ? { supervisor_notes: options.supervisor_notes }
+          : {}),
       })),
       profile_draft: consultProfile(round),
       round,
       phase: round === 0 ? ("template" as const) : ("deepen" as const),
       completeness: consultCompleteness(round),
       can_finalize: round >= 2,
-      clarification_progress: {
-        answered: 0,
-        skipped: 0,
-        total: 0,
-        questions_used: 0,
-      },
+      clarification_progress: clarificationProgress(options.clarification_progress),
     }) satisfies ConsultState,
 
-  consultTurn: (round: number) =>
+  consultTurn: (round: number, options: ConsultTurnFixtureOptions = {}) =>
     ({
       assistant_reply: `明白了（第 ${round} 轮）。`,
       next_question: round >= 2 ? "还有想补充的吗？" : "你更看重地点还是方向？",
@@ -207,12 +227,7 @@ export const apiFixtures = {
       can_finalize: round >= 2,
       round,
       profile_draft: consultProfile(round),
-      clarification_progress: {
-        answered: 0,
-        skipped: 0,
-        total: 0,
-        questions_used: 0,
-      },
+      clarification_progress: clarificationProgress(options.clarification_progress),
     }) satisfies ConsultTurn,
 
   supervisorNote: (overrides: Partial<SupervisorNote> = {}) =>
