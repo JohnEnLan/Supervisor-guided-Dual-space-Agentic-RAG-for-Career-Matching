@@ -144,3 +144,51 @@ describe("AppShell navigation truth", () => {
     expect(dialog).not.toHaveTextContent(/3 次|¥|数字上限/);
   });
 });
+
+describe("AppShell mobile navigation", () => {
+  it("opens a modal drawer, traps focus, and restores focus after Escape", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await screen.findByText("测试用户");
+    const trigger = document.querySelector<HTMLButtonElement>(".v2-mobile-nav-trigger")!;
+    const hiddenCloseButton = document.querySelector<HTMLButtonElement>(".v2-sidebar-close")!;
+    trigger.style.display = "block";
+    hiddenCloseButton.style.display = "grid";
+    expect(trigger).toHaveAccessibleName("打开导航");
+    await user.click(trigger);
+
+    const drawer = screen.getByRole("dialog", { name: "主导航" });
+    const closeButton = screen.getByRole("button", { name: "关闭导航" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(closeButton).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "退出登录" })).toHaveFocus();
+    await user.tab();
+    expect(closeButton).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "主导航" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("closes from the backdrop and returns focus to the menu trigger", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await screen.findByText("测试用户");
+    const trigger = document.querySelector<HTMLButtonElement>(".v2-mobile-nav-trigger")!;
+    trigger.style.display = "block";
+    await user.click(trigger);
+    const backdrop = document.querySelector<HTMLButtonElement>(".v2-drawer-backdrop")!;
+    backdrop.style.display = "block";
+    expect(backdrop).toHaveAccessibleName("关闭导航遮罩");
+    await user.click(backdrop);
+
+    expect(screen.queryByRole("dialog", { name: "主导航" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+});

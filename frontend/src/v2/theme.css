@@ -54,7 +54,9 @@
 
 /* App shell */
 .v2-shell { min-height: 100vh; display: grid; grid-template-columns: 268px minmax(0, 1fr); background: var(--v2-canvas); color: var(--v2-ink); font-family: var(--v2-sans); }
+.v2-mobile-nav, .v2-drawer-backdrop, .v2-sidebar-close { display: none; }
 .v2-sidebar { border-right: 1px solid var(--v2-line); display: flex; flex-direction: column; padding: 16px 12px; gap: 8px; background: var(--v2-surface-warm); }
+.v2-sidebar-heading { display: contents; }
 .v2-sidebar .v2-wordmark { padding: 6px 10px 14px; }
 .v2-new-chat { margin: 0 6px 10px; }
 .v2-session-list { flex: 1; overflow-y: auto; display: grid; gap: 2px; align-content: start; margin: 0; padding: 0; list-style: none; }
@@ -70,8 +72,18 @@
 
 @media (max-width: 900px) {
   .v2-hero { grid-template-columns: 1fr; }
-  .v2-shell { grid-template-columns: 1fr; }
-  .v2-sidebar { display: none; }
+  .v2-shell { width: 100%; height: 100dvh; min-height: 100dvh; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+  .v2-mobile-nav { min-height: 56px; padding: 6px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--v2-line); background: var(--v2-surface); z-index: 40; }
+  .v2-mobile-nav-trigger, .v2-sidebar-close { width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; border: 1px solid var(--v2-line); border-radius: 10px; background: var(--v2-surface); color: var(--v2-ink); cursor: pointer; }
+  .v2-mobile-nav-trigger:hover, .v2-mobile-nav-trigger:focus-visible, .v2-sidebar-close:hover, .v2-sidebar-close:focus-visible { border-color: var(--v2-accent); outline: 2px solid var(--v2-accent-soft); outline-offset: 1px; }
+  .v2-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 70; width: min(84vw, 320px); max-width: calc(100vw - 48px); border-right-color: var(--v2-line); box-shadow: 12px 0 34px rgb(31 30 29 / 0.18); transform: translateX(-100%); visibility: hidden; transition: transform 180ms ease, visibility 0s linear 180ms; }
+  .v2-sidebar[data-open="true"] { transform: translateX(0); visibility: visible; transition-delay: 0s; }
+  .v2-sidebar-heading { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .v2-sidebar .v2-wordmark { padding: 6px 10px; }
+  .v2-drawer-backdrop { position: fixed; inset: 0; z-index: 60; width: 100%; min-height: 0; padding: 0; display: block; border: 0; border-radius: 0; background: rgb(31 27 22 / 0.45); cursor: default; }
+  .v2-main { min-height: 0; overflow-y: auto; }
+  .v2-workbench { height: 100%; max-height: 100%; overflow: hidden; }
+  .v2-composer textarea { width: 100%; min-width: 0; }
 }
 
 /* Workbench chat */
@@ -263,6 +275,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .spin, .v2-msg, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
+  .v2-sidebar { transition: none; }
   .v2-message-meta { transition: none; }
   .v2-timeline { scroll-behavior: auto; }
 }

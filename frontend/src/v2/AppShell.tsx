@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, LogOut, MessageSquarePlus, ScrollText, UserRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { BarChart3, LogOut, Menu, MessageSquarePlus, ScrollText, UserRound, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { ApiError, onUnauthorized } from "../api/client";
@@ -25,6 +25,11 @@ function sessionDateLabel(updatedAt: string): string {
 export function AppShell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationTriggerRef = useRef<HTMLButtonElement>(null);
+  const navigationDrawerRef = useRef<HTMLElement>(null);
+  const navigationCloseRef = useRef<HTMLButtonElement>(null);
+  const closeNavigation = useCallback(() => setNavigationOpen(false), []);
 
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const sessions = useQuery({
@@ -46,6 +51,55 @@ export function AppShell() {
   useEffect(() => {
     if (me.isError) navigate("/", { replace: true });
   }, [me.isError, navigate]);
+
+  // 与 WorkbenchPage FocusModal 等价：打开即入焦、Tab 循环、Escape 关闭、关闭后还焦。
+  useEffect(() => {
+    if (!navigationOpen) return;
+
+    const restoreTo =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : navigationTriggerRef.current;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    navigationCloseRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeNavigation();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        navigationDrawerRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === navigationDrawerRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+      queueMicrotask(() => restoreTo?.focus());
+    };
+  }, [closeNavigation, navigationOpen]);
 
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [, refreshSessionTitles] = useState(0);
@@ -78,13 +132,57 @@ export function AppShell() {
 
   return (
     <div className="v2-shell">
-      <aside className="v2-sidebar">
+      <header className="v2-mobile-nav">
+        <button
+          ref={navigationTriggerRef}
+          type="button"
+          className="v2-mobile-nav-trigger"
+          aria-label="打开导航"
+          aria-expanded={navigationOpen}
+          aria-controls="v2-primary-navigation"
+          onClick={() => setNavigationOpen(true)}
+        >
+          <Menu size={20} />
+        </button>
         <span className="v2-wordmark">Career RAG</span>
+      </header>
+      {navigationOpen ? (
+        <button
+          type="button"
+          className="v2-drawer-backdrop"
+          aria-label="关闭导航遮罩"
+          onClick={closeNavigation}
+        />
+      ) : null}
+      <aside
+        id="v2-primary-navigation"
+        ref={navigationDrawerRef}
+        className="v2-sidebar"
+        data-open={String(navigationOpen)}
+        role={navigationOpen ? "dialog" : undefined}
+        aria-modal={navigationOpen ? "true" : undefined}
+        aria-label={navigationOpen ? "主导航" : undefined}
+      >
+        <div className="v2-sidebar-heading">
+          <span className="v2-wordmark">Career RAG</span>
+          <button
+            ref={navigationCloseRef}
+            type="button"
+            className="v2-sidebar-close"
+            aria-label="关闭导航"
+            onClick={closeNavigation}
+          >
+            <X size={20} />
+          </button>
+        </div>
         <button
           type="button"
           className="v2-btn primary v2-new-chat"
           disabled={createSession.isPending}
-          onClick={() => createSession.mutate()}
+          onClick={() => {
+            closeNavigation();
+            createSession.mutate();
+          }}
         >
           <MessageSquarePlus size={17} />
           新的咨询
@@ -95,6 +193,7 @@ export function AppShell() {
               <NavLink
                 to={`/app/sessions/${item.session_id}`}
                 className={({ isActive }) => (isActive ? "active" : "")}
+                onClick={closeNavigation}
               >
                 {me.data?.user_id
                   ? readSessionTitle(me.data.user_id, item.session_id) ?? `咨询 · ${sessionDateLabel(item.updated_at)}`
@@ -112,19 +211,25 @@ export function AppShell() {
           </p>
         ) : null}
         <div className="v2-sidebar-footer">
-          <NavLink to="/app/profile">
+          <NavLink to="/app/profile" onClick={closeNavigation}>
             <UserRound size={16} />
             {me.data?.display_name || "我的档案"}
           </NavLink>
-          <NavLink to="/app/settings/evaluation">
+          <NavLink to="/app/settings/evaluation" onClick={closeNavigation}>
             <ScrollText size={16} />
             评估（答辩）
           </NavLink>
-          <NavLink to="/app/settings/monitoring">
+          <NavLink to="/app/settings/monitoring" onClick={closeNavigation}>
             <BarChart3 size={16} />
             监控（答辩）
           </NavLink>
-          <button type="button" onClick={() => logout.mutate()}>
+          <button
+            type="button"
+            onClick={() => {
+              closeNavigation();
+              logout.mutate();
+            }}
+          >
             <LogOut size={16} />
             退出登录
           </button>
