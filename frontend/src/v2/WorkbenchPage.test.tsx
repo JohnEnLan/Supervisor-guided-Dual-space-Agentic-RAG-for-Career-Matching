@@ -150,6 +150,44 @@ describe("v2 personas", () => {
   });
 });
 
+describe("consultation required-slot presentation", () => {
+  it("renders three chips and a completeness bar, then focuses and safely prefills missing slots", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.consultState).mockResolvedValue({
+      transcript: [],
+      profile_draft: {
+        current_goal: ["Backend engineer"],
+        hard_constraints: {},
+        soft_preferences: {},
+        avoid_roles: [],
+      },
+      round: 1,
+      phase: "template",
+      completeness: 0.4,
+      can_finalize: false,
+    });
+    renderWorkbench();
+
+    const input = await screen.findByPlaceholderText(/告诉小意你的想法/);
+    expect(screen.getAllByRole("button", { name: /^(目标|地点|签证)：/ })).toHaveLength(3);
+    expect(screen.getByRole("progressbar", { name: "咨询信息完成度" })).toHaveAttribute(
+      "aria-valuenow",
+      "40",
+    );
+
+    await user.click(screen.getByRole("button", { name: "地点：待补充" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("我希望工作的地点是：");
+
+    await user.clear(input);
+    await user.type(input, "已有草稿");
+    await user.click(screen.getByRole("button", { name: "签证：待补充" }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("已有草稿");
+  });
+});
+
 describe("PM service progress announcement", () => {
   function mockRun(statusValue: string, stage: string | null, completedStages: readonly string[] = []) {
     mockWorkbenchApi();
@@ -365,6 +403,54 @@ describe("protected timeline scrolling", () => {
     await screen.findByText("规划建议已进入核查。");
     await waitFor(() => expect(timeline!.scrollTop).toBe(1000));
     expect(screen.queryByRole("button", { name: "↓ 有新消息" })).not.toBeInTheDocument();
+  });
+
+  it("treats a same-seq stage or text replacement as new timeline content", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.runStatus).mockResolvedValue(
+      apiFixtures.runStatus({
+        status: "running",
+        stage: "retrieval",
+        completedStages: ["resume", "intent"],
+        resultReady: false,
+        retryAfterMs: null,
+      }),
+    );
+    const firstConversation = {
+      ...apiFixtures.runConversation("running", null),
+      messages: [
+        {
+          seq: 2,
+          persona: "job_scout" as const,
+          display_name: "岗位顾问·小检",
+          kind: "progress" as const,
+          stage: "retrieval",
+          text: "正在筛选岗位",
+        },
+      ],
+    };
+    vi.mocked(api.runConversation).mockResolvedValue(firstConversation);
+    const { queryClient } = renderWorkbench("/app/sessions/sess-1?run=run-created");
+    await screen.findByText("正在筛选岗位");
+
+    const timeline = document.querySelector<HTMLOListElement>(".v2-timeline");
+    expect(timeline).not.toBeNull();
+    setTimelineMetrics(timeline!, { scrollHeight: 1000, clientHeight: 400, scrollTop: 200 });
+    act(() => {
+      queryClient.setQueryData(["v2-run-conv", "run-created"], {
+        ...firstConversation,
+        messages: [
+          {
+            ...firstConversation.messages[0],
+            stage: "strategy",
+            text: "正在整理规划建议",
+          },
+        ],
+      });
+    });
+
+    expect(await screen.findByRole("button", { name: "↓ 有新消息" })).toBeVisible();
+    expect(timeline!.scrollTop).toBe(200);
   });
 
   it("uses the result-ready marker and scrolls to a briefly highlighted result anchor only on click", async () => {
@@ -667,5 +753,100 @@ describe("run message rendering", () => {
 
     expect(await screen.findByText("正在筛选岗位")).toBeVisible();
     expect(screen.queryByText("重复的运行期自我介绍")).not.toBeInTheDocument();
+  });
+
+  it("groups consecutive personas, inserts stage sections, and exposes stage-only metadata", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.runStatus).mockResolvedValue(
+      apiFixtures.runStatus({
+        status: "running",
+        stage: "verification",
+        completedStages: ["resume", "intent", "retrieval", "strategy"],
+        resultReady: false,
+        retryAfterMs: null,
+      }),
+    );
+    vi.mocked(api.runConversation).mockResolvedValue({
+      run_id: "run-created",
+      status: "running",
+      stage: "verification",
+      next_poll_ms: null,
+      messages: [
+        {
+          seq: 2,
+          persona: "job_scout",
+          display_name: "岗位顾问·小检",
+          kind: "progress",
+          stage: "retrieval",
+          text: "开始筛选岗位",
+        },
+        {
+          seq: 3,
+          persona: "job_scout",
+          display_name: "岗位顾问·小检",
+          kind: "progress",
+          stage: "retrieval",
+          text: "岗位检索已完成",
+        },
+        {
+          seq: 4,
+          persona: "pm",
+          display_name: "项目经理·PM",
+          kind: "checkpoint",
+          stage: "verification",
+          text: "进入发布核查",
+        },
+      ],
+    });
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    expect(await screen.findByRole("separator", { name: "运行阶段：岗位检索" })).toBeVisible();
+    expect(screen.getByRole("separator", { name: "运行阶段：发布核查" })).toBeVisible();
+    const groupedMessage = screen.getByText("岗位检索已完成").closest(".v2-msg");
+    expect(groupedMessage).toHaveAttribute("data-grouped", "true");
+    expect(groupedMessage?.querySelector(".v2-avatar")).not.toBeInTheDocument();
+    expect(within(groupedMessage as HTMLElement).getByText("阶段 · 岗位检索")).toHaveAttribute(
+      "data-meta-kind",
+      "stage",
+    );
+    expect(groupedMessage?.querySelector('[data-meta-kind="round"]')).not.toBeInTheDocument();
+    expect(groupedMessage).toHaveAttribute("tabindex", "0");
+  });
+
+  it("shows round-only metadata on consultation messages", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.consultState).mockResolvedValue({
+      transcript: [
+        {
+          round: 3,
+          user_message: "我不需要签证担保",
+          assistant_reply: "签证情况已记录。",
+          next_question: "还有想补充的吗？",
+          phase: "deepen",
+        },
+      ],
+      profile_draft: {
+        current_goal: ["Backend engineer"],
+        hard_constraints: { locations: ["Shanghai"], need_visa_sponsor: false },
+        soft_preferences: {},
+        avoid_roles: [],
+      },
+      round: 3,
+      phase: "deepen",
+      completeness: 0.6,
+      can_finalize: true,
+    });
+    renderWorkbench();
+
+    const userMessage = (await screen.findByText("我不需要签证担保")).closest(".v2-msg");
+    const assistantMessage = screen.getByText(/签证情况已记录/).closest(".v2-msg");
+    for (const message of [userMessage, assistantMessage]) {
+      expect(within(message as HTMLElement).getByText("第 3 轮")).toHaveAttribute(
+        "data-meta-kind",
+        "round",
+      );
+      expect(message?.querySelector('[data-meta-kind="stage"]')).not.toBeInTheDocument();
+      expect(message).toHaveAttribute("tabindex", "0");
+    }
   });
 });

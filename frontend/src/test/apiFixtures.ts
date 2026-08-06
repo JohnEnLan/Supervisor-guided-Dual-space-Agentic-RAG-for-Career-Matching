@@ -59,6 +59,26 @@ function recommendation(index: number) {
   };
 }
 
+function consultProfile(round: number): Schemas["ConsultProfileDraft"] {
+  return {
+    current_goal: round >= 1 ? ["backend engineer"] : [],
+    hard_constraints:
+      round >= 2
+        ? { locations: ["Shanghai"], need_visa_sponsor: false }
+        : round >= 1
+          ? { locations: ["Shanghai"] }
+          : {},
+    soft_preferences: {},
+    avoid_roles: [],
+  };
+}
+
+function consultCompleteness(round: number): number {
+  if (round >= 2) return 0.6;
+  if (round >= 1) return 0.4;
+  return 0;
+}
+
 export const apiFixtures = {
   capabilities: (overrides: Partial<Capabilities> = {}) =>
     ({
@@ -153,18 +173,10 @@ export const apiFixtures = {
         next_question: index + 1 >= 2 ? "还有想补充的吗？" : "你更看重地点还是方向？",
         phase: index === 0 ? ("template" as const) : ("deepen" as const),
       })),
-      profile_draft: {
-        current_goal: ["backend engineer"],
-        hard_constraints: {
-          locations: ["Shanghai"],
-          need_visa_sponsor: false,
-        },
-        soft_preferences: {},
-        avoid_roles: [],
-      },
+      profile_draft: consultProfile(round),
       round,
       phase: round === 0 ? ("template" as const) : ("deepen" as const),
-      completeness: round >= 2 ? 1 : 0.4,
+      completeness: consultCompleteness(round),
       can_finalize: round >= 2,
     }) satisfies ConsultState,
 
@@ -173,18 +185,10 @@ export const apiFixtures = {
       assistant_reply: `明白了（第 ${round} 轮）。`,
       next_question: round >= 2 ? "还有想补充的吗？" : "你更看重地点还是方向？",
       phase: round === 1 ? "template" : "deepen",
-      completeness: round >= 2 ? 1 : 0.4,
+      completeness: consultCompleteness(round),
       can_finalize: round >= 2,
       round,
-      profile_draft: {
-        current_goal: ["backend engineer"],
-        hard_constraints: {
-          locations: ["Shanghai"],
-          need_visa_sponsor: false,
-        },
-        soft_preferences: {},
-        avoid_roles: [],
-      },
+      profile_draft: consultProfile(round),
     }) satisfies ConsultTurn,
 
   consultFinalize: () =>

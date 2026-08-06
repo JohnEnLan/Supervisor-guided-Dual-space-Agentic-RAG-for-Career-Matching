@@ -277,6 +277,48 @@ test("refresh mid-consultation restores transcript from GET consult", async ({ p
   await expect(page.getByRole("button", { name: "生成确认单" })).toBeVisible();
 });
 
+test("required-slot chips follow consultation data and keep visa=false complete", async ({ page }) => {
+  const state = createFlowState({ loggedIn: true, uploaded: true, confirmed: true });
+  await installV2Api(page, state);
+  await page.goto("/app/sessions/sess-e2e-1");
+
+  await expect(page.getByRole("button", { name: "目标：待补充" })).toHaveAttribute(
+    "data-complete",
+    "false",
+  );
+  await expect(page.getByRole("button", { name: "地点：待补充" })).toHaveAttribute(
+    "data-complete",
+    "false",
+  );
+  await expect(page.getByRole("button", { name: "签证：待补充" })).toHaveAttribute(
+    "data-complete",
+    "false",
+  );
+
+  const input = page.getByPlaceholder(/告诉小意你的想法/);
+  await input.fill("我想在上海找后端开发");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByRole("button", { name: "目标：backend engineer" })).toHaveAttribute(
+    "data-complete",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "地点：Shanghai" })).toHaveAttribute(
+    "data-complete",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "签证：待补充" })).toHaveAttribute(
+    "data-complete",
+    "false",
+  );
+
+  await input.fill("我不需要签证担保");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByRole("button", { name: "签证：不需担保" })).toHaveAttribute(
+    "data-complete",
+    "true",
+  );
+});
+
 test("PM service announcement advances four persona sections from all seven contract stages", async ({
   page,
 }) => {

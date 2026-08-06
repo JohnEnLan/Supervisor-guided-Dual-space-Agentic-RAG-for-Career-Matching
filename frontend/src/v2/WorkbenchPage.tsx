@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, Paperclip, Send, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
@@ -16,6 +16,7 @@ import {
 } from "../api/queries";
 import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
 import { ReactionForm } from "../features/feedback/ReactionForm";
+import { deriveConsultSlots } from "./consultSlots";
 import { readLastRun, removeLastRun, writeLastRun } from "./localRunStorage";
 import { deriveServiceProgress, type ServiceProgressItem } from "./runProgress";
 import { useProtectedTimelineScroll } from "./useProtectedTimelineScroll";
@@ -105,6 +106,20 @@ export const PERSONAS: Record<string, { short: string; name: string; role: strin
   user: { short: "你", name: "你", role: "" },
 };
 
+const RUN_MESSAGE_STAGE_LABELS: Record<string, string> = {
+  resume: "简历整理",
+  intent: "需求确认",
+  retrieval: "岗位检索",
+  strategy: "策略规划",
+  verification: "发布核查",
+  finalization: "发布整理",
+  result: "结果发布",
+};
+
+function runMessageStageLabel(stage: string): string {
+  return RUN_MESSAGE_STAGE_LABELS[stage] ?? "运行进展";
+}
+
 export function conversationInterval(
   data: Pick<RunConversation, "status" | "next_poll_ms"> | undefined,
 ): number | false {
@@ -124,11 +139,15 @@ function Bubble({
   children,
   tone,
   sticky = false,
+  grouped = false,
+  metadata,
 }: {
   persona: keyof typeof PERSONAS;
   children: React.ReactNode;
   tone?: "card";
   sticky?: boolean;
+  grouped?: boolean;
+  metadata?: { kind: "stage" | "round"; text: string };
 }) {
   const meta = PERSONAS[persona] ?? PERSONAS.pm;
   const mine = persona === "user";
@@ -137,20 +156,27 @@ function Bubble({
       className={`${mine ? "v2-msg mine" : "v2-msg"}${sticky ? " v2-progress-message" : ""}`}
       data-persona={persona}
       data-sticky={sticky ? "true" : undefined}
+      data-grouped={grouped ? "true" : undefined}
+      tabIndex={metadata ? 0 : undefined}
     >
-      {!mine ? (
+      {!mine && !grouped ? (
         <span className="v2-avatar" aria-hidden="true">
           {meta.short}
         </span>
       ) : null}
       <div className={tone === "card" ? "v2-bubble card" : "v2-bubble"}>
-        {!mine ? (
+        {!mine && !grouped ? (
           <header>
             <strong>{meta.name}</strong>
             {meta.role ? <span>{meta.role}</span> : null}
           </header>
         ) : null}
         {children}
+        {metadata ? (
+          <small className="v2-message-meta" data-meta-kind={metadata.kind}>
+            {metadata.text}
+          </small>
+        ) : null}
       </div>
     </li>
   );
@@ -404,6 +430,7 @@ export function WorkbenchPage() {
   const [retryModal, setRetryModal] = useState<"confirm" | "quota" | null>(null);
   const timelineRef = useRef<HTMLOListElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const executeAttempted = useRef(false);
 
   const consult = useQuery({
@@ -562,10 +589,14 @@ export function WorkbenchPage() {
   const timelineContentKey = [
     resumeReady,
     resumeProcessing,
-    transcript.length,
+    transcript
+      .map((entry) => [entry.round, entry.user_message, entry.assistant_reply, entry.next_question].join("~"))
+      .join("|"),
     turn.isPending,
     Boolean(briefDraft),
-    runMessages.map((item) => item.seq).join(","),
+    runMessages
+      .map((item) => [item.seq, item.persona, item.kind, item.stage, item.text].join("~"))
+      .join("|"),
     completed,
     retryableTerminal,
   ].join(":");
@@ -579,16 +610,26 @@ export function WorkbenchPage() {
 
   const canConsult = resumeConfirmed && !runId;
   const inputDisabled = !canConsult || turn.isPending;
+  const consultSlots = deriveConsultSlots(consult.data?.profile_draft);
+  const completenessPercent = Math.round(
+    Math.min(1, Math.max(0, consult.data?.completeness ?? 0)) * 100,
+  );
 
   const consultBubbles = useMemo(
     () =>
       transcript.flatMap((entry: ConsultTranscriptEntry) => {
-        const items: { key: string; persona: keyof typeof PERSONAS; text: string }[] = [
-          { key: `u-${entry.round}`, persona: "user", text: entry.user_message },
+        const items: {
+          key: string;
+          persona: keyof typeof PERSONAS;
+          text: string;
+          round: number;
+        }[] = [
+          { key: `u-${entry.round}`, persona: "user", text: entry.user_message, round: entry.round },
           {
             key: `a-${entry.round}`,
             persona: "intent_consultant",
             text: `${entry.assistant_reply}${entry.next_question ? `\n${entry.next_question}` : ""}`,
+            round: entry.round,
           },
         ];
         return items;
@@ -673,7 +714,11 @@ export function WorkbenchPage() {
         ) : null}
 
         {consultBubbles.map((item) => (
-          <Bubble key={item.key} persona={item.persona}>
+          <Bubble
+            key={item.key}
+            persona={item.persona}
+            metadata={{ kind: "round", text: `第 ${item.round} 轮` }}
+          >
             <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
           </Bubble>
         ))}
@@ -727,11 +772,28 @@ export function WorkbenchPage() {
           />
         ) : null}
 
-        {runMessages.map((item: ConversationMessage) => (
-          <Bubble key={`run-${item.seq}`} persona={item.persona}>
-            <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
-          </Bubble>
-        ))}
+        {runMessages.map((item: ConversationMessage, index) => {
+          const previous = runMessages[index - 1];
+          const startsStage = !previous || previous.stage !== item.stage;
+          const grouped = !startsStage && previous.persona === item.persona;
+          const stageLabel = runMessageStageLabel(item.stage);
+          return (
+            <Fragment key={`run-${item.seq}`}>
+              {startsStage ? (
+                <li className="v2-stage-divider" role="separator" aria-label={`运行阶段：${stageLabel}`}>
+                  <span>{stageLabel}</span>
+                </li>
+              ) : null}
+              <Bubble
+                persona={item.persona}
+                grouped={grouped}
+                metadata={{ kind: "stage", text: `阶段 · ${stageLabel}` }}
+              >
+                <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
+              </Bubble>
+            </Fragment>
+          );
+        })}
 
         {completed && runId ? (
           <Bubble persona="pm" tone="card">
@@ -768,6 +830,35 @@ export function WorkbenchPage() {
       ) : null}
 
       <footer className="v2-composer">
+        {canConsult ? (
+          <section className="v2-consult-slots" aria-label="咨询必填信息">
+            <div className="v2-slot-chips">
+              {consultSlots.map((slot) => (
+                <button
+                  key={slot.id}
+                  type="button"
+                  className="v2-slot-chip"
+                  data-complete={String(slot.complete)}
+                  disabled={slot.complete || inputDisabled}
+                  onClick={() => {
+                    messageInputRef.current?.focus();
+                    if (message === "") setMessage(slot.prompt);
+                  }}
+                >
+                  <span aria-hidden="true">{slot.complete ? "✓" : "○"}</span>
+                  {slot.label}
+                </button>
+              ))}
+            </div>
+            <progress
+              className="v2-completeness"
+              aria-label="咨询信息完成度"
+              aria-valuenow={completenessPercent}
+              value={completenessPercent}
+              max={100}
+            />
+          </section>
+        ) : null}
         <div className="v2-mode-toggle" role="tablist" aria-label="咨询模式">
           <button
             role="tab"
@@ -781,6 +872,7 @@ export function WorkbenchPage() {
           </button>
         </div>
         <textarea
+          ref={messageInputRef}
           value={message}
           placeholder={
             canConsult
