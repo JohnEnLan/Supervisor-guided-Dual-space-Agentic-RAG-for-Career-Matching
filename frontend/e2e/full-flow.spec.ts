@@ -166,7 +166,10 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await page.getByRole("button", { name: "登录 / 注册" }).click();
 
   await expect(page).toHaveURL(/\/app$/);
-  await page.getByRole("button", { name: "新的咨询" }).click();
+  const emptyGuide = page.getByRole("region", { name: "开始咨询" });
+  await expect(emptyGuide.getByRole("listitem")).toHaveCount(3);
+  await expect(page.getByText("已创建 1 次咨询")).toBeVisible();
+  await emptyGuide.getByRole("button", { name: "开始新的咨询" }).click();
   await expect(page.getByRole("heading", { name: "职业规划服务群" })).toBeVisible();
 
   await page.setInputFiles('input[type="file"]', {
@@ -174,6 +177,13 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
     mimeType: "text/plain",
     buffer: Buffer.from("Python engineer resume"),
   });
+  await page.getByRole("button", { name: "查看完整档案" }).click();
+  const resumeProfile = page.getByRole("region", { name: "完整简历档案" });
+  for (const heading of ["教育经历", "工作经历", "项目经历", "技能", "档案质量提示", "原文证据"]) {
+    await expect(resumeProfile.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  await expect(resumeProfile.getByText("Career RAG")).toBeVisible();
+  await expect(page.getByText("重新上传", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "确认简历档案" }).click();
 
   const input = page.getByPlaceholder(/告诉小意你的想法/);
@@ -201,17 +211,31 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("last_run:user-e2e-0001:sess-e2e-1")))
     .toBe("run-e2e-1");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("title:user-e2e-0001:sess-e2e-1")))
+    .toBe("Find backend");
 
   await expect(page.getByText("结果已通过发布核查。")).toBeVisible();
   expect(state.statusPoll).toBeGreaterThanOrEqual(RUN_STAGES.length);
   await expect(page.getByText("任务开始，团队就位。")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Backend Engineer", exact: true })).toBeVisible();
+  await expect(page.getByText("①", { exact: true })).toBeVisible();
+  await expect(page.getByText("4.", { exact: true })).toBeVisible();
   await expect(page.getByText("现在就投").first()).toBeVisible();
-  await expect(page.getByText("演示数据 · CN").first()).toBeVisible();
+  await expect(page.getByText("混合检索（BM25+语义双路）")).toBeVisible();
+  await expect(page.getByText("支持双空间增强")).toBeVisible();
+  await page.getByRole("button", { name: "演示数据 · CN" }).first().click();
+  await expect(page.getByText(/合成演示语料/).first()).toBeVisible();
+  const sourceLink = page.getByRole("link", { name: "查看原岗位 ↗" }).first();
+  await expect(sourceLink).toHaveAttribute("href", "https://jobs.example.com/e2e-backend");
+  await expect(sourceLink).toHaveAttribute("rel", "noopener noreferrer");
 
-  await page.getByRole("button", { name: "查看证据" }).first().click();
+  const evidenceButton = page.getByRole("button", { name: "查看证据" }).first();
+  await evidenceButton.click();
   await expect(page.getByText("Python, SQL required.")).toBeVisible();
-  await page.getByRole("button", { name: "关闭证据" }).click();
+  await expect(page.getByText("出自 JD 原文").first()).toBeVisible();
+  await evidenceButton.click();
+  await expect(page.getByText("Python, SQL required.")).not.toBeVisible();
 
   const outcomeLabels = ["被拒", "过筛", "面试", "Offer"];
   const jobCards = page.locator(".v2-job-card");
@@ -221,7 +245,7 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
     await expect(card.getByRole("button", { name: "提交进展" })).toBeDisabled();
     await card.getByRole("button", { name: label }).click();
     await card.getByRole("button", { name: "提交进展" }).click();
-    await expect(card.getByText(/进展已记录/)).toBeVisible();
+    await expect(card.getByText(/已记录/)).toBeVisible();
   }
   expect(state.reactionOutcomes).toEqual([...VALID_OUTCOMES]);
   expect(
@@ -229,7 +253,7 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   ).toBe(false);
 
   await page.getByRole("link", { name: /测试同学/ }).click();
-  await page.getByRole("link", { name: /会话 sess-e2e/ }).click();
+  await page.getByRole("link", { name: /Find backend/ }).click();
   await expect(page).toHaveURL(/\/app\/sessions\/sess-e2e-1\?run=run-e2e-1$/);
   await expect(page.getByRole("heading", { name: "Backend Engineer", exact: true })).toBeVisible();
 
@@ -237,6 +261,9 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await expect(page.getByRole("button", { name: "登录 / 注册" })).toBeVisible();
   expect(
     await page.evaluate(() => localStorage.getItem("last_run:user-e2e-0001:sess-e2e-1")),
+  ).toBeNull();
+  expect(
+    await page.evaluate(() => localStorage.getItem("title:user-e2e-0001:sess-e2e-1")),
   ).toBeNull();
 });
 
@@ -247,7 +274,7 @@ test("unauthenticated /app visit returns to landing login", async ({ page }) => 
   await expect(page.getByRole("button", { name: "登录 / 注册" })).toBeVisible();
 });
 
-test("session quota exhaustion shows the paywall modal", async ({ page }) => {
+test("session quota exhaustion shows truthful copy without an invented limit", async ({ page }) => {
   const state = createFlowState({ loggedIn: true });
   await installV2Api(page, state);
   await page.route("**/api/v1/sessions", (route) =>
@@ -261,10 +288,11 @@ test("session quota exhaustion shows the paywall modal", async ({ page }) => {
   );
 
   await page.goto("/app");
-  await page.getByRole("button", { name: "新的咨询" }).click();
-  await expect(page.getByText("咨询额度已用完")).toBeVisible();
-  await expect(page.getByRole("button", { name: /升级额度/ })).toBeVisible();
-  await page.getByRole("button", { name: "稍后再说" }).click();
+  await page.getByRole("button", { name: "新的咨询", exact: true }).click();
+  const quotaDialog = page.getByRole("dialog", { name: "额度已用完" });
+  await expect(quotaDialog).toContainText("当前账户的咨询额度已用完");
+  await expect(quotaDialog).not.toContainText(/3 次|¥/);
+  await page.getByRole("button", { name: "知道了" }).click();
   await expect(page.getByText("咨询额度已用完")).not.toBeVisible();
 });
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, Paperclip, Send, Sparkles } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
@@ -17,7 +17,8 @@ import {
 import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
 import { ReactionForm } from "../features/feedback/ReactionForm";
 import { deriveConsultSlots } from "./consultSlots";
-import { readLastRun, removeLastRun, writeLastRun } from "./localRunStorage";
+import { readLastRun, removeLastRun, writeLastRun, writeSessionTitle } from "./localRunStorage";
+import { ResumeProfileAccordion } from "./ResumeProfileAccordion";
 import { deriveServiceProgress, type ServiceProgressItem } from "./runProgress";
 import { useProtectedTimelineScroll } from "./useProtectedTimelineScroll";
 import "./theme.css";
@@ -285,6 +286,24 @@ function BriefCard({
   );
 }
 
+function DemoDisclosure({ countryCode }: { countryCode: string | null | undefined }) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  return (
+    <div className="v2-demo-disclosure">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        演示数据{countryCode ? ` · ${countryCode}` : ""}
+      </button>
+      {open ? <p id={panelId}>该岗位来自合成演示语料，公司与城市为演示映射。</p> : null}
+    </div>
+  );
+}
+
 function ResultCards({
   runId,
   anchorRef,
@@ -297,6 +316,10 @@ function ResultCards({
   const result = useQuery({
     queryKey: ["v2-result", runId],
     queryFn: () => api.runResult(runId),
+  });
+  const capabilities = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: api.capabilities,
   });
   
   if (result.isPending)
@@ -335,6 +358,16 @@ function ResultCards({
     stretch_fit: "值得冲刺",
     bridge_role: "跳板岗位",
   };
+  const featuredRanks = ["①", "②", "③"];
+  const safeSourceUrl = (sourceUrl: string | null | undefined): string | null => {
+    if (!sourceUrl) return null;
+    try {
+      const url = new URL(sourceUrl);
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
   return (
     <div
       ref={anchorRef}
@@ -343,33 +376,48 @@ function ResultCards({
       aria-label="匹配结果"
       tabIndex={-1}
     >
-      {(product.recommended_roles ?? []).map((role: Recommendation, index: number) => (
-        <article
-          key={role.job_id}
-          className={`v2-job-card${highlighted && index === 0 ? " is-highlighted" : ""}`}
-        >
-          <header>
-            <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ?? role.tier}</span>
-            {role.demo_synthetic ? (
-              <span className="v2-demo-badge" title="该岗位来自合成演示语料，公司与城市为演示映射">
-                演示数据{role.country_code ? ` · ${role.country_code}` : ""}
-              </span>
-            ) : null}
-            <h3>{role.title ?? role.job_id}</h3>
-            <p>
-              {role.company ?? "—"} · {role.location ?? "—"}
-            </p>
-          </header>
-          <p className="v2-job-why">{role.concise_explanation}</p>
-          <EvidenceDrawer
-            title={role.title ?? role.job_id}
-            evidence={role.evidence ?? []}
-            resumeEvidence={role.resume_evidence ?? []}
-            agentMatchReasons={role.why_this_match ?? []}
-          />
-          <ReactionForm runId={runId} jobId={role.job_id} />
-        </article>
-      ))}
+      <div className="v2-capabilities" aria-label="检索能力">
+        <span>混合检索（BM25+语义双路）</span>
+        {capabilities.data?.dual_space_enabled === true ? <span>支持双空间增强</span> : null}
+      </div>
+      {(product.recommended_roles ?? []).map((role: Recommendation, index: number) => {
+        const sourceUrl = safeSourceUrl(role.source_url);
+        return (
+          <article
+            key={role.job_id}
+            className={`v2-job-card${highlighted && index === 0 ? " is-highlighted" : ""}`}
+          >
+            <header>
+              <div className="v2-job-card-eyebrow">
+                <span className="v2-rank" data-featured={index < 3 ? "true" : "false"}>
+                  {featuredRanks[index] ?? `${index + 1}.`}
+                </span>
+                <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ?? role.tier}</span>
+              </div>
+              {role.demo_synthetic ? (
+                <DemoDisclosure countryCode={role.country_code} />
+              ) : null}
+              <h3>{role.title ?? role.job_id}</h3>
+              <p>
+                {role.company ?? "—"} · {role.location ?? "—"}
+              </p>
+              {sourceUrl ? (
+                <a className="v2-source-link" href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                  查看原岗位 ↗
+                </a>
+              ) : null}
+            </header>
+            <p className="v2-job-why">{role.concise_explanation}</p>
+            <EvidenceDrawer
+              title={role.title ?? role.job_id}
+              evidence={role.evidence ?? []}
+              resumeEvidence={role.resume_evidence ?? []}
+              agentMatchReasons={role.why_this_match ?? []}
+            />
+            <ReactionForm runId={runId} jobId={role.job_id} />
+          </article>
+        );
+      })}
       {resumeStrategy.length ? (
         <details className="v2-extra">
           <summary>简历修改建议（{resumeStrategy.length} 条）</summary>
@@ -499,7 +547,10 @@ export function WorkbenchPage() {
       });
     },
     onSuccess: (created) => {
-      if (me.data?.user_id) writeLastRun(me.data.user_id, sessionId, created.run_id);
+      if (me.data?.user_id) {
+        writeLastRun(me.data.user_id, sessionId, created.run_id);
+        writeSessionTitle(me.data.user_id, sessionId, created.brief.career_goal);
+      }
       setBrief(created);
       executeAttempted.current = false;
       setSearchParams({ run: created.run_id }, { replace: true });
@@ -702,6 +753,11 @@ export function WorkbenchPage() {
               {preview.data?.experience?.length ?? 0} 段经历、{preview.data?.skills?.length ?? 0}{" "}
               项技能。请确认无误后我们开始聊方向。
             </p>
+            <ResumeProfileAccordion
+              preview={preview.data}
+              reuploading={upload.isPending}
+              onReupload={(file) => upload.mutate(file)}
+            />
             <button
               type="button"
               className="v2-btn primary"

@@ -52,8 +52,8 @@ function recommendation(index: number) {
     resume_evidence: [
       { evidence_span_id: "R001", field: "resume", content: "Built a Python service." },
     ],
-    source_url: null,
-    listing_kind: "dataset_only" as const,
+    source_url: index === 1 ? "https://jobs.example.com/e2e-backend" : null,
+    listing_kind: index === 1 ? ("source_url" as const) : ("dataset_only" as const),
     demo_synthetic: true,
     country_code: "CN" as const,
   };
@@ -147,12 +147,23 @@ export const apiFixtures = {
           evidence_span_ids: ["R001"],
         },
       ],
-      projects: [],
+      projects: [
+        {
+          name: "Career RAG",
+          summary: "Evidence-grounded career matching",
+          dates: "2026",
+          actions: ["Implemented RRF fusion"],
+          outcomes: ["Produced traceable recommendations"],
+          technologies: ["FastAPI", "pgvector"],
+          evidence_span_ids: ["R003"],
+        },
+      ],
       skills: ["Python", "SQL"],
-      resume_quality_issues: [],
+      resume_quality_issues: ["补充更多量化结果"],
       evidence: [
         { evidence_span_id: "R001", content: "Built a Python service." },
         { evidence_span_id: "R002", content: "MSc in Computer Science." },
+        { evidence_span_id: "R003", content: "Built an evidence-grounded career matcher." },
       ],
     }) satisfies ResumePreview,
 

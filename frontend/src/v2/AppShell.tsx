@@ -1,12 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, LogOut, MessageSquarePlus, ScrollText, Sparkles, UserRound } from "lucide-react";
+import { BarChart3, LogOut, MessageSquarePlus, ScrollText, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { ApiError, onUnauthorized } from "../api/client";
 import { api } from "../api/queries";
-import { clearLastRuns } from "./localRunStorage";
+import {
+  clearUserScopedStorage,
+  readSessionTitle,
+  SESSION_TITLE_UPDATED_EVENT,
+} from "./localRunStorage";
 import "./theme.css";
+
+export type AppShellOutletContext = {
+  startNewConsultation: () => void;
+  isCreatingConsultation: boolean;
+};
+
+function sessionDateLabel(updatedAt: string): string {
+  const match = /^(?:\d{4})-(\d{2})-(\d{2})/.exec(updatedAt);
+  return match ? `${match[1]}-${match[2]}` : "-- --";
+}
 
 export function AppShell() {
   const navigate = useNavigate();
@@ -22,7 +36,7 @@ export function AppShell() {
   // 任意请求 401 → 清缓存回登录页（会话过期的统一出口）
   useEffect(() => {
     onUnauthorized(() => {
-      clearLastRuns(me.data?.user_id);
+      clearUserScopedStorage(me.data?.user_id);
       queryClient.clear();
       navigate("/", { replace: true });
     });
@@ -34,6 +48,13 @@ export function AppShell() {
   }, [me.isError, navigate]);
 
   const [quotaOpen, setQuotaOpen] = useState(false);
+  const [, refreshSessionTitles] = useState(0);
+  useEffect(() => {
+    const onTitleUpdated = () => refreshSessionTitles((version) => version + 1);
+    window.addEventListener(SESSION_TITLE_UPDATED_EVENT, onTitleUpdated);
+    return () => window.removeEventListener(SESSION_TITLE_UPDATED_EVENT, onTitleUpdated);
+  }, []);
+
   const createSession = useMutation({
     mutationFn: () => api.createSession({}),
     onSuccess: (session) => {
@@ -49,7 +70,7 @@ export function AppShell() {
   const logout = useMutation({
     mutationFn: api.logout,
     onSettled: () => {
-      clearLastRuns(me.data?.user_id);
+      clearUserScopedStorage(me.data?.user_id);
       queryClient.clear();
       navigate("/", { replace: true });
     },
@@ -75,14 +96,21 @@ export function AppShell() {
                 to={`/app/sessions/${item.session_id}`}
                 className={({ isActive }) => (isActive ? "active" : "")}
               >
-                {`会话 ${item.session_id.slice(0, 8)}`}
+                {me.data?.user_id
+                  ? readSessionTitle(me.data.user_id, item.session_id) ?? `咨询 · ${sessionDateLabel(item.updated_at)}`
+                  : `咨询 · ${sessionDateLabel(item.updated_at)}`}
                 <span className="v2-session-meta">
-                  {item.status} · {new Date(item.updated_at).toLocaleDateString()}
+                  {item.status} · {sessionDateLabel(item.updated_at)}
                 </span>
               </NavLink>
             </li>
           ))}
         </ul>
+        {sessions.data ? (
+          <p className="v2-quota-usage" aria-label="咨询使用情况">
+            已创建{sessions.data.has_more ? "至少 " : " "}{sessions.data.sessions?.length ?? 0} 次咨询
+          </p>
+        ) : null}
         <div className="v2-sidebar-footer">
           <NavLink to="/app/profile">
             <UserRound size={16} />
@@ -103,31 +131,21 @@ export function AppShell() {
         </div>
       </aside>
       <main className="v2-main">
-        <Outlet />
+        <Outlet
+          context={{
+            startNewConsultation: () => createSession.mutate(),
+            isCreatingConsultation: createSession.isPending,
+          } satisfies AppShellOutletContext}
+        />
       </main>
       {quotaOpen ? (
         <div className="v2-modal-backdrop" role="dialog" aria-modal="true" aria-label="额度已用完">
           <div className="v2-modal">
             <h2>咨询额度已用完</h2>
-            <p>
-              每个账号包含 3 次完整咨询。你的额度已全部使用，升级后可继续创建新的咨询会话。
-            </p>
-            <div className="v2-modal-actions">
-              <button
-                type="button"
-                className="v2-btn primary"
-                onClick={() => {
-                  /* 支付流程尚未接入：按钮先占位 */
-                }}
-              >
-                <Sparkles size={16} />
-                升级额度（¥9.9 起）
-              </button>
-              <button type="button" className="v2-btn ghost" onClick={() => setQuotaOpen(false)}>
-                稍后再说
-              </button>
-            </div>
-            <p className="v2-footnote">支付功能即将上线，目前仅为演示占位。</p>
+            <p>当前账户的咨询额度已用完。</p>
+            <button type="button" className="v2-btn ghost" onClick={() => setQuotaOpen(false)}>
+              知道了
+            </button>
           </div>
         </div>
       ) : null}

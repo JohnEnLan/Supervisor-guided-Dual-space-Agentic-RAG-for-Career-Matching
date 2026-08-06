@@ -41,7 +41,7 @@ export function ReactionForm({ runId, jobId }: { runId: string; jobId: string })
     return (
       <div className="feedback-success">
         <CheckCircle2 />
-        <span>进展已记录，谢谢你回来更新。</span>
+        <span>已记录 ✓</span>
       </div>
     );
   return (

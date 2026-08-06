@@ -188,6 +188,100 @@ describe("consultation required-slot presentation", () => {
   });
 });
 
+describe("resume confirmation profile", () => {
+  function mockUnconfirmedFullResume() {
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview).mockResolvedValue({
+      session_id: "sess-1",
+      resume_version: 2,
+      confirmed: false,
+      education: [
+        {
+          institution: "Birmingham University",
+          degree: "MSc",
+          field: "Computer Science",
+          dates: "2025–2026",
+          details: ["Distinction track"],
+          evidence_span_ids: ["R-EDU-1"],
+        },
+      ],
+      experience: [
+        {
+          organization: "Career Lab",
+          title: "Backend Engineer",
+          location: "Shanghai",
+          dates: "2024–2025",
+          responsibilities: ["Built retrieval services"],
+          achievements: ["Reduced latency by 30%"],
+          technologies: ["Python", "PostgreSQL"],
+          evidence_span_ids: ["R-EXP-1"],
+        },
+      ],
+      projects: [
+        {
+          name: "Career RAG",
+          summary: "Evidence-grounded career matching",
+          dates: "2026",
+          actions: ["Implemented RRF fusion"],
+          outcomes: ["Produced traceable recommendations"],
+          technologies: ["FastAPI", "pgvector"],
+          evidence_span_ids: ["R-PROJ-1"],
+        },
+      ],
+      skills: ["Python", "SQL"],
+      resume_quality_issues: ["缺少部分经历的量化结果"],
+      evidence: [{ evidence_span_id: "R-EVID-1", content: "Built an async retrieval service." }],
+    });
+  }
+
+  it("expands all six preview DTO categories inline without dropping their fields", async () => {
+    const user = userEvent.setup();
+    mockUnconfirmedFullResume();
+    renderWorkbench();
+
+    const trigger = await screen.findByRole("button", { name: "查看完整档案" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "完整简历档案" })).not.toBeInTheDocument();
+    await user.click(trigger);
+
+    const profile = screen.getByRole("region", { name: "完整简历档案" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    for (const heading of ["教育经历", "工作经历", "项目经历", "技能", "档案质量提示", "原文证据"]) {
+      expect(within(profile).getByRole("heading", { name: heading })).toBeVisible();
+    }
+    for (const content of [
+      "Birmingham University",
+      "Distinction track",
+      "Career Lab",
+      "Reduced latency by 30%",
+      "Career RAG",
+      "Produced traceable recommendations",
+      "SQL",
+      "缺少部分经历的量化结果",
+      "Built an async retrieval service.",
+      "R-EVID-1",
+    ]) {
+      expect(within(profile).getByText(content)).toBeVisible();
+    }
+  });
+
+  it("keeps a working re-upload entry before resume confirmation", async () => {
+    const user = userEvent.setup();
+    mockUnconfirmedFullResume();
+    vi.spyOn(api, "uploadResume").mockResolvedValue({
+      session_id: "sess-1",
+      status: "resume_queued",
+    });
+    renderWorkbench();
+
+    const input = await screen.findByLabelText("重新上传简历");
+    const replacement = new File(["updated resume"], "updated-resume.txt", { type: "text/plain" });
+    await user.upload(input, replacement);
+
+    expect(api.uploadResume).toHaveBeenCalledWith("sess-1", replacement);
+  });
+});
+
 describe("PM service progress announcement", () => {
   function mockRun(statusValue: string, stage: string | null, completedStages: readonly string[] = []) {
     mockWorkbenchApi();
@@ -309,6 +403,61 @@ describe("PM service progress announcement", () => {
 
     const card = await screen.findByRole("region", { name: "服务进度" });
     expect(await within(card).findByText("↻ 质量把关：受控重检")).toBeVisible();
+  });
+});
+
+describe("truthful result cards", () => {
+  function mockCompletedResult() {
+    mockWorkbenchApi();
+    vi.mocked(api.runStatus).mockResolvedValue(
+      apiFixtures.runStatus({
+        status: "completed",
+        stage: "finalization",
+        completedStages: RUN_STAGES,
+        resultReady: true,
+        retryAfterMs: null,
+      }),
+    );
+    vi.mocked(api.runConversation).mockResolvedValue(apiFixtures.runConversation("completed", null));
+    vi.spyOn(api, "capabilities").mockResolvedValue(apiFixtures.capabilities());
+  }
+
+  it("covers the full ranking rule and shows only truth-sourced capability chips", async () => {
+    mockCompletedResult();
+    vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult(5));
+
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const results = await screen.findByRole("region", { name: "匹配结果" });
+    expect(await within(results).findByText("混合检索（BM25+语义双路）")).toBeVisible();
+    expect(await within(results).findByText("支持双空间增强")).toBeVisible();
+    for (const rank of ["①", "②", "③", "4.", "5."]) {
+      expect(within(results).getByText(rank)).toBeVisible();
+    }
+    expect(results).not.toHaveTextContent(/RAPTOR|Cross|匹配强度|%/i);
+  });
+
+  it("links only http(s) source URLs and exposes demo context without hover", async () => {
+    const user = userEvent.setup();
+    mockCompletedResult();
+    const result = apiFixtures.runResult(2);
+    result.result.recommended_roles![0].source_url = "https://jobs.example.com/role-1";
+    result.result.recommended_roles![0].listing_kind = "source_url";
+    result.result.recommended_roles![1].source_url = "javascript:alert(1)";
+    result.result.recommended_roles![1].listing_kind = "source_url";
+    vi.spyOn(api, "runResult").mockResolvedValue(result);
+
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const cards = await screen.findAllByRole("article");
+    const sourceLink = within(cards[0]).getByRole("link", { name: "查看原岗位 ↗" });
+    expect(sourceLink).toHaveAttribute("href", "https://jobs.example.com/role-1");
+    expect(sourceLink).toHaveAttribute("rel", "noopener noreferrer");
+    expect(within(cards[1]).queryByRole("link", { name: "查看原岗位 ↗" })).not.toBeInTheDocument();
+
+    const demoDisclosure = within(cards[0]).getByRole("button", { name: /演示数据 · CN/ });
+    await user.click(demoDisclosure);
+    expect(within(cards[0]).getByText(/合成演示语料/)).toBeVisible();
   });
 });
 
@@ -521,6 +670,7 @@ describe("last run recovery", () => {
     await waitFor(() =>
       expect(localStorage.getItem("last_run:user-1:sess-1")).toBe("run-created"),
     );
+    expect(localStorage.getItem("title:user-1:sess-1")).toBe("backend engi");
   });
 
   it("restores a stored run when the conversation URL has no run query", async () => {

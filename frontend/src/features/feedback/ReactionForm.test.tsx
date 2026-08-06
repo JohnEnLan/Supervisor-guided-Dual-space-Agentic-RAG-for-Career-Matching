@@ -72,5 +72,6 @@ describe("ReactionForm", () => {
         expect.objectContaining({ job_id: "job-1", outcome }),
       ),
     );
+    expect(await screen.findByText("已记录 ✓")).toBeVisible();
   });
 });
