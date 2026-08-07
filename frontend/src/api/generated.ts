@@ -1071,7 +1071,7 @@ export interface components {
              * Detail
              * @enum {string}
              */
-            detail: "resume_changed" | "resume_processing" | "resume_error";
+            detail: "resume_changed" | "resume_processing" | "resume_error" | "resume_missing";
         };
         /** ResumePreviewResponse */
         ResumePreviewResponse: {
@@ -1119,6 +1119,14 @@ export interface components {
             summary: string;
             /** Technologies */
             technologies?: string[];
+        };
+        /** ResumeVersionRequiredResponse */
+        ResumeVersionRequiredResponse: {
+            /**
+             * Detail
+             * @constant
+             */
+            detail: "expected_resume_version_required";
         };
         /** RunConversationResponse */
         RunConversationResponse: {
@@ -1978,13 +1986,13 @@ export interface operations {
                     "application/json": components["schemas"]["ResumeLifecycleConflictResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ResumeVersionRequiredResponse"];
                 };
             };
         };

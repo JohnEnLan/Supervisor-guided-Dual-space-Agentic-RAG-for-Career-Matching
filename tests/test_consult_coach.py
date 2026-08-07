@@ -1088,12 +1088,24 @@ async def test_feature_switch_matrix_preserves_scoped_equivalence_contract(
         assert observation["state_delta"]["resume"] == baseline["state_delta"][
             "resume"
         ]
-        assert bool(observation["state_delta"]["coach_reservations"]) is expected[
-            "coach_state"
-        ]
-        assert bool(observation["state_delta"]["supervisor_stages"]) is expected[
-            "coach_state"
-        ]
+        # 审计二轮 T1 收紧：state-delta 用全形状精确断言——错 trigger/status/
+        # stage、多余 reservation 或多写 note 都必须红，不接受真值级检查。
+        if expected["coach_state"]:
+            expected_trigger = (
+                "finalizable"
+                if baseline["response"]["can_finalize"]
+                else "deepen_entry"
+            )
+            assert observation["state_delta"]["coach_reservations"] == [
+                {"round": 1, "trigger": expected_trigger, "status": "succeeded"}
+            ]
+            assert observation["state_delta"]["supervisor_stages"] == [
+                "consult_coach_l1",
+                "consult_coach",
+            ]
+        else:
+            assert observation["state_delta"]["coach_reservations"] == []
+            assert observation["state_delta"]["supervisor_stages"] == []
         assert observation["state_delta"]["note_count"] == int(
             expected["coach_state"]
         )

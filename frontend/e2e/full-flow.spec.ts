@@ -73,7 +73,9 @@ function installV2Api(page: Page, state: FlowState) {
       return json(apiFixtures.resumeAccepted(), 202);
     }
     if (path.endsWith("/resume-preview")) {
-      if (!state.uploaded) return json({ detail: "processing" }, 409);
+      // 生产真实契约：从未上传 = resume_missing（审计二轮抓出 fixture 漂移
+      // 用了不存在的 "processing"，掩盖了新会话被判处理中的回归）
+      if (!state.uploaded) return json({ detail: "resume_missing" }, 409);
       return json(apiFixtures.resumePreview(state.confirmed));
     }
     if (path.endsWith("/resume-confirm")) {

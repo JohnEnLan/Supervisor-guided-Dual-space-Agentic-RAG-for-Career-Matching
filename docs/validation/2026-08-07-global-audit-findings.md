@@ -1,8 +1,14 @@
 # 全局逐段审核合并发现清单（2026-08-07，基线 092461f→54f089f）
 
 三方审核：子 agent 18 项（BLOCKED）+ Codex 21 项（不 PASS）+ Claude 线抽查（4 项亲验）。
-合并去重后 29 项，按修复批次分组。修复人=Claude（v5.2），修后 Codex 复审 + 子 agent
-重审受影响模块。状态标记：[ ] 待修 [x] 已修。
+合并去重后 29 项，按修复批次分组。修复执行=Codex（v5.2 主循环），复审修正=Claude，
+修后 Codex 复审 + 子 agent 重审受影响模块。状态标记：[ ] 待修 [x] 已修。
+
+**第 2 轮（Codex BLOCKED 4 项，Claude 修复）**：R1 preview 对从未上传会话回
+resume_missing（新增稳定 detail + 前端纯 detail 分流 + upload 成功清恢复态 +
+e2e fixture 漂移修正 + 钉死测试）；R2 confirm 422 契约落 OpenAPI
+（ResumeVersionRequiredResponse + 路由声明，快照/客户端再生加性）；R3 CAS2
+异常路径 reservation 键安全访问；R4 四组合测试 state-delta 全形状精确断言。
 
 ## FIX-1 后端行为（必修）
 

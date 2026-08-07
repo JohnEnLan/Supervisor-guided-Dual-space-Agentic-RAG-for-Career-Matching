@@ -90,7 +90,15 @@ class ResumeConfirmRequest(PublicDTO):
 
 
 class ResumeLifecycleConflictResponse(PublicDTO):
-    detail: Literal["resume_changed", "resume_processing", "resume_error"]
+    # resume_missing = 会话从未上传过简历（与"归一化中"必须可区分，否则新
+    # 会话会被前端当成处理中而失去上传入口——审计二轮阻断项）
+    detail: Literal[
+        "resume_changed", "resume_processing", "resume_error", "resume_missing"
+    ]
+
+
+class ResumeVersionRequiredResponse(PublicDTO):
+    detail: Literal["expected_resume_version_required"]
 
 
 class ResumeEducationPreview(PublicDTO):

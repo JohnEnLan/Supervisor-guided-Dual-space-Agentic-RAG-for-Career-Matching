@@ -481,6 +481,33 @@ def test_preview_does_not_expose_stale_resume_for_incomplete_generation(
     assert "old-version" not in response.text
 
 
+def test_preview_reports_resume_missing_for_never_uploaded_session(
+    monkeypatch,
+) -> None:
+    """审计二轮阻断回归钉死：从未上传的新会话必须回 resume_missing，
+    与"归一化中"可区分——否则前端会隐藏上传入口造成新用户卡死。"""
+    from app.api.v1 import sessions
+    from app.db.state_store import ConsultContext
+    from app.state.schema import SharedState
+
+    async def context(_session_id):
+        return ConsultContext(
+            state=SharedState(session_id="session-1", user_id="user-1"),
+            status="awaiting_resume",
+            resume_version=0,
+            confirmed_resume_version=None,
+            resume_upload_generation=0,
+        )
+
+    monkeypatch.setattr(sessions, "load_consult_context", context, raising=False)
+
+    with TestClient(_api_app()) as client:
+        response = client.get("/api/v1/sessions/session-1/resume-preview")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "resume_missing"}
+
+
 def test_confirm_checks_expected_version_only_when_clarification_is_enabled(
     monkeypatch,
 ) -> None:

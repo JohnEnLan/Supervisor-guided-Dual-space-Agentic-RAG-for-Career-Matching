@@ -546,7 +546,12 @@ export function WorkbenchPage() {
 
   const upload = useMutation({
     mutationFn: (file: File) => api.uploadResume(sessionId, file),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
+    onSuccess: () => {
+      // 重传成功即清除旧的恢复提示（如 resume_error），由新一轮 preview
+      // detail 重新驱动生命周期（审计二轮卡死路径修复）。
+      setResumeRecovery(null);
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+    },
   });
   const confirmResume = useMutation({
     mutationFn: () => {
@@ -678,14 +683,21 @@ export function WorkbenchPage() {
   }, [me.data?.user_id, queryClient, runId, sessionId, setSearchParams, status.error]);
 
   const resumeReady = preview.isSuccess;
-  // 后端对"未上传"与"归一化中"同为 409（known_issues #6）：
-  // 只有本次会话发起过上传时才把 409 解释为"处理中"，否则展示上传入口。
+  // 三态纯按后端稳定 detail 分流（审计二轮阻断修复）：resume_missing=从未
+  // 上传（走上传入口分支）；resume_processing=归一化中；resume_error=归一化
+  // 失败（停轮询、提示重传）。upload.isSuccess 只在 invalidate→refetch 的
+  // 缓存空窗内把 resume_missing 桥接为处理中，不再压住后续 ready/error。
   const preview409 = preview.error instanceof ApiError && preview.error.status === 409;
-  const previewRecovery = resumeRecoveryState(preview.error);
+  const previewDetail =
+    preview.error instanceof ApiError && preview.error.status === 409
+      ? preview.error.message
+      : null;
   const resumeProcessing =
-    (preview409 || upload.isPending || upload.isSuccess) &&
-    (upload.isPending || upload.isSuccess || previewRecovery === "processing" || resumeRecovery === "processing");
-  const resumeError = !resumeProcessing && (previewRecovery === "error" || resumeRecovery === "error");
+    upload.isPending ||
+    previewDetail === "resume_processing" ||
+    (previewDetail === "resume_missing" && upload.isSuccess);
+  const resumeError =
+    !resumeProcessing && (previewDetail === "resume_error" || resumeRecovery === "error");
   const previewLoadError = preview.isError && !preview409;
   const resumeConfirmed = resumeReady && Boolean(preview.data?.confirmed);
 

@@ -40,6 +40,7 @@ from app.api.v1.schemas import (
     ResumePreviewResponse,
     ResumeProjectPreview,
     ResumeLifecycleConflictResponse,
+    ResumeVersionRequiredResponse,
     SessionCreateRequest,
     SessionResponse,
 )
@@ -197,7 +198,9 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
         raise HTTPException(status_code=409, detail="resume_error")
     version = context.resume_version
     if version < 1:
-        raise HTTPException(status_code=409, detail="resume_processing")
+        # 从未上传过简历的新会话：必须与"归一化中"可区分，前端据此展示
+        # 上传入口而非处理中 spinner（审计二轮阻断项修复）。
+        raise HTTPException(status_code=409, detail="resume_missing")
     resume = context.state.resume_state
     return ResumePreviewResponse(
         session_id=session_id,
@@ -215,7 +218,11 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
 @router.post(
     "/sessions/{session_id}/resume-confirm",
     response_model=ResumeConfirmResponse,
-    responses={409: {"model": ResumeLifecycleConflictResponse}},
+    responses={
+        409: {"model": ResumeLifecycleConflictResponse},
+        # 开关开启时 expected_resume_version 必填的稳定契约（审计二轮 B4 补账）
+        422: {"model": ResumeVersionRequiredResponse},
+    },
     dependencies=[Depends(require_owned_session)],
 )
 async def resume_confirm(
@@ -655,7 +662,7 @@ async def _execute_consult_round(
                     latest,
                     round_number=int(reservation["round"]),
                     trigger=str(reservation["trigger"]),
-                    coach_attempt_id=str(reservation["coach_attempt_id"]),
+                    coach_attempt_id=str(reservation.get("coach_attempt_id") or ""),
                     status=outcome.status,
                     note=outcome.note,
                     error_code=outcome.error_code,
@@ -679,7 +686,7 @@ async def _execute_consult_round(
                     exc_info=True,
                     extra={
                         "session_id": session_id,
-                        "coach_attempt_id": reservation["coach_attempt_id"],
+                        "coach_attempt_id": reservation.get("coach_attempt_id"),
                     },
                 )
     return turn, persisted

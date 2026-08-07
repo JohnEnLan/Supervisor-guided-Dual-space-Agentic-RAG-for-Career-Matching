@@ -1770,7 +1770,8 @@
             "enum": [
               "resume_changed",
               "resume_processing",
-              "resume_error"
+              "resume_error",
+              "resume_missing"
             ],
             "title": "Detail",
             "type": "string"
@@ -1896,6 +1897,21 @@
           }
         },
         "title": "ResumeProjectPreview",
+        "type": "object"
+      },
+      "ResumeVersionRequiredResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "const": "expected_resume_version_required",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ResumeVersionRequiredResponse",
         "type": "object"
       },
       "RunConversationResponse": {
@@ -3215,11 +3231,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ResumeVersionRequiredResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Resume Confirm"
