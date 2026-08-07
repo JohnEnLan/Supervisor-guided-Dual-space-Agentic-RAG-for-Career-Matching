@@ -143,6 +143,26 @@ describe("AppShell navigation truth", () => {
     expect(dialog).toHaveTextContent("当前账户的咨询额度已用完");
     expect(dialog).not.toHaveTextContent(/3 次|¥|数字上限/);
   });
+
+  it("traps quota-dialog focus, closes on Escape, and restores the trigger", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    vi.mocked(api.createSession).mockRejectedValue(new ApiError(402, "quota exceeded"));
+    const trigger = screen.getByRole("button", { name: "新的咨询" });
+
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole("dialog", { name: "额度已用完" });
+    await waitFor(() => expect(dialog.querySelector(".v2-modal")).toHaveFocus());
+    await user.tab();
+    expect(screen.getByRole("button", { name: "知道了" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "知道了" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "额度已用完" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
 });
 
 describe("AppShell mobile navigation", () => {

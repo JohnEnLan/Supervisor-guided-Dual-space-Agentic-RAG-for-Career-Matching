@@ -324,6 +324,38 @@ def test_replayed_answer_record_does_not_allocate_a_second_span() -> None:
     assert len(resume.clarifications) == 1
 
 
+def test_invalid_summary_persists_none_while_projection_uses_raw(
+    monkeypatch,
+) -> None:
+    from app.api.v1.sessions import _record_clarification_turn
+    from app.config import settings
+    from app.state.resume_view import effective_resume_text
+
+    monkeypatch.setattr(settings, "resume_clarify_enabled", True)
+    resume = _state().resume_state
+    pending = {
+        "target_ref": "experience[0]",
+        "asked_round": 1,
+        "baseline_version": 4,
+    }
+    turn = SimpleNamespace(
+        round=2,
+        clarification_action="answered",
+        clarification_target_refs=("experience[0]",),
+        clarification_answer_summary=None,
+    )
+
+    _record_clarification_turn(
+        resume,
+        turn=turn,
+        pending_at_round_start=pending,
+        raw_answer="我负责 Python API 开发",
+    )
+
+    assert resume.clarifications[0]["answer_summary"] is None
+    assert "我负责 Python API 开发" in effective_resume_text(resume)
+
+
 def test_finalize_atomically_skips_remaining_targets_and_clears_pending(
     monkeypatch,
 ) -> None:

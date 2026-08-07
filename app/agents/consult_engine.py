@@ -383,6 +383,14 @@ async def run_consult_round(
         except (json.JSONDecodeError, TypeError, ValidationError) as exc:
             last_error = exc
             continue
+        if (
+            not settings.resume_clarify_enabled
+            and candidate.phase_suggestion == "resume_clarify"
+        ):
+            last_error = ValueError(
+                "resume_clarify phase is disabled by RESUME_CLARIFY_ENABLED"
+            )
+            continue
         if showing_remembered_draft:
             parsed = candidate
             break
@@ -402,6 +410,10 @@ async def run_consult_round(
     if parsed is None:
         raise ConsultResponseError("invalid consultation response") from last_error
 
+    next_round = career.consult_rounds_used + 1
+    issued_clarification_question = False
+    recorded_phase = phase
+    next_question = parsed.next_question.strip()
     if merged_career is not None:
         for field_name in (
             "current_goal",
@@ -412,13 +424,16 @@ async def run_consult_round(
         ):
             setattr(career, field_name, getattr(merged_career, field_name))
     answer_summary: str | None = None
+    clarification_action = parsed.clarification_action
+    if clarification_action == "answered" and not bounded_message:
+        clarification_action = None
     if (
         settings.resume_clarify_enabled
         and answer_target is not None
         and deterministic_skip is None
-        and parsed.clarification_action is not None
+        and clarification_action is not None
     ):
-        processed_action = parsed.clarification_action
+        processed_action = clarification_action
         processed_target_refs = _apply_clarification_action(
             state,
             target_ref=str(answer_target["target_ref"]),
@@ -431,9 +446,33 @@ async def run_consult_round(
                 bounded_message,
             )
 
-    next_round = career.consult_rounds_used + 1
-    issued_clarification_question = False
-    recorded_phase = phase
+    extraction_failed = (
+        settings.resume_clarify_enabled
+        and answer_target is not None
+        and deterministic_skip is None
+        and clarification_action is None
+    )
+    if extraction_failed:
+        target_ref = str(answer_target["target_ref"])
+        if state.resume_state.questions_used < settings.resume_clarify_max:
+            pending = state.resume_state.pending_clarification_question or {}
+            state.resume_state.questions_used += 1
+            state.resume_state.pending_clarification_question = {
+                "target_ref": target_ref,
+                "asked_round": next_round,
+                "baseline_version": pending.get("baseline_version", resume_version),
+            }
+            next_question = _clarification_retry_question(state, answer_target)
+            issued_clarification_question = True
+        else:
+            processed_action = "skip_current"
+            processed_target_refs = _apply_clarification_action(
+                state,
+                target_ref=target_ref,
+                action=processed_action,
+            )
+            state.resume_state.pending_clarification_question = None
+
     if settings.resume_clarify_enabled:
         phase_after_action = determine_phase(state, mode=mode)
         if processed_action == "skip_remaining":
@@ -464,7 +503,7 @@ async def run_consult_round(
             "round": next_round,
             "user_message": bounded_message,
             "assistant_reply": parsed.assistant_reply.strip(),
-            "next_question": parsed.next_question.strip(),
+            "next_question": next_question,
             "phase": recorded_phase,
         }
     )
@@ -473,7 +512,7 @@ async def run_consult_round(
     career.intent_clarification_used = min(next_round, 1)
     career.intent_needs_clarification = not can_finalize(career)
     career.intent_clarification_question = (
-        parsed.next_question.strip()
+        next_question
         if career.intent_needs_clarification
         else None
     )
@@ -481,7 +520,7 @@ async def run_consult_round(
 
     return ConsultTurn(
         assistant_reply=parsed.assistant_reply.strip(),
-        next_question=parsed.next_question.strip(),
+        next_question=next_question,
         phase=recorded_phase,
         completeness=calculate_completeness(career),
         can_finalize=can_finalize(career),
@@ -544,7 +583,7 @@ def detect_clarification_skip(
     return action if len(residual) < _SKIP_RESIDUAL_CHARS else None
 
 
-def validated_answer_summary(summary: Any, raw_answer: str) -> str:
+def validated_answer_summary(summary: Any, raw_answer: str) -> str | None:
     bounded_raw = str(raw_answer).strip()[:MAX_USER_MESSAGE_CHARS]
     candidate = str(summary).strip() if isinstance(summary, str) else ""
     candidate = candidate[:_SUMMARY_FALLBACK_CHARS]
@@ -552,7 +591,7 @@ def validated_answer_summary(summary: Any, raw_answer: str) -> str:
     raw_tokens = _content_tokens(bounded_raw)
     if candidate and summary_tokens and summary_tokens.issubset(raw_tokens):
         return candidate
-    return bounded_raw[:_SUMMARY_FALLBACK_CHARS]
+    return None
 
 
 def _content_tokens(value: str) -> set[str]:
@@ -652,6 +691,21 @@ def _target_prompt_payload(
         "issue": str(target.get("issue") or ""),
         "evidence": evidence,
     }
+
+
+def _clarification_retry_question(
+    state: SharedState,
+    target: dict[str, Any],
+) -> str:
+    payload = _target_prompt_payload(state, target)
+    field_path = payload["field_path"][:24] or payload["target_ref"][:24]
+    evidence = payload["evidence"]
+    source = (
+        str(evidence[0].get("text") or "") if evidence else payload["issue"]
+    )[:24]
+    return (
+        f"想再确认 {field_path}：请结合简历原文“{source}”具体补充一次，方便准确记录。"
+    )[:80]
 
 
 def _required_slots_filled(career: CareerState) -> int:

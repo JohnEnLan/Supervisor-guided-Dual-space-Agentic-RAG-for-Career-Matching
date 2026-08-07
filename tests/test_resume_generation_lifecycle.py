@@ -512,6 +512,32 @@ def test_confirm_checks_expected_version_only_when_clarification_is_enabled(
     assert captured == [("session-1", None)]
 
 
+@pytest.mark.parametrize("body", [None, {}])
+def test_enabled_confirm_requires_expected_resume_version(
+    monkeypatch,
+    body,
+) -> None:
+    from app.api.v1 import sessions
+
+    calls = 0
+
+    async def confirm(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return {"resume_version": 2, "resume_confirmed_at": None}
+
+    monkeypatch.setattr(sessions, "confirm_resume", confirm)
+    monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", True)
+
+    with TestClient(_api_app()) as client:
+        url = "/api/v1/sessions/session-1/resume-confirm"
+        response = client.post(url) if body is None else client.post(url, json=body)
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "expected_resume_version_required"}
+    assert calls == 0
+
+
 def test_confirm_returns_resume_changed_for_enabled_stale_client_version(
     monkeypatch,
 ) -> None:
@@ -556,6 +582,57 @@ def test_confirm_returns_stable_lifecycle_detail(monkeypatch, detail) -> None:
     assert response.json() == {"detail": detail}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [
+        ("resume_queued", "resume_processing"),
+        ("resume_error", "resume_error"),
+    ],
+)
+async def test_confirm_store_rejects_real_queued_and_error_states(
+    monkeypatch,
+    status,
+    detail,
+) -> None:
+    from app.db import state_store
+
+    class Connection:
+        def __init__(self):
+            self.updated = False
+
+        def transaction(self):
+            return _Transaction()
+
+        async def fetchrow(self, sql, *_args):
+            if "FOR UPDATE" in sql:
+                return {
+                    "state": _old_state_json(),
+                    "status": status,
+                    "resume_version": 1,
+                    "confirmed_resume_version": None,
+                    "resume_upload_generation": 2,
+                }
+            self.updated = True
+            raise AssertionError("invalid lifecycle state must not confirm")
+
+    connection = Connection()
+
+    async def fake_get_pool():
+        return _Pool(connection)
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+
+    with pytest.raises(state_store.ResumeLifecycleConflict) as conflict:
+        await state_store.confirm_resume(
+            session_id="session-1",
+            expected_resume_version=1,
+        )
+
+    assert conflict.value.detail == detail
+    assert connection.updated is False
+
+
 def test_enabled_consult_cas_rejects_upload_accepted_during_llm_wait(
     monkeypatch,
 ) -> None:
@@ -593,9 +670,15 @@ def test_enabled_consult_cas_rejects_upload_accepted_during_llm_wait(
             profile_draft={},
         )
 
+    rejected_candidate = None
+
     async def mutate(*, mutator, **_kwargs):
+        nonlocal rejected_candidate
         latest = initial.model_copy(deep=True)
-        return mutator(latest, 1, 2)
+        try:
+            return mutator(latest, 1, 2)
+        finally:
+            rejected_candidate = latest
 
     async def forbidden(*_args, **_kwargs):
         raise AssertionError("enabled consultation must use one lifecycle snapshot")
@@ -618,8 +701,9 @@ def test_enabled_consult_cas_rejects_upload_accepted_during_llm_wait(
 
     assert response.status_code == 409
     assert response.json() == {"detail": "resume_changed"}
-    assert initial.career_state.consult_rounds_used == 0
-    assert initial.career_state.consult_transcript == []
+    assert rejected_candidate is not None
+    assert rejected_candidate.career_state.consult_rounds_used == 0
+    assert rejected_candidate.career_state.consult_transcript == []
 
 
 def test_enabled_consult_rejects_queued_resume_before_llm(monkeypatch) -> None:

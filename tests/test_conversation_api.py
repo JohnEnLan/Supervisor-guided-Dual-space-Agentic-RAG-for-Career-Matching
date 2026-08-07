@@ -163,6 +163,7 @@ def test_completed_conversation_has_four_personas_and_stable_order(
     assert "已锁定并将由 SQL/metadata 严格过滤" not in response.text
     assert "我已复核本次 Match Brief" not in response.text
     assert "所有建议只基于已核验信息" not in response.text
+    assert "简历原始证据和用户确认的澄清证据" in messages[6]["text"]
     assert "基于某个岗位细化简历" in messages[7]["text"]
     assert "Now Fit 1 个、Stretch Fit 1 个、Bridge Role 1 个" in messages[-1][
         "text"

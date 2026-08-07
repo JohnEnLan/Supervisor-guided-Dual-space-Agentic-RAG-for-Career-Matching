@@ -4,6 +4,7 @@ import { apiFixtures, RUN_STAGES } from "../src/test/apiFixtures";
 
 async function installMobileApi(page: Page) {
   let loggedIn = false;
+  let consultRound = 0;
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -23,7 +24,12 @@ async function installMobileApi(page: Page) {
     if (path.endsWith("/me/sessions")) return json(apiFixtures.sessions());
     if (path.endsWith("/sessions") && method === "POST") return json(apiFixtures.session());
     if (path.endsWith("/resume-preview")) return json(apiFixtures.resumePreview(true));
-    if (path.endsWith("/consult") && method === "GET") return json(apiFixtures.consultState(0));
+    if (path.endsWith("/consult") && method === "GET")
+      return json(apiFixtures.consultState(consultRound));
+    if (path.endsWith("/consult") && method === "POST") {
+      consultRound += 1;
+      return json(apiFixtures.consultTurn(consultRound));
+    }
     if (path.endsWith("/status")) {
       return json(
         apiFixtures.runStatus({
@@ -35,7 +41,7 @@ async function installMobileApi(page: Page) {
         }),
       );
     }
-    if (path.endsWith("/conversation")) return json(apiFixtures.runConversation("completed", null));
+    if (path.endsWith("/conversation")) return json(apiFixtures.runConversation("completed", null, 8));
     if (path.endsWith("/result")) return json(apiFixtures.runResult(8));
     return json({ detail: `unmocked ${method} ${path}` }, 500);
   });
@@ -69,6 +75,9 @@ test("375px journey keeps navigation, consultation, and results usable", async (
   await expect(consultInput).toBeEnabled();
   await consultInput.fill("我想找后端工程师岗位");
   await expect(consultInput).toHaveValue("我想找后端工程师岗位");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("明白了（第 1 轮）。")).toBeVisible();
+  await expect(consultInput).toHaveValue("");
 
   await page.goto("/app/sessions/sess-e2e-1?run=run-e2e-1");
   await expect(page.getByRole("heading", { name: "Backend Engineer", exact: true })).toBeVisible();

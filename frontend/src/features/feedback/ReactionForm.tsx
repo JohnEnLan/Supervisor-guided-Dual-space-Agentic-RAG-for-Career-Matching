@@ -20,16 +20,21 @@ export function ReactionForm({ runId, jobId }: { runId: string; jobId: string })
   const [notesOpen, setNotesOpen] = useState(false);
   const notesId = useId();
   const [reason, setReason] = useState("");
-  const idempotencyKey = useRef(crypto.randomUUID());
+  const idempotency = useRef<{ signature: string; key: string } | null>(null);
   const reaction = useMutation({
     mutationFn: () => {
       if (!outcome) throw new Error("outcome missing");
+      const normalizedReason = reason.trim() || null;
+      const signature = JSON.stringify({ runId, jobId, outcome, reason: normalizedReason });
+      if (idempotency.current?.signature !== signature) {
+        idempotency.current = { signature, key: crypto.randomUUID() };
+      }
       return api.addReaction(runId, {
         job_id: jobId,
         outcome,
         user_rating: null,
-        reason: reason.trim() || null,
-        idempotency_key: idempotencyKey.current,
+        reason: normalizedReason,
+        idempotency_key: idempotency.current.key,
       });
     },
   });

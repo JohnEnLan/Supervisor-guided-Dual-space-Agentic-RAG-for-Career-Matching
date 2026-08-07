@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import uuid
 from copy import deepcopy
 from pathlib import Path
@@ -69,7 +70,7 @@ from app.db.state_store import (
     ResumeLifecycleConflict,
     accept_resume_upload,
     confirm_resume,
-    count_owned_sessions,
+    create_owned_session_with_quota,
     get_resume_metadata,
     load_consult_context,
     load_state,
@@ -81,6 +82,9 @@ from app.db.state_store import (
 from app.domain.match_brief import create_match_brief
 from app.normalization.resume_intake import intake_resume
 from app.state.schema import ResumeState, SharedState
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -125,19 +129,25 @@ async def create_session(
 ) -> SessionResponse:
     # 每账号会话额度（默认 3）：超额返回 402，前端展示付费墙弹窗。
     # 兼容模式的匿名会话不计额度（仅 development/test 存在）。
+    session_id = str(uuid.uuid4())
+    resolved_user_id = user.user_id if user is not None else session_id
+    state = SharedState(session_id=session_id, user_id=resolved_user_id)
     if user is not None:
-        owned = await count_owned_sessions(user.user_id)
-        if owned >= settings.session_quota_per_user:
+        created = await create_owned_session_with_quota(
+            state,
+            owner_user_id=user.user_id,
+            quota=settings.session_quota_per_user,
+        )
+        if not created:
             raise HTTPException(
                 status_code=402, detail="session_quota_exceeded"
             )
-    session_id = str(uuid.uuid4())
-    resolved_user_id = user.user_id if user is not None else session_id
-    await save_state(
-        SharedState(session_id=session_id, user_id=resolved_user_id),
-        status="awaiting_resume",
-        owner_user_id=user.user_id if user is not None else None,
-    )
+    else:
+        await save_state(
+            state,
+            status="awaiting_resume",
+            owner_user_id=None,
+        )
     return SessionResponse(session_id=session_id, status="awaiting_resume")
 
 
@@ -215,6 +225,13 @@ async def resume_confirm(
     # Feature-A's client version CAS is intentionally scoped to the resume
     # clarification switch. With the switch off, legacy no-body confirmation
     # and all 00/01 runtime behavior remain equivalent to the baseline.
+    if settings.resume_clarify_enabled and (
+        request is None or request.expected_resume_version is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="expected_resume_version_required",
+        )
     expected_resume_version = (
         request.expected_resume_version
         if settings.resume_clarify_enabled and request is not None
@@ -651,11 +668,20 @@ async def _execute_consult_round(
                     mutator=persist_coach_outcome,
                     status=None,
                 )
-            except KeyError:
-                raise HTTPException(
-                    status_code=404,
-                    detail="session_id not found",
-                ) from None
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # CAS1 has already committed the user turn and burned this
+                # reservation. CAS2 is advisory, so persistence races or store
+                # failures must not turn a successful consultation into an error.
+                logger.warning(
+                    "coach CAS2 persistence failed",
+                    exc_info=True,
+                    extra={
+                        "session_id": session_id,
+                        "coach_attempt_id": reservation["coach_attempt_id"],
+                    },
+                )
     return turn, persisted
 
 
@@ -812,13 +838,12 @@ def _record_clarification_turn(
                 "source": "user_clarification",
             }
         )
-        summary = str(
-            getattr(turn, "clarification_answer_summary", "") or ""
-        ).strip()
+        summary_value = getattr(turn, "clarification_answer_summary", None)
+        summary = str(summary_value).strip() if summary_value is not None else None
         resume.clarifications.append(
             {
                 "target_ref": anchored_ref,
-                "answer_summary": summary or raw_answer[:240],
+                "answer_summary": summary or None,
                 "span_id": span_id,
                 "round": round_number,
                 "action": action,

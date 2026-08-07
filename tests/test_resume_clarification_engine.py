@@ -121,7 +121,7 @@ def test_optional_clarification_fields_never_invalidate_the_core_turn() -> None:
     assert parsed.clarification_action is None
 
 
-def test_summary_content_tokens_must_be_a_subset_or_fall_back_to_raw() -> None:
+def test_summary_content_tokens_must_be_a_subset_or_return_none() -> None:
     from app.agents.consult_engine import validated_answer_summary
 
     raw = "我在 Acme 负责 Python API 开发，并把响应时间降低到 200ms。"
@@ -129,7 +129,7 @@ def test_summary_content_tokens_must_be_a_subset_or_fall_back_to_raw() -> None:
     assert validated_answer_summary("负责 Python API 开发", raw) == (
         "负责 Python API 开发"
     )
-    assert validated_answer_summary("主导 Go 平台重构", raw) == raw
+    assert validated_answer_summary("主导 Go 平台重构", raw) is None
 
 
 @pytest.mark.parametrize(
@@ -268,13 +268,13 @@ async def test_skip_remaining_updates_state_before_prompt_and_asks_no_target(
 
 
 @pytest.mark.asyncio
-async def test_failed_optional_extraction_keeps_pending_target_for_retry(
+async def test_failed_extraction_reasks_t_then_next_round_attributes_answer_to_t(
     monkeypatch,
 ) -> None:
     from app.agents import consult_engine as engine
 
     monkeypatch.setattr(engine.settings, "resume_clarify_enabled", True)
-    monkeypatch.setattr(engine.settings, "resume_clarify_max", 2)
+    monkeypatch.setattr(engine.settings, "resume_clarify_max", 3)
     state = _complete_state(targets=_targets(), questions_used=1)
     state.career_state.consult_rounds_used = 1
     pending = {
@@ -284,13 +284,26 @@ async def test_failed_optional_extraction_keeps_pending_target_for_retry(
     }
     state.resume_state.pending_clarification_question = dict(pending)
 
-    async def chat(*_args, **_kwargs):
-        return _llm_payload(
-            answer_summary=["bad"],
-            clarification_action="bad",
-        )
+    prompts: list[dict] = []
+    responses = iter(
+        [
+            _llm_payload(
+                next_question="错误地询问了 T+1",
+                answer_summary=["bad"],
+                clarification_action="bad",
+            ),
+            _llm_payload(
+                answer_summary="负责 Python API 开发",
+                clarification_action="answered",
+            ),
+        ]
+    )
 
-    turn = await engine.run_consult_round(
+    async def chat(_system, user, **_kwargs):
+        prompts.append(json.loads(user))
+        return next(responses)
+
+    failed = await engine.run_consult_round(
         state,
         mode="targeted",
         message="我补充一下",
@@ -299,10 +312,154 @@ async def test_failed_optional_extraction_keeps_pending_target_for_retry(
     )
 
     assert state.resume_state.clarification_targets[0]["status"] == "open"
-    assert state.resume_state.pending_clarification_question == pending
-    assert state.resume_state.questions_used == 1
-    assert turn.clarification_action is None
+    assert state.resume_state.pending_clarification_question == {
+        "target_ref": "experience[0]",
+        "asked_round": 2,
+        "baseline_version": 7,
+    }
+    assert state.resume_state.questions_used == 2
+    assert "experience[0]" in failed.next_question
+    assert "Acme 数据接口开发" in failed.next_question
+    assert "错误地询问了 T+1" not in failed.next_question
+    assert failed.clarification_action is None
+    assert failed.issued_clarification_question is True
+
+    answered = await engine.run_consult_round(
+        state,
+        mode="targeted",
+        message="我负责 Python API 开发",
+        resume_version=7,
+        chat=chat,
+    )
+
+    second_context = prompts[1]["clarification_context"]
+    assert second_context["answer_target"]["target_ref"] == "experience[0]"
+    assert second_context["question_target"]["target_ref"] == "projects[0]"
+    assert state.resume_state.clarification_targets[0]["status"] == "answered"
+    assert state.resume_state.pending_clarification_question == {
+        "target_ref": "projects[0]",
+        "asked_round": 3,
+        "baseline_version": 7,
+    }
+    assert state.resume_state.questions_used == 3
+    assert answered.clarification_target_refs == ("experience[0]",)
+    assert answered.clarification_action == "answered"
+
+
+@pytest.mark.asyncio
+async def test_failed_extraction_at_budget_limit_skips_t_without_reasking(
+    monkeypatch,
+) -> None:
+    from app.agents import consult_engine as engine
+
+    monkeypatch.setattr(engine.settings, "resume_clarify_enabled", True)
+    monkeypatch.setattr(engine.settings, "resume_clarify_max", 2)
+    state = _complete_state(targets=_targets(), questions_used=2)
+    state.career_state.consult_rounds_used = 2
+    state.resume_state.pending_clarification_question = {
+        "target_ref": "experience[0]",
+        "asked_round": 2,
+        "baseline_version": 7,
+    }
+
+    async def chat(*_args, **_kwargs):
+        return _llm_payload(
+            next_question="LLM 不可信的后续问题",
+            answer_summary=["bad"],
+            clarification_action="bad",
+        )
+
+    turn = await engine.run_consult_round(
+        state,
+        mode="targeted",
+        message="仍然无法抽取",
+        resume_version=7,
+        chat=chat,
+    )
+
+    assert state.resume_state.clarification_targets[0]["status"] == "skipped"
+    assert state.resume_state.pending_clarification_question is None
+    assert state.resume_state.questions_used == 2
+    assert turn.clarification_target_refs == ("experience[0]",)
+    assert turn.clarification_action == "skip_current"
     assert turn.issued_clarification_question is False
+
+
+@pytest.mark.asyncio
+async def test_answered_with_blank_raw_message_is_an_extraction_failure(
+    monkeypatch,
+) -> None:
+    from app.agents import consult_engine as engine
+
+    monkeypatch.setattr(engine.settings, "resume_clarify_enabled", True)
+    monkeypatch.setattr(engine.settings, "resume_clarify_max", 2)
+    state = _complete_state(targets=_targets(), questions_used=1)
+    state.career_state.consult_rounds_used = 1
+    state.resume_state.pending_clarification_question = {
+        "target_ref": "experience[0]",
+        "asked_round": 1,
+        "baseline_version": 7,
+    }
+
+    async def chat(*_args, **_kwargs):
+        return _llm_payload(
+            answer_summary="",
+            clarification_action="answered",
+        )
+
+    turn = await engine.run_consult_round(
+        state,
+        mode="targeted",
+        message=" \t\n ",
+        resume_version=7,
+        chat=chat,
+    )
+
+    assert state.resume_state.clarification_targets[0]["status"] == "open"
+    assert state.resume_state.pending_clarification_question == {
+        "target_ref": "experience[0]",
+        "asked_round": 2,
+        "baseline_version": 7,
+    }
+    assert turn.clarification_action is None
+    assert turn.clarification_raw_answer is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_summary_with_answered_action_keeps_raw_answer_only(
+    monkeypatch,
+) -> None:
+    from app.agents import consult_engine as engine
+
+    monkeypatch.setattr(engine.settings, "resume_clarify_enabled", True)
+    monkeypatch.setattr(engine.settings, "resume_clarify_max", 2)
+    state = _complete_state(targets=_targets(), questions_used=1)
+    state.career_state.consult_rounds_used = 1
+    state.resume_state.pending_clarification_question = {
+        "target_ref": "experience[0]",
+        "asked_round": 1,
+        "baseline_version": 7,
+    }
+    raw_answer = "我负责 Python API 开发"
+
+    async def chat(*_args, **_kwargs):
+        return _llm_payload(
+            answer_summary="主导 Go 平台重构",
+            clarification_action="answered",
+        )
+
+    turn = await engine.run_consult_round(
+        state,
+        mode="targeted",
+        message=raw_answer,
+        resume_version=7,
+        chat=chat,
+    )
+
+    assert state.resume_state.clarification_targets[0]["status"] == "answered"
+    assert turn.clarification_action == "answered"
+    assert turn.clarification_raw_answer == raw_answer
+    assert turn.clarification_answer_summary is None
 
 
 @pytest.mark.asyncio
@@ -331,5 +488,42 @@ async def test_switch_off_does_not_enter_clarify_or_touch_feature_a_state(
     )
 
     assert calls == 1
+    assert turn.phase == "deepen"
+    assert state.resume_state.model_dump() == before
+
+
+@pytest.mark.asyncio
+async def test_switch_off_retries_resume_clarify_phase_suggestion(
+    monkeypatch,
+) -> None:
+    from app.agents import consult_engine as engine
+
+    monkeypatch.setattr(engine.settings, "resume_clarify_enabled", False)
+    state = _complete_state(targets=_targets(), questions_used=1)
+    before = state.resume_state.model_dump()
+    calls = 0
+
+    async def chat(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _llm_payload(
+                assistant_reply="非法分支不应落地。",
+                phase_suggestion="resume_clarify",
+            )
+        return _llm_payload(
+            assistant_reply="已按基线继续。",
+            phase_suggestion="deepen",
+        )
+
+    turn = await engine.run_consult_round(
+        state,
+        mode="targeted",
+        message="继续",
+        chat=chat,
+    )
+
+    assert calls == engine.CONSULT_LLM_ATTEMPTS == 2
+    assert turn.assistant_reply == "已按基线继续。"
     assert turn.phase == "deepen"
     assert state.resume_state.model_dump() == before

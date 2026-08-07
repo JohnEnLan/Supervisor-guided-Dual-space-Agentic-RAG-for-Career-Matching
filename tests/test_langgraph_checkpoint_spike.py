@@ -55,6 +55,29 @@ def _database_url() -> str:
     return str(database_url)
 
 
+async def _probe_postgres(database_url: str) -> None:
+    pool = AsyncConnectionPool(
+        conninfo=database_url,
+        min_size=1,
+        max_size=1,
+        kwargs={"autocommit": True, "prepare_threshold": 0},
+        open=False,
+    )
+    try:
+        await pool.open()
+        await pool.wait(timeout=5)
+    except (OperationalError, PoolTimeout, OSError) as exc:
+        await pool.close()
+        pytest.skip(f"PostgreSQL checkpoint tests unavailable: {exc}")
+    await pool.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def postgres_available() -> None:
+    """Skip this PG-only module once when no test database is reachable."""
+    _run_async(_probe_postgres(_database_url()))
+
+
 @asynccontextmanager
 async def _open_checkpointer() -> AsyncIterator[
     tuple[AsyncPostgresSaver, AsyncConnectionPool]

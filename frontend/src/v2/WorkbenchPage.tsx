@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, Paperclip, Send, Sparkles } from "lucide-react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
@@ -18,6 +18,7 @@ import {
 import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
 import { ReactionForm } from "../features/feedback/ReactionForm";
 import { deriveConsultSlots } from "./consultSlots";
+import { FocusModal } from "./FocusModal";
 import { readLastRun, removeLastRun, writeLastRun, writeSessionTitle } from "./localRunStorage";
 import { ResumeProfileAccordion } from "./ResumeProfileAccordion";
 import { deriveServiceProgress, type ServiceProgressItem } from "./runProgress";
@@ -40,78 +41,8 @@ function resumeRecoveryMessage(state: ResumeRecoveryState): string {
   return "简历已更新，本轮未提交；请确认新档案后重试";
 }
 
-/**
- * 焦点管理弹窗：初始焦点落在容器（避免默认聚焦到会消耗额度的确认按钮）、
- * Escape 关闭、Tab 循环约束、关闭后焦点归还打开前的触发元素。
- * 模式与 EvidenceDrawer 保持一致。
- */
-function FocusModal({
-  label,
-  onClose,
-  closeDisabled = false,
-  modeKey,
-  children,
-}: {
-  label: string;
-  onClose: () => void;
-  closeDisabled?: boolean;
-  /** 同一实例内切换内容（如 confirm→quota）时变化，触发容器重新聚焦 */
-  modeKey?: string;
-  children: ReactNode;
-}) {
-  const container = useRef<HTMLDivElement>(null);
-  const restoreTo = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    restoreTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    return () => {
-      const target = restoreTo.current;
-      queueMicrotask(() => target?.focus());
-    };
-  }, []);
-
-  useEffect(() => {
-    container.current?.focus();
-  }, [modeKey]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (!closeDisabled) onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = Array.from(
-        container.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ) ?? [],
-      );
-      if (!focusable.length) {
-        event.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || active === container.current)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || active === container.current)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [closeDisabled, onClose]);
-
-  return (
-    <div className="v2-modal-backdrop" role="dialog" aria-modal="true" aria-label={label}>
-      <div className="v2-modal" ref={container} tabIndex={-1}>
-        {children}
-      </div>
-    </div>
-  );
+export function resumePreviewInterval(error: unknown): number | false {
+  return resumeRecoveryState(error) === "processing" ? 2500 : false;
 }
 
 export const PERSONAS: Record<string, { short: string; name: string; role: string }> = {
@@ -280,6 +211,30 @@ function finalizationMilestoneText(profile: ConsultState["profile_draft"]): stri
   return `小意已把必填信息收集齐：目标 ${value(goal.label)}、地点 ${value(location.label)}、签证${value(visa.label)}。你可以继续补充偏好，也可以让我安排匹配。`;
 }
 
+const SQL_LOCKED_CONSTRAINT_FIELDS = new Set([
+  "location",
+  "locations",
+  "max_years_exp",
+  "role_cluster",
+  "role_clusters",
+  "degree_required",
+  "companies",
+]);
+
+function isSqlLockedConstraint([key, value]: [string, unknown]): boolean {
+  if (key === "need_visa_sponsor") return value === true;
+  if (!SQL_LOCKED_CONSTRAINT_FIELDS.has(key) || value == null) return false;
+  if (typeof value === "string") return Boolean(value.trim());
+  if (Array.isArray(value)) return value.length > 0;
+  return key === "max_years_exp";
+}
+
+function constraintText(entries: [string, unknown][]): string {
+  return entries.length
+    ? entries.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("；")
+    : "无";
+}
+
 function BriefCard({
   draft,
   brief,
@@ -294,6 +249,9 @@ function BriefCard({
   confirmed: boolean;
 }) {
   const hard = draft.hard_constraints ?? {};
+  const hardEntries = Object.entries(hard);
+  const sqlLocked = hardEntries.filter(isSqlLockedConstraint);
+  const directional = hardEntries.filter((entry) => !isSqlLockedConstraint(entry));
   return (
     <div className="v2-brief">
       <p className="v2-brief-title">Match Brief 确认单</p>
@@ -304,14 +262,12 @@ function BriefCard({
           <dd>{draft.career_goal}</dd>
         </div>
         <div>
-          <dt>硬条件（锁定）</dt>
-          <dd>
-            {Object.entries(hard).length
-              ? Object.entries(hard)
-                  .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-                  .join("；")
-              : "无"}
-          </dd>
+          <dt>硬条件（SQL 锁定）</dt>
+          <dd>{constraintText(sqlLocked)}</dd>
+        </div>
+        <div>
+          <dt>检索方向 / 排序参考</dt>
+          <dd>{constraintText(directional)}</dd>
         </div>
         <div>
           <dt>暂不考虑</dt>
@@ -420,7 +376,7 @@ function ResultCards({
   const activateResultControl = (selector: string, click = false) => {
     const control = anchorRef.current?.querySelector<HTMLButtonElement>(selector);
     if (!control) return;
-    if (click) control.click();
+    if (click && control.getAttribute("aria-expanded") !== "true") control.click();
     control.focus();
   };
   return (
@@ -561,8 +517,7 @@ export function WorkbenchPage() {
     queryFn: () => api.resumePreview(sessionId),
     enabled: Boolean(sessionId),
     retry: false,
-    refetchInterval: (query) =>
-      query.state.error instanceof ApiError && query.state.error.status === 409 ? 2500 : false,
+    refetchInterval: (query) => resumePreviewInterval(query.state.error),
   });
   const status = useQuery({
     queryKey: ["v2-run-status", runId],
@@ -576,6 +531,18 @@ export function WorkbenchPage() {
     enabled: Boolean(runId),
     refetchInterval: (query) => conversationInterval(query.state.data),
   });
+
+  const handleResumeLifecycleConflict = (error: unknown) => {
+    const recovery = resumeRecoveryState(error);
+    if (!recovery) return false;
+    setResumeRecovery(recovery);
+    setBriefDraft(null);
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ["consult", sessionId] }),
+    ]);
+    return true;
+  };
 
   const upload = useMutation({
     mutationFn: (file: File) => api.uploadResume(sessionId, file),
@@ -591,7 +558,11 @@ export function WorkbenchPage() {
         expected_resume_version: expectedResumeVersion,
       });
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
+    onSuccess: () => {
+      setResumeRecovery(null);
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+    },
+    onError: handleResumeLifecycleConflict,
   });
   const turn = useMutation({
     mutationFn: () =>
@@ -608,19 +579,13 @@ export function WorkbenchPage() {
       void queryClient.invalidateQueries({ queryKey: ["consult", sessionId] });
     },
     onError: (error) => {
-      const recovery = resumeRecoveryState(error);
-      if (!recovery) return;
-      setResumeRecovery(recovery);
-      setBriefDraft(null);
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] }),
-        queryClient.invalidateQueries({ queryKey: ["consult", sessionId] }),
-      ]);
+      handleResumeLifecycleConflict(error);
     },
   });
   const finalize = useMutation({
     mutationFn: () => api.consultFinalize(sessionId),
     onSuccess: (draft) => setBriefDraft(draft),
+    onError: handleResumeLifecycleConflict,
   });
   const confirmBrief = useMutation({
     mutationFn: () => {
@@ -644,6 +609,7 @@ export function WorkbenchPage() {
       executeAttempted.current = false;
       setSearchParams({ run: created.run_id }, { replace: true });
     },
+    onError: handleResumeLifecycleConflict,
   });
   const execute = useMutation({
     mutationFn: (payload: { runId: string; plan_version: number; plan_hash: string }) =>
@@ -693,7 +659,11 @@ export function WorkbenchPage() {
   }, [me.data?.user_id, runId, sessionId, setSearchParams]);
 
   useEffect(() => {
+    setBriefDraft(null);
+    setBrief(null);
     setResumeRecovery(null);
+    setRetryModal(null);
+    executeAttempted.current = false;
   }, [sessionId]);
 
   useEffect(() => {
@@ -711,12 +681,17 @@ export function WorkbenchPage() {
   // 后端对"未上传"与"归一化中"同为 409（known_issues #6）：
   // 只有本次会话发起过上传时才把 409 解释为"处理中"，否则展示上传入口。
   const preview409 = preview.error instanceof ApiError && preview.error.status === 409;
+  const previewRecovery = resumeRecoveryState(preview.error);
   const resumeProcessing =
-    preview409 && (upload.isPending || upload.isSuccess || resumeRecovery === "processing");
+    (preview409 || upload.isPending || upload.isSuccess) &&
+    (upload.isPending || upload.isSuccess || previewRecovery === "processing" || resumeRecovery === "processing");
+  const resumeError = !resumeProcessing && (previewRecovery === "error" || resumeRecovery === "error");
+  const previewLoadError = preview.isError && !preview409;
   const resumeConfirmed = resumeReady && Boolean(preview.data?.confirmed);
 
   useEffect(() => {
     if (!resumeRecovery || preview.isFetching) return;
+    if (resumeRecovery === "error") return;
     if (preview.isSuccess) {
       setResumeRecovery("updated");
       return;
@@ -733,7 +708,7 @@ export function WorkbenchPage() {
       executeAttempted.current = true;
       execute.mutate({ runId, plan_version: data.plan_version, plan_hash: data.plan_hash });
     }
-  }, [status.data, runId, execute]);
+  }, [status.data, runId, execute.mutate]);
 
   const transcript = consult.data?.transcript ?? [];
   const runMessages = (conversation.data?.messages ?? []).filter((item) => item.kind !== "intro");
@@ -808,7 +783,11 @@ export function WorkbenchPage() {
   });
 
   const canConsult =
-    resumeConfirmed && !runId && resumeRecovery !== "processing" && resumeRecovery !== "error";
+    resumeConfirmed &&
+    consult.isSuccess &&
+    !runId &&
+    resumeRecovery !== "processing" &&
+    resumeRecovery !== "error";
   const inputDisabled = !canConsult || turn.isPending;
   const consultSlots = deriveConsultSlots(
     consult.data?.profile_draft,
@@ -847,12 +826,46 @@ export function WorkbenchPage() {
           </p>
         </Bubble>
 
-        {!resumeReady && !resumeProcessing ? (
+        {!resumeReady && !resumeProcessing && !resumeError && !previewLoadError ? (
           <Bubble persona="intent_consultant" tone="card">
             <p>把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）。</p>
             <label className="v2-btn ghost v2-upload">
               <Paperclip size={16} />
               {upload.isPending ? "上传中…" : "选择简历文件"}
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) upload.mutate(file);
+                }}
+              />
+            </label>
+            {upload.isError ? <p className="v2-error">上传失败，请重试。</p> : null}
+          </Bubble>
+        ) : null}
+
+        {previewLoadError ? (
+          <Bubble persona="intent_consultant" tone="card">
+            <p className="v2-error">简历档案加载失败，请重试</p>
+            <button
+              type="button"
+              className="v2-btn ghost"
+              disabled={preview.isFetching}
+              onClick={() => void preview.refetch()}
+            >
+              {preview.isFetching ? "重试中…" : "重试加载简历档案"}
+            </button>
+          </Bubble>
+        ) : null}
+
+        {resumeError ? (
+          <Bubble persona="intent_consultant" tone="card">
+            <p className="v2-error">旧档案已作废，请重传</p>
+            <label className="v2-btn ghost v2-upload">
+              <Paperclip size={16} />
+              {upload.isPending ? "上传中…" : "重新上传简历"}
               <input
                 type="file"
                 accept=".pdf,.docx,.txt"
@@ -895,6 +908,20 @@ export function WorkbenchPage() {
               onClick={() => confirmResume.mutate()}
             >
               {confirmResume.isPending ? "确认中…" : "确认简历档案"}
+            </button>
+          </Bubble>
+        ) : null}
+
+        {resumeConfirmed && consult.isError ? (
+          <Bubble persona="intent_consultant" tone="card">
+            <p className="v2-error">咨询状态加载失败，请重试</p>
+            <button
+              type="button"
+              className="v2-btn ghost"
+              disabled={consult.isFetching}
+              onClick={() => void consult.refetch()}
+            >
+              {consult.isFetching ? "重试中…" : "重试加载咨询状态"}
             </button>
           </Bubble>
         ) : null}

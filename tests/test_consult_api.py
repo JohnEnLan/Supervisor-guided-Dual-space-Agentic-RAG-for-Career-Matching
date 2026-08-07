@@ -141,6 +141,28 @@ def test_post_consult_uses_atomic_cas_and_returns_new_contract(monkeypatch) -> N
     assert persisted[0].career_state.consult_transcript[0]["round"] == 1
 
 
+def test_post_consult_rejects_blank_message_before_loading_state(monkeypatch) -> None:
+    from app.api.v1 import sessions
+
+    calls = 0
+
+    async def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("blank request must fail validation first")
+
+    monkeypatch.setattr(sessions, "load_state", forbidden)
+
+    with TestClient(_app()) as client:
+        response = client.post(
+            "/api/v1/sessions/session-1/consult",
+            json={"mode": "targeted", "message": " \t\n ", "expected_round": 0},
+        )
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
 def test_authenticated_first_consult_round_receives_remembered_profile(
     monkeypatch,
 ) -> None:

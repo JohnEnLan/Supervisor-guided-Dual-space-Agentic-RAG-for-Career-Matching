@@ -137,6 +137,7 @@ function installV2Api(page: Page, state: FlowState) {
         apiFixtures.runConversation(
           conversationDone ? "completed" : "running",
           conversationDone ? null : 50,
+          VALID_OUTCOMES.length,
         ),
       );
     }
@@ -215,9 +216,10 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
     .poll(() => page.evaluate(() => localStorage.getItem("title:user-e2e-0001:sess-e2e-1")))
     .toBe("Find backend");
 
-  await expect(page.getByText("结果已通过发布核查。")).toBeVisible();
+  await expect(page.getByText(/本次规划已完成：Now Fit 1 个、Stretch Fit 3 个/)).toBeVisible();
   expect(state.statusPoll).toBeGreaterThanOrEqual(RUN_STAGES.length);
-  await expect(page.getByText("任务开始，团队就位。")).toHaveCount(0);
+  // 静态 PM 欢迎语常驻 1 条；run 播报的 intro 被去重后不得出现第 2 条
+  await expect(page.getByText(/欢迎来到职业规划服务群。我是项目经理 PM/)).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Backend Engineer", exact: true })).toBeVisible();
   await expect(page.getByText("①", { exact: true })).toBeVisible();
   await expect(page.getByText("4.", { exact: true })).toBeVisible();
@@ -311,6 +313,47 @@ test("refresh mid-consultation restores transcript from GET consult", async ({ p
   await expect(page.getByText("明白了（第 1 轮）。")).toBeVisible();
   await expect(page.getByText("明白了（第 2 轮）。")).toBeVisible();
   await expect(page.getByRole("button", { name: "生成确认单" })).toBeVisible();
+});
+
+test("consult refetch renders a finalizable PM note with its action CTA", async ({ page }) => {
+  const state = createFlowState({ loggedIn: true, uploaded: true, confirmed: true, round: 2 });
+  const noteText = "必填信息已完整，可以生成确认单。";
+  let consultGets = 0;
+  await installV2Api(page, state);
+  await page.route("**/api/v1/sessions/sess-e2e-1/consult", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    consultGets += 1;
+    const response = apiFixtures.consultState(state.round, {
+      supervisor_notes:
+        consultGets >= 2
+          ? [
+              apiFixtures.supervisorNote({
+                trigger: "finalizable",
+                text: noteText,
+              }),
+            ]
+          : undefined,
+    });
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(response),
+    });
+  });
+
+  await page.goto("/app/sessions/sess-e2e-1");
+  await expect(page.getByText(noteText, { exact: true })).toHaveCount(0);
+
+  const input = page.getByPlaceholder(/告诉小意你的想法/);
+  await input.fill("我也偏好平台工程方向");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => consultGets).toBeGreaterThanOrEqual(2);
+  const noteBubble = page.getByText(noteText, { exact: true }).locator("..");
+  await expect(noteBubble).toBeVisible();
+  const finalizableCta = noteBubble.getByRole("button", { name: "生成确认单" });
+  await expect(finalizableCta).toBeEnabled();
+  await finalizableCta.click();
+  await expect(page.getByText("Match Brief 确认单")).toBeVisible();
 });
 
 test("required-slot chips follow consultation data and keep visa=false complete", async ({ page }) => {
@@ -427,7 +470,8 @@ test("resume conflicts preserve the draft and recover through processing, update
   expect(consultPosts).toBe(1);
 
   await page.getByRole("button", { name: "发送" }).click();
-  await expect(page.getByText("旧档案已作废，请重传")).toBeVisible();
+  // F2 后该文案在简历区与输入区各出现一次（行为正确），锁定 role=status 那条
+  await expect(page.getByRole("status").filter({ hasText: "旧档案已作废，请重传" })).toBeVisible();
   await expect(input).toHaveValue("这段输入需要由我确认后重试");
   expect(consultPosts).toBe(2);
 });

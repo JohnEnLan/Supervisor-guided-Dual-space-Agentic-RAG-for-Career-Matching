@@ -10,6 +10,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from app.config import settings
 from app.llm import deepseek
 from app.state.schema import CareerState, SharedState
 
@@ -82,11 +83,11 @@ def evaluate_consult_l1(
                 break
         except (TypeError, ValueError):
             continue
-    if (
-        abs(delta) < 1e-9
-        and not can_finalize
-        and not clarification_turn_active
-    ):
+    if clarification_turn_active:
+        # G18 用户裁决（2026-08-07）：澄清轮"暂停"停滞计数——既不累加也不
+        # 清零，澄清结束后从暂停前的值继续。
+        stagnation_streak = previous_streak
+    elif abs(delta) < 1e-9 and not can_finalize:
         stagnation_streak = previous_streak + 1
     else:
         stagnation_streak = 0
@@ -416,6 +417,8 @@ def _required_slot_gaps(career: CareerState) -> list[str]:
 
 
 def _targets_are_exhausted(state: SharedState) -> bool:
+    if not settings.resume_clarify_enabled:
+        return True
     targets = [
         item
         for item in state.resume_state.clarification_targets

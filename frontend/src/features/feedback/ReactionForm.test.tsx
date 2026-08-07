@@ -74,4 +74,25 @@ describe("ReactionForm", () => {
     );
     expect(await screen.findByText("已记录 ✓")).toBeVisible();
   });
+
+  it("reuses the idempotency key for the same payload and rotates it after a payload change", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "addReaction").mockRejectedValue(new Error("network unavailable"));
+    renderReactionForm();
+
+    await user.click(screen.getByRole("button", { name: "被拒" }));
+    await user.click(screen.getByRole("button", { name: "提交进展" }));
+    await waitFor(() => expect(api.addReaction).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "提交进展" }));
+    await waitFor(() => expect(api.addReaction).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("button", { name: "Offer" }));
+    await user.click(screen.getByRole("button", { name: "提交进展" }));
+    await waitFor(() => expect(api.addReaction).toHaveBeenCalledTimes(3));
+
+    const payloads = vi.mocked(api.addReaction).mock.calls.map((call) => call[1]);
+    expect(payloads[1].idempotency_key).toBe(payloads[0].idempotency_key);
+    expect(payloads[2].idempotency_key).not.toBe(payloads[1].idempotency_key);
+  });
 });

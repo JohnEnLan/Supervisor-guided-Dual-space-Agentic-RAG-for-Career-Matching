@@ -10,6 +10,7 @@ import {
   readSessionTitle,
   SESSION_TITLE_UPDATED_EVENT,
 } from "./localRunStorage";
+import { FocusModal } from "./FocusModal";
 import "./theme.css";
 
 export type AppShellOutletContext = {
@@ -244,15 +245,13 @@ export function AppShell() {
         />
       </main>
       {quotaOpen ? (
-        <div className="v2-modal-backdrop" role="dialog" aria-modal="true" aria-label="额度已用完">
-          <div className="v2-modal">
-            <h2>咨询额度已用完</h2>
-            <p>当前账户的咨询额度已用完。</p>
-            <button type="button" className="v2-btn ghost" onClick={() => setQuotaOpen(false)}>
-              知道了
-            </button>
-          </div>
-        </div>
+        <FocusModal label="额度已用完" onClose={() => setQuotaOpen(false)}>
+          <h2>咨询额度已用完</h2>
+          <p>当前账户的咨询额度已用完。</p>
+          <button type="button" className="v2-btn ghost" onClick={() => setQuotaOpen(false)}>
+            知道了
+          </button>
+        </FocusModal>
       ) : null}
     </div>
   );

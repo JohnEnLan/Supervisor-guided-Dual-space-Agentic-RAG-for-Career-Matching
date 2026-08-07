@@ -511,7 +511,13 @@ def _fact_is_supported(
 
 
 def _claim_strings(value: Any, *, field_name: str | None = None) -> list[str]:
-    if field_name in {"evidence_span_ids", "severity", "verification_status"}:
+    if field_name in {
+        "evidence_span_ids",
+        "severity",
+        "verification_status",
+        "field_path",
+        "target_ref",
+    }:
         return []
     if isinstance(value, dict):
         return [
@@ -561,9 +567,17 @@ def _build_user_prompt(raw_text: str, evidence_spans: list[EvidenceSpan]) -> str
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _normalization_system_prompt() -> str:
+    if settings.resume_clarify_enabled:
+        return SYSTEM_PROMPT
+    return "\n".join(
+        line for line in SYSTEM_PROMPT.splitlines() if '"field_path":' not in line
+    )
+
+
 async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan]) -> ResumeState:
     raw = await chat(
-        SYSTEM_PROMPT,
+        _normalization_system_prompt(),
         _build_user_prompt(raw_text, evidence_spans),
         temperature=0.0,
         json_mode=True,
@@ -632,7 +646,9 @@ async def intake_resume(
     user_id: str,
     save_to_db: bool = False,
 ) -> ResumeIntakeResult:
-    raw_text, page_count = extract_resume_text(path)
+    # Offloading a blocking parser with asyncio.to_thread is the idiomatic
+    # asyncio boundary; it does not replace the project's asyncio concurrency model.
+    raw_text, page_count = await asyncio.to_thread(extract_resume_text, path)
     if not raw_text:
         raise ValueError(f"No text could be extracted from resume: {path}")
     evidence_spans = build_evidence_spans(raw_text)

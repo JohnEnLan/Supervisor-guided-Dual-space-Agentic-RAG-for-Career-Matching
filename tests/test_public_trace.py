@@ -1,4 +1,6 @@
 from app.agents.trace import build_public_explain
+import json
+
 from app.state.schema import RetrievalState, SharedState, StrategyState
 
 
@@ -75,6 +77,46 @@ def test_explain_contains_allow_list_trace_without_prompt_or_state() -> None:
     assert "must stay private" not in serialized
     assert "private-user" not in serialized
     assert "normalized_base_resume" not in serialized
+
+
+def test_explain_never_projects_private_clarification_or_coach_state() -> None:
+    state = _state()
+    state.resume_state.clarifications = [
+        {
+            "target_ref": "private-target-ref",
+            "raw_answer": "private-clarification-answer",
+        }
+    ]
+    state.resume_state.pending_clarification_question = {
+        "target_ref": "private-pending-target",
+        "asked_round": 3,
+        "baseline_version": 9,
+    }
+    state.coach_reservations = [
+        {
+            "coach_attempt_id": "private-coach-attempt",
+            "round": 3,
+            "trigger": "stagnation",
+            "status": "reserved",
+        }
+    ]
+
+    payload = build_public_explain(state, evaluation_enabled=True)
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    for private_key in (
+        "clarifications",
+        "pending_clarification_question",
+        "coach_reservations",
+    ):
+        assert private_key not in serialized
+    for private_value in (
+        "private-target-ref",
+        "private-clarification-answer",
+        "private-pending-target",
+        "private-coach-attempt",
+    ):
+        assert private_value not in serialized
 
 
 def test_explain_projects_repair_loop_recovery_event() -> None:

@@ -106,6 +106,47 @@ async def count_owned_sessions(owner_user_id: str) -> int:
         )
 
 
+async def create_owned_session_with_quota(
+    state: SharedState,
+    *,
+    owner_user_id: str,
+    quota: int,
+) -> bool:
+    """Atomically enforce one owner's session quota and insert a new session."""
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+                owner_user_id,
+            )
+            owned = int(
+                await connection.fetchval(
+                    """
+                    SELECT count(*)
+                    FROM session_state
+                    WHERE owner_user_id = $1::uuid
+                    """,
+                    owner_user_id,
+                )
+            )
+            if owned >= int(quota):
+                return False
+            await connection.execute(
+                """
+                INSERT INTO session_state (
+                    session_id, user_id, state, status, owner_user_id, updated_at
+                )
+                VALUES ($1, $2, $3::jsonb, 'awaiting_resume', $4::uuid, now())
+                """,
+                state.session_id,
+                state.user_id,
+                state.model_dump_json(),
+                owner_user_id,
+            )
+    return True
+
+
 async def load_state(session_id: str) -> SharedState | None:
     pool = await get_pool()
     async with pool.acquire() as conn:

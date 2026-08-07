@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
@@ -207,15 +208,15 @@ def test_authenticated_session_creation_uses_cookie_owner_and_rejects_legacy_fie
 
     saved = []
 
-    async def save(state, *, status: str, owner_user_id: str | None = None):
-        saved.append((state, status, owner_user_id))
+    async def create_owned(state, *, owner_user_id: str, quota: int):
+        saved.append((state, "awaiting_resume", owner_user_id, quota))
+        return True
 
-    monkeypatch.setattr(sessions, "save_state", save)
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("authenticated creation must use the atomic quota store")
 
-    async def no_owned_sessions(owner_user_id: str) -> int:
-        return 0
-
-    monkeypatch.setattr(sessions, "count_owned_sessions", no_owned_sessions)
+    monkeypatch.setattr(sessions, "create_owned_session_with_quota", create_owned, raising=False)
+    monkeypatch.setattr(sessions, "save_state", forbidden)
     app = FastAPI()
     app.include_router(router)
     user = _user("11111111-1111-1111-1111-111111111111")
@@ -230,10 +231,11 @@ def test_authenticated_session_creation_uses_cookie_owner_and_rejects_legacy_fie
 
     assert response.status_code == 201
     assert legacy.status_code == 422
-    state, status, owner_user_id = saved[0]
+    state, status, owner_user_id, quota = saved[0]
     assert state.user_id == user.user_id
     assert owner_user_id == user.user_id
     assert status == "awaiting_resume"
+    assert quota == sessions.settings.session_quota_per_user
 
 
 def test_compatibility_session_creation_without_cookie_is_ownerless(
@@ -272,11 +274,11 @@ def test_session_quota_returns_402_paywall_and_anonymous_is_exempt(
     async def save(state, *, status: str, owner_user_id: str | None = None):
         saved.append(owner_user_id)
 
-    async def three_owned_sessions(owner_user_id: str) -> int:
-        return 3
+    async def create_owned(*_args, **_kwargs) -> bool:
+        return False
 
     monkeypatch.setattr(sessions, "save_state", save)
-    monkeypatch.setattr(sessions, "count_owned_sessions", three_owned_sessions)
+    monkeypatch.setattr(sessions, "create_owned_session_with_quota", create_owned, raising=False)
     app = FastAPI()
     app.include_router(router)
     user = _user("11111111-1111-1111-1111-111111111111")
@@ -301,14 +303,10 @@ def test_session_quota_allows_creation_below_limit(monkeypatch) -> None:
     from app.api.v1 import sessions
     from app.api.v1.router import router
 
-    async def save(state, *, status: str, owner_user_id: str | None = None):
-        return None
+    async def create_owned(*_args, **_kwargs) -> bool:
+        return True
 
-    async def two_owned_sessions(owner_user_id: str) -> int:
-        return 2
-
-    monkeypatch.setattr(sessions, "save_state", save)
-    monkeypatch.setattr(sessions, "count_owned_sessions", two_owned_sessions)
+    monkeypatch.setattr(sessions, "create_owned_session_with_quota", create_owned, raising=False)
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[optional_current_user] = lambda: _user(
@@ -319,3 +317,99 @@ def test_session_quota_allows_creation_below_limit(monkeypatch) -> None:
         response = client.post("/api/v1/sessions")
 
     assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_concurrent_session_quota_count_and_insert_are_atomic(monkeypatch) -> None:
+    from app.db import state_store
+    from app.state.schema import SharedState
+
+    class Database:
+        def __init__(self) -> None:
+            self.lock = asyncio.Lock()
+            self.rows: list[str] = []
+            self.events: list[str] = []
+
+    class Transaction:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+
+        async def __aenter__(self):
+            self.connection.database.events.append("begin")
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            if self.connection.locked:
+                self.connection.database.lock.release()
+                self.connection.locked = False
+            self.connection.database.events.append("end")
+            return False
+
+    class Connection:
+        def __init__(self, database: Database) -> None:
+            self.database = database
+            self.locked = False
+
+        def transaction(self):
+            return Transaction(self)
+
+        async def execute(self, sql, *args):
+            if "pg_advisory_xact_lock" in sql:
+                await self.database.lock.acquire()
+                self.locked = True
+                self.database.events.append("lock")
+                return "SELECT 1"
+            if "INSERT INTO session_state" in sql:
+                self.database.rows.append(str(args[0]))
+                self.database.events.append("insert")
+                return "INSERT 0 1"
+            raise AssertionError(sql)
+
+        async def fetchval(self, sql, *_args):
+            assert "SELECT count(*)" in sql
+            self.database.events.append("count")
+            await asyncio.sleep(0)
+            return len(self.database.rows)
+
+    class Acquire:
+        def __init__(self, database: Database) -> None:
+            self.connection = Connection(database)
+
+        async def __aenter__(self):
+            return self.connection
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class Pool:
+        def __init__(self, database: Database) -> None:
+            self.database = database
+
+        def acquire(self):
+            return Acquire(self.database)
+
+    database = Database()
+
+    async def get_pool():
+        return Pool(database)
+
+    monkeypatch.setattr(state_store, "get_pool", get_pool)
+    owner = "11111111-1111-1111-1111-111111111111"
+    states = [
+        SharedState(session_id=f"session-{index}", user_id=owner)
+        for index in range(2)
+    ]
+
+    accepted = await asyncio.gather(
+        *(
+            state_store.create_owned_session_with_quota(
+                state,
+                owner_user_id=owner,
+                quota=1,
+            )
+            for state in states
+        )
+    )
+
+    assert sorted(accepted) == [False, True]
+    assert len(database.rows) == 1
+    assert database.events[:3] == ["begin", "lock", "count"]

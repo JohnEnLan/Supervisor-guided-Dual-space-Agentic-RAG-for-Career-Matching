@@ -156,7 +156,8 @@ def test_l1_evaluation_persists_all_deterministic_facts() -> None:
     }
 
 
-def test_l1_stagnation_streak_resets_on_clarification_turn() -> None:
+def test_l1_stagnation_streak_pauses_on_clarification_turn() -> None:
+    """G18 用户裁决：澄清轮暂停停滞计数（保留前值），不清零。"""
     from app.agents.consult_coach import evaluate_consult_l1
 
     state = _state(rounds=1)
@@ -180,7 +181,7 @@ def test_l1_stagnation_streak_resets_on_clarification_turn() -> None:
         coach_max=3,
     )
 
-    assert facts["stagnation_streak"] == 0
+    assert facts["stagnation_streak"] == 1
 
 
 @pytest.mark.parametrize(
@@ -205,13 +206,42 @@ def test_l1_stagnation_streak_resets_on_clarification_turn() -> None:
         (_l1(streak=2, clarification_turn_active=True), [], None),
     ],
 )
-def test_trigger_matrix_is_deterministic(facts, targets, expected) -> None:
+def test_trigger_matrix_is_deterministic(
+    monkeypatch,
+    facts,
+    targets,
+    expected,
+) -> None:
     from app.agents.consult_coach import select_coach_trigger
+    from app.config import settings
 
+    monkeypatch.setattr(settings, "resume_clarify_enabled", True)
     state = _state(rounds=1)
     state.resume_state.clarification_targets = targets
 
     assert select_coach_trigger(state, facts, coach_max=3) == expected
+
+
+def test_rollback_11_to_01_treats_stale_clarification_targets_as_exhausted(
+    monkeypatch,
+) -> None:
+    from app.agents import consult_coach
+    from app.config import settings
+
+    state = _state(rounds=1, complete=True)
+    state.resume_state.clarification_targets = [
+        {"target_ref": "experience[0]", "status": "open"}
+    ]
+    facts = _l1(round_number=2, phase="explore", can_finalize=True)
+
+    monkeypatch.setattr(settings, "resume_clarify_enabled", True)
+    assert consult_coach.select_coach_trigger(state, facts, coach_max=3) is None
+
+    monkeypatch.setattr(settings, "resume_clarify_enabled", False)
+    assert (
+        consult_coach.select_coach_trigger(state, facts, coach_max=3)
+        == "finalizable"
+    )
 
 
 def test_trigger_priority_and_deepen_state_detection_prevent_starvation() -> None:
@@ -234,6 +264,15 @@ def test_trigger_priority_and_deepen_state_detection_prevent_starvation() -> Non
 
     state.coach_reservations.clear()
     assert select_coach_trigger(state, facts, coach_max=3) == "finalizable"
+
+
+def test_stagnation_trigger_has_priority_over_deepen_transition() -> None:
+    from app.agents.consult_coach import select_coach_trigger
+
+    state = _state(rounds=2)
+    facts = _l1(round_number=3, phase="deepen", streak=2)
+
+    assert select_coach_trigger(state, facts, coach_max=3) == "stagnation"
 
 
 def test_reservation_budget_counts_all_statuses_and_enforces_limits() -> None:
@@ -677,6 +716,101 @@ async def test_consult_post_waits_for_cas2_and_persists_verdict_twice(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["reservation_conflict", "storage"])
+async def test_cas2_persistence_failure_is_fail_open(
+    monkeypatch,
+    caplog,
+    failure_kind,
+) -> None:
+    from app.agents.consult_coach import CoachAttemptOutcome, CoachReservationConflict
+    from app.api.v1 import sessions
+
+    database_state = _state(rounds=0, complete=True)
+    mutate_calls = 0
+
+    async def load(_session_id: str):
+        return database_state.model_copy(deep=True)
+
+    async def advisor(working, **_kwargs):
+        _append_turn(working, round_number=1, phase="deepen")
+        return _turn(working, phase="deepen", can_finalize=True)
+
+    async def mutate(*, mutator, **_kwargs):
+        nonlocal mutate_calls
+        mutate_calls += 1
+        if mutate_calls == 1:
+            return mutator(database_state, 0, 0)
+        if failure_kind == "reservation_conflict":
+            raise CoachReservationConflict("reservation moved")
+        raise RuntimeError("database unavailable")
+
+    async def coach(*_args, **_kwargs):
+        return CoachAttemptOutcome(status="succeeded", note=_note())
+
+    monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
+    monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
+    monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "run_consult_round", advisor)
+    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
+    monkeypatch.setattr(sessions, "run_consult_coach", coach, raising=False)
+
+    with caplog.at_level("WARNING"):
+        turn, persisted = await sessions._execute_consult_round(
+            session_id="session-1",
+            mode="targeted",
+            message="继续",
+            expected_round=0,
+            status="intent_consulting",
+        )
+
+    assert turn.round == 1
+    assert persisted.coach_reservations[0]["status"] == "reserved"
+    assert "coach CAS2 persistence failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cas2_persistence_cancelled_error_propagates(monkeypatch) -> None:
+    from app.agents.consult_coach import CoachAttemptOutcome
+    from app.api.v1 import sessions
+
+    database_state = _state(rounds=0, complete=True)
+    mutate_calls = 0
+
+    async def load(_session_id: str):
+        return database_state.model_copy(deep=True)
+
+    async def advisor(working, **_kwargs):
+        _append_turn(working, round_number=1, phase="deepen")
+        return _turn(working, phase="deepen", can_finalize=True)
+
+    async def mutate(*, mutator, **_kwargs):
+        nonlocal mutate_calls
+        mutate_calls += 1
+        if mutate_calls == 1:
+            return mutator(database_state, 0, 0)
+        raise asyncio.CancelledError
+
+    async def coach(*_args, **_kwargs):
+        return CoachAttemptOutcome(status="succeeded", note=_note())
+
+    monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
+    monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
+    monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "run_consult_round", advisor)
+    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
+    monkeypatch.setattr(sessions, "run_consult_coach", coach, raising=False)
+
+    with pytest.raises(asyncio.CancelledError):
+        await sessions._execute_consult_round(
+            session_id="session-1",
+            mode="targeted",
+            message="继续",
+            expected_round=0,
+            status="intent_consulting",
+        )
+
+
+@pytest.mark.asyncio
 async def test_consult_coach_unavailable_is_fail_open_and_is_landed_before_return(
     monkeypatch,
 ) -> None:
@@ -804,6 +938,170 @@ async def test_disabled_coach_is_x0_equivalent_with_zero_call_or_side_effect(
     assert persisted.coach_reservations == []
     assert persisted.supervisor_log == []
     assert "supervisor_notes" not in persisted.career_state.consult_transcript[0]
+
+
+@pytest.mark.asyncio
+async def test_feature_switch_matrix_preserves_scoped_equivalence_contract(
+    monkeypatch,
+) -> None:
+    from app.agents import consult_engine
+    from app.agents.consult_coach import CoachAttemptOutcome
+    from app.api.v1 import sessions
+    from app.api.v1.schemas import ConsultResponse
+    from app.db.state_store import ConsultContext
+
+    observations: dict[tuple[bool, bool], dict] = {}
+
+    for clarify_enabled, coach_enabled in (
+        (False, False),
+        (True, False),
+        (False, True),
+        (True, True),
+    ):
+        database_state = _state(rounds=0, complete=True)
+        calls = {"consult": 0, "coach": 0}
+        prompts: list[str] = []
+
+        async def load(_session_id: str):
+            return database_state.model_copy(deep=True)
+
+        async def context(_session_id: str):
+            return ConsultContext(
+                state=database_state.model_copy(deep=True),
+                status="resume_ready",
+                resume_version=1,
+                confirmed_resume_version=1,
+                resume_upload_generation=1,
+            )
+
+        async def chat(system: str, _user: str, **_kwargs):
+            calls["consult"] += 1
+            prompts.append(system)
+            return json.dumps(
+                {
+                    "assistant_reply": "收到。",
+                    "next_question": "还有其他岗位偏好吗？",
+                    "profile_updates": {},
+                    "phase_suggestion": "deepen",
+                },
+                ensure_ascii=False,
+            )
+
+        async def mutate(*, mutator, **_kwargs):
+            return mutator(database_state, 1, 1)
+
+        async def coach(_state, *, reservation, **_kwargs):
+            calls["coach"] += 1
+            attempt_id = str(reservation["coach_attempt_id"])
+            return CoachAttemptOutcome(
+                status="succeeded",
+                note={
+                    "kind": "coach",
+                    "trigger": reservation["trigger"],
+                    "text": "方向完整，可以生成确认单。",
+                    "verdict": "advise",
+                    "coach_attempt_id": attempt_id,
+                },
+            )
+
+        monkeypatch.setattr(
+            sessions.settings,
+            "resume_clarify_enabled",
+            clarify_enabled,
+        )
+        monkeypatch.setattr(
+            sessions.settings,
+            "consult_coach_enabled",
+            coach_enabled,
+        )
+        monkeypatch.setattr(sessions, "load_state", load)
+        monkeypatch.setattr(sessions, "load_consult_context", context)
+        monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
+        monkeypatch.setattr(sessions, "run_consult_coach", coach)
+        monkeypatch.setattr(consult_engine.deepseek, "chat", chat)
+
+        turn, persisted = await sessions._execute_consult_round(
+            session_id="session-1",
+            mode="targeted",
+            message="继续",
+            expected_round=0,
+            status="intent_consulting",
+        )
+        public_response = ConsultResponse(
+            assistant_reply=turn.assistant_reply,
+            next_question=turn.next_question,
+            phase=turn.phase,
+            completeness=turn.completeness,
+            can_finalize=turn.can_finalize,
+            round=turn.round,
+            profile_draft=turn.profile_draft,
+            clarification_progress=sessions._clarification_progress(persisted),
+        ).model_dump(mode="json")
+        transcript_without_notes = [
+            {key: value for key, value in entry.items() if key != "supervisor_notes"}
+            for entry in persisted.career_state.consult_transcript
+        ]
+        observations[(clarify_enabled, coach_enabled)] = {
+            "prompt": prompts,
+            "calls": calls,
+            "response": public_response,
+            "state_delta": {
+                "transcript": transcript_without_notes,
+                "resume": persisted.resume_state.model_dump(mode="json"),
+                "coach_reservations": [
+                    {
+                        "round": item["round"],
+                        "trigger": item["trigger"],
+                        "status": item["status"],
+                    }
+                    for item in persisted.coach_reservations
+                ],
+                "supervisor_stages": [
+                    item.get("stage") for item in persisted.supervisor_log
+                ],
+                "note_count": sum(
+                    len(entry.get("supervisor_notes", []))
+                    for entry in persisted.career_state.consult_transcript
+                ),
+            },
+        }
+
+    baseline = observations[(False, False)]
+    clarify_prompt = observations[(True, False)]["prompt"]
+    expected_by_switches = {
+        (False, False): {"coach_calls": 0, "coach_state": False},
+        (True, False): {"coach_calls": 0, "coach_state": False},
+        (False, True): {"coach_calls": 1, "coach_state": True},
+        (True, True): {"coach_calls": 1, "coach_state": True},
+    }
+    for switches, expected in expected_by_switches.items():
+        clarify_enabled, _coach_enabled = switches
+        observation = observations[switches]
+        assert observation["calls"] == {
+            "consult": 1,
+            "coach": expected["coach_calls"],
+        }
+        assert observation["response"] == baseline["response"]
+        assert observation["state_delta"]["transcript"] == baseline[
+            "state_delta"
+        ]["transcript"]
+        assert observation["state_delta"]["resume"] == baseline["state_delta"][
+            "resume"
+        ]
+        assert bool(observation["state_delta"]["coach_reservations"]) is expected[
+            "coach_state"
+        ]
+        assert bool(observation["state_delta"]["supervisor_stages"]) is expected[
+            "coach_state"
+        ]
+        assert observation["state_delta"]["note_count"] == int(
+            expected["coach_state"]
+        )
+        if clarify_enabled:
+            assert observation["prompt"] == clarify_prompt
+            assert observation["prompt"] != baseline["prompt"]
+        else:
+            assert observation["prompt"] == baseline["prompt"]
 
 
 @pytest.mark.asyncio
@@ -974,5 +1272,6 @@ async def test_both_switches_on_excludes_clarification_round_from_stagnation(
     )
 
     assert persisted.coach_reservations == []
-    assert persisted.supervisor_log[-1]["stagnation_streak"] == 0
+    # G18 用户裁决：澄清轮暂停计数——沿用上一轮已累计的 streak=1，不清零
+    assert persisted.supervisor_log[-1]["stagnation_streak"] == 1
     assert persisted.supervisor_log[-1]["clarification_turn_active"] is True

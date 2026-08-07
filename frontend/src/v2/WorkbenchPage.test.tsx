@@ -7,8 +7,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import { api, type Me } from "../api/queries";
 import { apiFixtures, RUN_STAGES } from "../test/apiFixtures";
-import { PERSONAS, conversationInterval, statusInterval } from "./WorkbenchPage";
+import {
+  PERSONAS,
+  conversationInterval,
+  resumePreviewInterval,
+  statusInterval,
+} from "./WorkbenchPage";
 import { WorkbenchPage } from "./WorkbenchPage";
+import workbenchSource from "./WorkbenchPage.tsx?raw";
 
 const ME = {
   user_id: "user-1",
@@ -118,7 +124,7 @@ function renderWorkbench(initialEntry = "/app/sessions/sess-1") {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { queryClient, ...view };
+  return { queryClient, router, ...view };
 }
 
 beforeEach(() => {
@@ -138,6 +144,13 @@ describe("v2 polling intervals", () => {
   });
 });
 
+describe("plan-ready execution effect", () => {
+  it("depends on the stable mutate callback instead of the mutation observer object", () => {
+    expect(workbenchSource).toMatch(/\[status\.data, runId, execute\.mutate\]/);
+    expect(workbenchSource).not.toMatch(/\[status\.data, runId, execute\]/);
+  });
+});
+
 describe("v2 personas", () => {
   it("covers the four service personas plus the user", () => {
     expect(Object.keys(PERSONAS).sort()).toEqual([
@@ -147,6 +160,78 @@ describe("v2 personas", () => {
       "strategist",
       "user",
     ]);
+  });
+});
+
+describe("session-scoped workbench state", () => {
+  it("clears an unconfirmed Match Brief draft when the route switches sessions", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    const { router } = renderWorkbench();
+
+    await user.click(await screen.findByRole("button", { name: "生成确认单" }));
+    expect(await screen.findByText("Match Brief 确认单")).toBeVisible();
+
+    await act(() => router.navigate("/app/sessions/sess-2"));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Match Brief 确认单")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("closes a retry modal when the route switches sessions", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    const { router } = renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    await user.click(await screen.findByRole("button", { name: "新建咨询重试" }));
+    expect(screen.getByRole("dialog", { name: "新建咨询确认" })).toBeVisible();
+
+    await act(() => router.navigate("/app/sessions/sess-2"));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "新建咨询确认" })).not.toBeInTheDocument(),
+    );
+  });
+});
+
+describe("truthful Match Brief constraints", () => {
+  it("separates SQL-enforced fields from retrieval and ranking directions", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.consultFinalize).mockResolvedValue({
+      career_goal: "backend engineer",
+      hard_constraints: {
+        locations: ["Shanghai"],
+        need_visa_sponsor: false,
+        max_years_exp: 5,
+        degree_required: "bachelor",
+        role_clusters: ["backend"],
+        companies: ["Acme"],
+        remote: true,
+        work_mode: "hybrid",
+      },
+      soft_preferences: {},
+      avoid_roles: [],
+      result_count: 5,
+    });
+    renderWorkbench();
+
+    await user.click(await screen.findByRole("button", { name: "生成确认单" }));
+
+    const locked = screen.getByText("硬条件（SQL 锁定）").parentElement!;
+    expect(locked).toHaveTextContent("locations");
+    expect(locked).toHaveTextContent("max_years_exp");
+    expect(locked).toHaveTextContent("degree_required");
+    expect(locked).toHaveTextContent("role_clusters");
+    expect(locked).toHaveTextContent("companies");
+    expect(locked).not.toHaveTextContent("need_visa_sponsor");
+    expect(locked).not.toHaveTextContent("remote");
+
+    const directional = screen.getByText("检索方向 / 排序参考").parentElement!;
+    expect(directional).toHaveTextContent("need_visa_sponsor: false");
+    expect(directional).toHaveTextContent("remote: true");
+    expect(directional).toHaveTextContent('work_mode: "hybrid"');
   });
 });
 
@@ -577,8 +662,13 @@ describe("truthful result cards", () => {
     const actions = await screen.findByRole("group", { name: "结果后续行动" });
     expect(within(actions).getAllByRole("button")).toHaveLength(3);
 
-    await user.click(within(actions).getByRole("button", { name: "查看第 1 名的证据" }));
+    const evidenceAction = within(actions).getByRole("button", { name: "查看第 1 名的证据" });
+    await user.click(evidenceAction);
     expect(await screen.findByText("Python, SQL required.")).toBeVisible();
+    const evidenceTrigger = screen.getByRole("button", { name: "查看证据" });
+    expect(evidenceTrigger).toHaveAttribute("aria-expanded", "true");
+    await user.click(evidenceAction);
+    expect(evidenceTrigger).toHaveAttribute("aria-expanded", "true");
 
     await user.click(within(actions).getByRole("button", { name: "更新申请进展" }));
     expect(screen.getByRole("button", { name: "被拒" })).toHaveFocus();
@@ -607,6 +697,88 @@ describe("truthful consultation typing state", () => {
 });
 
 describe("resume-generation conflict recovery", () => {
+  it("polls only the preview processing lifecycle state", () => {
+    expect(resumePreviewInterval(new ApiError(409, "resume_processing"))).toBe(2500);
+    expect(resumePreviewInterval(new ApiError(409, "resume_error"))).toBe(false);
+    expect(resumePreviewInterval(new ApiError(500, "server_error"))).toBe(false);
+  });
+
+  it("renders preview resume_processing as processing without an upload entry", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview).mockRejectedValue(new ApiError(409, "resume_processing"));
+
+    renderWorkbench();
+
+    expect(await screen.findByText(/正在归一化你的简历/)).toBeVisible();
+    expect(screen.queryByText("选择简历文件")).not.toBeInTheDocument();
+  });
+
+  it("stops on preview resume_error and offers an explicit re-upload action", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview).mockRejectedValue(new ApiError(409, "resume_error"));
+
+    renderWorkbench();
+
+    expect(await screen.findByText("旧档案已作废，请重传")).toBeVisible();
+    expect(screen.getByText("重新上传简历")).toBeVisible();
+  });
+
+  it("uses lifecycle recovery for confirm and clears it after a successful retry", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview).mockResolvedValue(apiFixtures.resumePreview(false));
+    vi.spyOn(api, "confirmResume")
+      .mockRejectedValueOnce(new ApiError(409, "resume_processing"))
+      .mockResolvedValueOnce({
+        session_id: "sess-1",
+        resume_version: 1,
+        confirmed: true,
+        confirmed_at: "2026-08-07T00:00:00Z",
+      });
+    renderWorkbench();
+
+    const confirm = await screen.findByRole("button", { name: "确认简历档案" });
+    await user.click(confirm);
+    expect(await screen.findByText("简历已更新，本轮未提交；请确认新档案后重试")).toBeVisible();
+
+    await user.click(confirm);
+    await waitFor(() => expect(api.confirmResume).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("简历已更新，本轮未提交；请确认新档案后重试"),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it.each([
+    ["finalize", "resume_processing", "生成确认单"],
+    ["match-brief", "resume_error", "确认无误，开始匹配"],
+  ])("uses lifecycle recovery for %s conflicts", async (operation, detail, buttonName) => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    if (operation === "finalize") {
+      vi.mocked(api.consultFinalize).mockRejectedValue(new ApiError(409, detail));
+    } else {
+      vi.mocked(api.createMatchBrief).mockRejectedValue(new ApiError(409, detail));
+    }
+    const { queryClient } = renderWorkbench();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    if (operation === "match-brief") {
+      await user.click(await screen.findByRole("button", { name: "生成确认单" }));
+    }
+    await user.click(await screen.findByRole("button", { name: buttonName }));
+
+    const lifecycleMessages = await screen.findAllByText(
+      detail === "resume_error"
+        ? "旧档案已作废，请重传"
+        : "简历已更新，本轮未提交；请确认新档案后重试",
+    );
+    expect(lifecycleMessages[0]).toBeVisible();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["resume-preview", "sess-1"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["consult", "sess-1"] });
+  });
+
   it("keeps the turn draft, clears the stale brief, refetches both resources, and advances the two-stage copy", async () => {
     const user = userEvent.setup();
     mockWorkbenchApi();
@@ -660,9 +832,60 @@ describe("resume-generation conflict recovery", () => {
     await user.type(input, "这条输入不能自动重放");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(await screen.findByText(expectedCopy)).toBeVisible();
+    const recoveryMessages = await screen.findAllByText(expectedCopy);
+    expect(recoveryMessages.length).toBeGreaterThan(0);
+    expect(recoveryMessages.every((message) => message.isConnected)).toBe(true);
     expect(input).toHaveValue("这条输入不能自动重放");
     expect(api.consultTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("workbench query failures", () => {
+  it("shows a retry action for non-lifecycle preview errors", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview)
+      .mockRejectedValueOnce(new ApiError(500, "server_error"))
+      .mockResolvedValueOnce(apiFixtures.resumePreview(true));
+    renderWorkbench();
+
+    expect(await screen.findByText("简历档案加载失败，请重试")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "重试加载简历档案" }));
+
+    await waitFor(() => expect(api.resumePreview).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText("简历档案加载失败，请重试")).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByRole("button", { name: "生成确认单" })).toBeEnabled();
+  });
+
+  it("shows a retry action for consult GET failures and keeps sending disabled until ready", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.consultState)
+      .mockRejectedValueOnce(new ApiError(500, "server_error"))
+      .mockResolvedValueOnce({
+        transcript: [],
+        profile_draft: {
+          current_goal: ["backend engineer"],
+          hard_constraints: { locations: ["Shanghai"], need_visa_sponsor: false },
+          soft_preferences: {},
+          avoid_roles: [],
+        },
+        round: 2,
+        phase: "deepen",
+        completeness: 1,
+        can_finalize: true,
+      });
+    renderWorkbench();
+
+    expect(await screen.findByText("咨询状态加载失败，请重试")).toBeVisible();
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "重试加载咨询状态" }));
+    await waitFor(() => expect(api.consultState).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled());
   });
 });
 
@@ -694,7 +917,9 @@ describe("protected timeline scrolling", () => {
     const firstConversation = apiFixtures.runConversation("running", null);
     vi.mocked(api.runConversation).mockResolvedValue(firstConversation);
     const { queryClient } = renderWorkbench("/app/sessions/sess-1?run=run-created");
-    await screen.findByText("岗位检索正在执行：适用的 metadata 条件筛选与双路召回。");
+    await screen.findByText(
+      "我已接手确认单，岗位检索正在执行：适用的 metadata 条件筛选 → BM25/Dense 并行 → job_id 级 RRF 融合。你要求的 Shanghai 我已锁定为硬条件，绝不放宽。",
+    );
 
     const timeline = document.querySelector<HTMLOListElement>(".v2-timeline");
     expect(timeline).not.toBeNull();

@@ -18,6 +18,23 @@ export function ProfilePage() {
     );
   }
 
+  if (me.isError || profile.isError) {
+    return (
+      <section className="v2-profile">
+        <h1>我的档案</h1>
+        <p className="v2-error">画像加载失败，请重试</p>
+        <button
+          type="button"
+          className="v2-btn ghost"
+          disabled={me.isFetching || profile.isFetching}
+          onClick={() => void Promise.all([me.refetch(), profile.refetch()])}
+        >
+          {me.isFetching || profile.isFetching ? "重试中…" : "重试加载画像"}
+        </button>
+      </section>
+    );
+  }
+
   const remembered = profile.data?.profile ?? null;
   const hasProfile = remembered && Object.keys(remembered).length > 0;
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.match_brief import MatchBrief
 from app.domain.results import ProductResult
@@ -185,6 +185,14 @@ class ConsultRequest(PublicDTO):
     mode: Literal["targeted", "explore"]
     message: str = Field(min_length=1, max_length=2000)
     expected_round: int = Field(ge=0)
+
+    @field_validator("message")
+    @classmethod
+    def strip_nonempty_message(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("consultation message must not be blank")
+        return stripped
 
 
 class ConsultResponse(PublicDTO):

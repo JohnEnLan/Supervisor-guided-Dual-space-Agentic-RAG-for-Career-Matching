@@ -174,6 +174,42 @@ async def test_intake_resume_save_to_db_does_not_close_global_pool(monkeypatch):
     assert ("close_pool",) not in calls
 
 
+@pytest.mark.asyncio
+async def test_intake_offloads_blocking_resume_parser_with_to_thread(
+    monkeypatch,
+) -> None:
+    from app.normalization import resume_intake as intake
+    from app.state.schema import ResumeState
+
+    offloaded = []
+
+    def parse(path):
+        assert path == Path("resume.pdf")
+        return "raw resume", 1
+
+    async def to_thread(function, *args):
+        offloaded.append((function, args))
+        return function(*args)
+
+    async def normalize(raw_text, evidence_spans):
+        return ResumeState(
+            normalized_base_resume=raw_text,
+            original_evidence_spans=[span.model_dump() for span in evidence_spans],
+        )
+
+    monkeypatch.setattr(intake, "extract_resume_text", parse)
+    monkeypatch.setattr(intake.asyncio, "to_thread", to_thread)
+    monkeypatch.setattr(intake, "normalize_resume_text", normalize)
+
+    await intake.intake_resume(
+        Path("resume.pdf"),
+        session_id="session-1",
+        user_id="user-1",
+    )
+
+    assert offloaded == [(parse, (Path("resume.pdf"),))]
+
+
 def test_clarification_trigger_normalizes_prioritizes_deduplicates_and_caps() -> None:
     from app.normalization import resume_intake as intake
 
@@ -316,3 +352,44 @@ async def test_normalization_writes_feature_a_fields_only_when_enabled(
     else:
         assert result.quality_issues_struct == []
         assert result.clarification_targets == []
+
+
+@pytest.mark.asyncio
+async def test_switch_off_field_path_metadata_preserves_baseline_verification(
+    monkeypatch,
+) -> None:
+    from app.normalization import resume_intake as intake
+
+    captured_system_prompts: list[str] = []
+
+    async def fake_chat(system, _user, **_kwargs):
+        captured_system_prompts.append(system)
+        return json.dumps(
+            {
+                "education": [],
+                "experience": [],
+                "projects": [],
+                "skills": [],
+                "resume_quality_issues": [
+                    {
+                        "issue": "Acme",
+                        "severity": "medium",
+                        "field_path": "experience[0]",
+                        "target_ref": "experience[0]",
+                        "evidence_span_ids": ["R001"],
+                    }
+                ],
+                "normalized_base_resume": "Acme",
+            }
+        )
+
+    monkeypatch.setattr(intake, "chat", fake_chat)
+    monkeypatch.setattr(intake.settings, "resume_clarify_enabled", False)
+
+    result = await intake.normalize_resume_text(
+        "ignored",
+        [intake.EvidenceSpan(span_id="R001", text="Acme")],
+    )
+
+    assert "field_path" not in captured_system_prompts[0]
+    assert result.resume_quality_issues == ["medium: Acme evidence=['R001']"]

@@ -178,6 +178,10 @@ async def test_case_search_uses_existing_embedding_and_public_tables(
 
     assert "FROM anonymous_resume_cases" in connection.sql
     assert "JOIN case_job_outcomes" in connection.sql
+    assert "WITH top_cases AS" in connection.sql
+    assert connection.sql.index("LIMIT $2") < connection.sql.index(
+        "JOIN case_job_outcomes"
+    )
     assert connection.args[1] == 3
     assert rows[0]["case_id"] == "case-1"
     assert rows[0]["similarity"] == pytest.approx(0.88)

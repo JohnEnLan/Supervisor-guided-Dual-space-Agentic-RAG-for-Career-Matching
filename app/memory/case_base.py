@@ -205,10 +205,20 @@ async def search_similar_resume_cases_by_embedding(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
+            WITH top_cases AS (
+                SELECT
+                    case_id,
+                    resume_payload,
+                    1 - (embedding <=> $1::vector) AS similarity
+                FROM anonymous_resume_cases
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2
+            )
             SELECT
                 c.case_id,
                 c.resume_payload,
-                1 - (c.embedding <=> $1::vector) AS similarity,
+                c.similarity,
                 o.outcome_id,
                 o.job_id,
                 o.company,
@@ -217,11 +227,9 @@ async def search_similar_resume_cases_by_embedding(
                 o.highest_stage,
                 o.final_status,
                 o.source_confidence
-            FROM anonymous_resume_cases AS c
+            FROM top_cases AS c
             JOIN case_job_outcomes AS o ON o.case_id = c.case_id
-            WHERE c.embedding IS NOT NULL
-            ORDER BY c.embedding <=> $1::vector
-            LIMIT $2
+            ORDER BY c.similarity DESC, o.outcome_id
             """,
             to_pgvector(query_embedding),
             top_k,
