@@ -6,7 +6,7 @@
 > **【V2 阶段优先级指引（2026-08-04）】** 本项目已进入 V2 产品化阶段（用户授权）。凡本文件与
 > `CLAUDE_LANGGRAPH.md` §5「V2 修订案」冲突之处，以修订案为准——包括：一个月/P0–P2 范围纪律、
 > clarification 最多一次、不引入 LangGraph（langgraph 分支已授权）。"一次一个模块"继续有效。
-> 执行计划见 `docs/v2_redesign_plan.md`（v3 终审稿，双审通过）。
+> 执行计划见 `docs/archive/v2_redesign_plan.md`（v3 终审稿，双审通过）。
 
 
 ---

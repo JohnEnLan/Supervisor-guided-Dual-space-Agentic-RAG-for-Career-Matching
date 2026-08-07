@@ -64,7 +64,7 @@ run API 切换为最大验收门、本轮不删除任何旧编排入口）。版
 
 ## 5. V2 修订案（2026-08-04 · 计划双审通过后生效）
 
-依据 `docs/v2_redesign_plan.md`（v3 终审稿，Claude 子 agent 与 Codex 双审通过），下列条款**替代**本文件及 CLAUDE.md / AGENTS.md 中的对应旧条款；未列出的条款继续有效：
+依据 `docs/archive/v2_redesign_plan.md`（v3 终审稿，Claude 子 agent 与 Codex 双审通过），下列条款**替代**本文件及 CLAUDE.md / AGENTS.md 中的对应旧条款；未列出的条款继续有效：
 
 | 旧条款 | V2 替代 |
 |---|---|
