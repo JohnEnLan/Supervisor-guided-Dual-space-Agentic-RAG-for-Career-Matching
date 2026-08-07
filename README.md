@@ -97,6 +97,10 @@ RERANK_ENDPOINT=...
 
 迁移必须先跑；批次 9 真机验收曾据此补齐 `0008_resume_upload_generation.sql`。
 
+后端必须通过 `-m app.serve` 模块入口启动（而不是直接 `uvicorn`）：该入口会在
+Windows 上强制切换到 SelectorEventLoop——psycopg 异步驱动与默认的
+ProactorEventLoop 不兼容，绕过此入口会在 LangGraph 检查点写入时报错。
+
 也可以使用根目录启动脚本一次拉起迁移、后端和前端：
 
 ```powershell
