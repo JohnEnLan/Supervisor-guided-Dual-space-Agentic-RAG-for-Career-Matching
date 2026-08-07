@@ -1,8 +1,20 @@
 # 部署指南：zhangen.cn @ 45.153.131.127（香港 · Ubuntu 22.04）
 
 > 所有「本机」命令在你 Windows 的 PowerShell 里跑；所有「服务器」命令是
-> `ssh root@45.153.131.127` 登进去之后贴。配套文件在 `deploy/`。
+> SSH 登进去之后贴。配套文件在 `deploy/`。
 > 上传包由 Claude 预先在本机生成（第 2 步）。
+> **2026-08-08 实战定稿**：本指南已按首次真实部署踩坑修订，与线上环境一致。
+
+## 跨境连接三条铁律（实战教训）
+
+1. **连接一律带心跳**，否则长命令中途会被掐线：
+   ```bash
+   ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=6 root@45.153.131.127
+   ```
+2. **大文件切块传**：901MB+ 的 dump 直传曾在 63% 断掉。按 100MB 切块逐个 scp，
+   断了只补缺块；服务器上 `cat dump.part* > career_rag.dump` 拼回并 `sha256sum` 比对。
+3. **长任务放后台**：SSH 一断，前台进程会被杀（pg_restore 曾因此留下半截库）。
+   凡是要跑几分钟以上的命令都用 `nohup ... > xxx.log 2>&1 &`，进度看 log。
 
 ## 第 0 步：两项前置（各一分钟）
 
@@ -21,10 +33,16 @@
 ssh root@45.153.131.127
 ```
 
-登进去后，先把 `deploy/server_setup.sh` 内容上传（第 2 步的包里有），或直接：
+登进去后建目录；若买了独立数据盘（`lsblk` 里有一块无挂载点的空盘，如 40G 的 `vdb`），
+先格式化并挂到应用目录（**仅对全新空盘执行**，mkfs 会清空整块盘）：
 
 ```bash
 mkdir -p /opt/career-rag
+lsblk    # 确认 vdb 存在且无分区、无挂载点
+mkfs.ext4 /dev/vdb
+mount /dev/vdb /opt/career-rag
+echo "UUID=$(blkid -s UUID -o value /dev/vdb) /opt/career-rag ext4 defaults 0 2" >> /etc/fstab
+df -h /opt/career-rag    # 应显示约 40G 可用
 ```
 
 ## 第 2 步（本机）：上传部署包
@@ -72,12 +90,28 @@ chown -R career:career /opt/career-rag
 ## 第 5 步（服务器）：导入数据 + 迁移
 
 ```bash
-sudo -u postgres pg_restore -d career_rag --no-owner --role=career -j 2 /opt/career-rag/career_rag.dump
-sudo -u postgres psql -d career_rag -c "REASSIGN OWNED BY postgres TO career;" || true
+cd /opt/career-rag && nohup sudo -u postgres pg_restore -d career_rag --no-owner --role=career -j 2 career_rag.dump > restore.log 2>&1 &
+```
+
+后台跑（断线不死），进度与完成判断：
+
+```bash
+tail /opt/career-rag/restore.log; ps aux | grep [p]g_restore
+sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('career_rag'));"
+```
+
+进程消失 + 库约 2.5GB + log 末尾 `errors ignored on restore: 1` ＝ 成功
+（那 1 条是 `COMMENT ON EXTENSION vector` 权限提示，无害；后台任务因此
+显示 `Exit 1` 也正常）。然后跑迁移：
+
+```bash
+sudo -u postgres psql -d career_rag -c "REASSIGN OWNED BY postgres TO career;" 2>/dev/null || true
 cd /opt/career-rag/app && sudo -u career ../venv/bin/python -m app.db.migrate
 ```
 
-（restore 含 HNSW 索引重建，2 核机器上可能要几分钟，正常。）
+migrate **静默退出即成功**（快照自带全部迁移记录，无迁移可补时不打印任何东西）。
+若需重来（如断线留下半截库）：`DROP DATABASE career_rag;` 后按 setup 脚本第 4 步
+重建空库（CREATE DATABASE / EXTENSION vector / ALTER SCHEMA），再重新 restore。
 
 ## 第 6 步（服务器）：服务上线
 
@@ -85,6 +119,8 @@ cd /opt/career-rag/app && sudo -u career ../venv/bin/python -m app.db.migrate
 cp /opt/career-rag/career-rag.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now career-rag
 systemctl status career-rag --no-pager    # 应显示 active (running)
+# 应用初始化（连库、装配编排图）约需 5–20 秒，刚起来时 curl 可能空响应，稍等重试：
+curl -s http://127.0.0.1:8000/api/v1/capabilities    # 吐 JSON 即后端就绪
 
 cp /opt/career-rag/Caddyfile /etc/caddy/Caddyfile
 systemctl reload caddy
