@@ -1,193 +1,171 @@
-# Supervisor-guided Dual-space Agentic RAG for Career Matching
+# Career-RAG：Supervisor 监督的双空间 Agentic RAG 职业匹配系统
 
-This repository contains a dissertation project for building a
-Supervisor-guided dual-space Agentic RAG system for career matching.
+Career-RAG 是一个面向毕业设计答辩的多人职业匹配 Web 系统。用户在群聊式工作台中上传并确认简历、完成目标咨询、批准 Match Brief（匹配确认单），随后得到分层岗位、JD 与简历证据、技能差距、简历建议和职业路径。
 
-The system upgrades a traditional resume-job semantic matching RAG pipeline
-into a supervised multi-agent workflow. It uses hybrid retrieval to find
-evidence-grounded job candidates, then uses LLM-based agents to reason about
-user intent, job fit, resume strategy, and career development.
+这里的 **Agentic RAG**，白话说就是“先从岗位库找证据，再让分工明确的 AI 角色基于证据完成任务”；**Supervisor** 是贯穿流程的项目经理，负责检查计划、约束、证据和发布条件。
 
-## Project Focus
+代码与实测工件冻结基线：`2474e48`。批次 9 的验收口径见 `docs/validation/2026-08-07-batch9-acceptance.md`。
 
-The one-month implementation target is to make the main P0 workflow run end to
-end:
+## 当前真实能力
 
-```text
-data ingestion
-  -> resume normalization
-  -> hybrid retrieval
-  -> Top-K job matching
-  -> three business agents + supervisor
-  -> FastAPI multi-user service
-  -> evaluation metrics
-```
+- **群聊工作台**：登录后在一条时间线上完成简历上传、档案确认、咨询、确认单、运行播报、结果查看与反馈；移动端使用可聚焦、可关闭的导航抽屉。
+- **认证与配额**：邮箱或短信验证码通道由后端能力声明控制；认证会话使用 Cookie；每账号会话额度由 `SESSION_QUOTA_PER_USER` 配置，额度用尽时前端展示 402 付费墙。
+- **咨询引擎与简历澄清回路**：咨询先收集目标、地点、签证三项必需信息；功能开启时，归一化阶段发现的含糊经历会生成澄清问题。有效回答按 `C001`、`C002`……保存为新的简历证据，跳过也会被明确记录。
+- **三个业务 Agent + Supervisor + PM 咨询督导**：意图 Agent 整理需求，匹配 Agent 检索并解释岗位，策略 Agent 给出差距与路径；Supervisor 执行有界核查。咨询期 PM 督导先用纯规则 L1 判断是否需要介入，再在预算允许时调用 L2 模型生成一条提示；失败时不回滚已经提交的用户轮次。
+- **混合检索与双空间**：SQL/metadata 先执行地点、签证等硬过滤；BM25 关键词检索、Dense 语义检索与可选 RAPTOR 层级摘要检索并行，经 RRF（按排名合并多路结果）融合，再做确定性打分。显式岗位空间与匿名案例空间并行，案例空间只能在硬过滤后的岗位集合内有限调序。
+- **RAPTOR + Cross-Encoder 双开**：RAPTOR 用层级摘要补充召回；Cross-Encoder（把查询与每个候选放在一起精排的模型）重排候选池。批次 9 验收配置中 `RAPTOR_ENABLED=true`、`RERANK_ENABLED=true`；`.env.example` 为安全起步仍默认关闭，需显式开启。
+- **持久化和恢复**：FastAPI 服务本身无状态，共享状态、run、事件与 checkpoint 均存 PostgreSQL。LangGraph runner 在同一 run 再次触发时可从 checkpoint 继续；服务重启不会自动重新调度未完成 run。
+- **评估管线**：实现 P@K、R@K、MRR、NDCG@K、硬过滤准确率与证据忠实度；版本化演示语料可复现实验的排名、标签与 manifest。
 
-P1 features, such as dual-space memory, feedback loops, and anonymized case
-base examples, are used as mechanism demonstrations. P2 features, such as
-RAPTOR and cross-encoder reranking, are intentionally kept out of the main
-workflow unless time allows.
-
-## Architecture
-
-The core design is:
-
-- RAG core: metadata filtering, BM25, dense retrieval, RRF fusion, and
-  bi-encoder scoring.
-- Agent workflow: Intent Agent, Matching Agent, and Strategy Agent share one
-  structured state object.
-- Supervisor Harness: workflow orchestration, state/constraint management,
-  deterministic checks before and after each business Agent, bounded recovery,
-  and a final publication gate. LLM verification is reserved for judgments that
-  SQL or Python rules cannot make.
-- Stateless service: all shared state is stored by `session_id` in PostgreSQL.
-- Async execution: FastAPI, asyncpg connection pooling, and semaphore-limited
-  LLM / embedding calls.
-
-## Repository Layout
+## 架构
 
 ```text
-app/
-  agents/          LLM agent harness and business agents
-  api/             FastAPI entrypoint and routes
-  db/              asyncpg pool, PostgreSQL schema, state store
-  evaluation/      ranking metrics
-  llm/             DeepSeek and Qwen embedding clients
-  memory/          private memory, feedback, anonymized case base
-  normalization/   resume intake and evidence-preserving normalization
-  retrieval/       hybrid search, job-level RRF, optional RAPTOR-lite leaf propagation
-  state/           shared structured state schema
-scripts/           data loading and sample case scripts
-data/              local job, resume, and case data placeholders
-tests/             regression tests for retrieval, agents, API, memory, evaluation
-frontend/          React/Vite 答辩工作台、进度板、证据和监控页面
+React 群聊工作台
+  │  登录 / 上传 / 咨询 / 批准确认单 / 轮询 / 反馈
+  ▼
+FastAPI v1（认证、配额、公开字段投影）
+  │
+  ├─ Resume Intake ── 解析 → 归一化 → R### 原文证据 → 可选 C### 澄清证据
+  │
+  ├─ Consult Engine ── 三项必需槽位 → 澄清回路 → 深挖
+  │                    └─ PM Coach：L1 规则 → L2 提示（有预算、fail-open）
+  │
+  └─ Match Brief（版本 + 哈希锁定）
+       ▼
+     LangGraph runner / PostgreSQL checkpoint
+       Intent Agent → Retrieval & Matching Agent → Strategy Agent
+                                │
+                                ▼
+       SQL 硬过滤 → BM25 ∥ Dense ∥ RAPTOR → RRF → Cross-Encoder
+                                │
+                         Supervisor 有界核查
+                                ▼
+               Now Fit / Stretch Fit / Bridge Role + evidence
+
+PostgreSQL + pgvector
+  ├─ session_id 下的 SharedState 与 resume generation/version
+  ├─ JD、全文索引、1024 维向量与 HNSW 索引
+  ├─ run / event / checkpoint
+  └─ 用户画像、反馈与匿名案例
 ```
 
-## Setup
+关键边界：硬条件由 SQL/metadata 判断；对外建议必须能指回简历或 JD 证据；所有外部 LLM/embedding/rerank 调用均受异步并发限制。
 
-Copy the environment template and fill in local secrets:
+## 快速启动
 
-```bash
-cp .env.example .env
+### 1. 环境与依赖
+
+需要 Python 3.11+、PostgreSQL 17（安装 pgvector）、Node.js/npm，以及可用的 DeepSeek、Qwen/DashScope 凭据。
+
+PowerShell：
+
+```powershell
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Install dependencies:
+在 `.env` 中填写真实密钥和数据库连接。不要提交 `.env`。接受态演示需要在模板基础上显式设置：
 
-```bash
-pip install -r requirements.txt
+```dotenv
+DATABASE_URL=postgresql://user:password@localhost:5432/career_rag
+AUTH_ENFORCED=true
+SESSION_QUOTA_PER_USER=3
+
+DEEPSEEK_API_KEY=...
+QWEN_API_KEY=...
+QWEN_EMBED_MODEL=text-embedding-v4
+EMBED_DIM=1024
+
+RESUME_CLARIFY_ENABLED=true
+RESUME_CLARIFY_MAX=2
+CONSULT_COACH_ENABLED=true
+CONSULT_COACH_MAX=3
+
+RAPTOR_ENABLED=true
+RERANK_ENABLED=true
+RERANK_ENDPOINT=...
 ```
 
-The project expects:
+`EMBED_DIM` 必须与数据库向量列一致；Cross-Encoder 开启时必须提供有效的 `RERANK_ENDPOINT`。验证码的 `console` provider 仅适合本地开发，生产配置会拒绝它。
 
-- Python 3.11+
-- PostgreSQL with pgvector
-- DeepSeek API credentials
-- Qwen / DashScope embedding credentials
-
-Real credentials must stay in `.env`; `.env` is ignored by Git.
-
-## Current Status
-
-The P0 path now has tested modules for resume intake, hybrid retrieval, the
-three-agent workflow, Supervisor verification, persisted orchestration, and
-FastAPI polling routes. State is stored by `session_id` in PostgreSQL.
-
-Start the API locally:
-
-```bash
-python -m app.serve --host 127.0.0.1 --port 8000
-```
-
-On Windows, this entrypoint selects `SelectorEventLoop` before Uvicorn
-creates the event loop, as required by psycopg's asynchronous connections.
-
-Minimal API flow:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u1"}'
-
-# Copy session_id from the response.
-SESSION_ID="<session_id>"
-
-curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/resume" \
-  -F "file=@data/resumes/sample.txt"
-
-# Poll until the preview is ready, then confirm the normalized resume.
-curl "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/resume-preview"
-curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/resume-confirm"
-
-curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/intent-consult" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"targeted","goal_text":"Find data analyst jobs in Birmingham","target_roles":["Data Analyst"]}'
-
-curl -X POST "http://127.0.0.1:8000/api/v1/sessions/$SESSION_ID/match-brief" \
-  -H "Content-Type: application/json" \
-  -d '{"career_goal":"Find data analyst jobs in Birmingham","hard_constraints":{},"soft_preferences":{},"avoid_roles":[],"result_count":5}'
-
-# Copy run_id, brief.plan_version and brief.plan_hash from the response.
-RUN_ID="<run_id>"
-PLAN_VERSION=1
-PLAN_HASH="<plan_hash>"
-
-curl -X POST "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/execute" \
-  -H "Content-Type: application/json" \
-  -d "{\"plan_version\":$PLAN_VERSION,\"plan_hash\":\"$PLAN_HASH\"}"
-
-curl "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/status"
-curl "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/result"
-
-curl -X POST "http://127.0.0.1:8000/api/v1/runs/$RUN_ID/reaction" \
-  -H "Content-Type: application/json" \
-  -d '{"job_id":"<recommended_job_id>","outcome":"interview","user_rating":5}'
-```
-
-## React 答辩工作台
-
-先应用数据库 migration，并启动 v1 API：
+### 2. 数据库迁移与服务
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.db.migrate
 .\.venv\Scripts\python.exe -m app.serve --host 127.0.0.1 --port 8000
 ```
 
-另开一个终端启动前端：
+迁移必须先跑；批次 9 真机验收曾据此补齐 `0008_resume_upload_generation.sql`。
+
+也可以使用根目录启动脚本一次拉起迁移、后端和前端：
 
 ```powershell
-cd frontend
+.\start.ps1
+```
+
+### 3. 前端
+
+另开终端：
+
+```powershell
+Set-Location frontend
 npm.cmd install
 npm.cmd run dev
 ```
 
-浏览器打开 `http://127.0.0.1:5173`。工作台主流程为：
+浏览器访问 `http://127.0.0.1:5173`。前端通过 OpenAPI 快照生成 TypeScript 类型，不应手改 `frontend/src/api/generated.ts`。
 
-```text
-上传简历 → 确认结构化事实 → 目标咨询 Agent
-→ 批准 Match Brief → 查看 7 阶段进度 → 推荐/证据 → 评估解释/反馈
-```
+## 测试入口
 
-页面不展示录用概率、完整归一化简历、内部 state、提示词或供应商错误。
-
-## 只读运行监控
-
-在 `.env` 中开启：
-
-```dotenv
-MONITORING_ENABLED=true
-```
-
-重启 API 后访问 `http://127.0.0.1:5173/monitoring`。监控页面每 5 秒读取一次持久化的 allow-list 指标，包括运行量、完成/失败/警告率、P50/P95 耗时、推荐数量、JD 证据覆盖率、隐式空间使用率、重排次数和最近运行。该页面没有删除或修改接口，也不包含用户身份与简历正文。
-
-## 前端验收
+批次 9 冻结验收的实测结果为：后端 pytest **642 passed**、Vitest **105/105**、Playwright **14/14**、全局冒烟 **32 passed, 0 failed**。来源仅为 `docs/validation/2026-08-07-batch9-acceptance.md`。
 
 ```powershell
-cd frontend
+# 后端
+.\.venv\Scripts\python.exe -m pytest tests -q
+.\.venv\Scripts\python.exe -m pyflakes app scripts
+
+# 前端单测、类型、构建、端到端
+Set-Location frontend
 npm.cmd test
 npm.cmd run typecheck
 npm.cmd run build
-npx.cmd playwright install chromium
 npm.cmd run e2e
+
+# OpenAPI 契约链
+Set-Location ..
+.\.venv\Scripts\python.exe scripts\export_openapi.py
+Set-Location frontend
+npm.cmd run api:generate
+npm.cmd run api:check
 ```
 
-Playwright 覆盖完整产品流程、证据抽屉焦点恢复、Examiner View、反馈、监控页面以及 375/768/1440 像素宽度下的横向溢出检查。
+真机服务启动后，全局冒烟入口为：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\global_smoke.py <server-log-path>
+```
+
+## 评估入口与已测口径
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_demo_corpus.py --include-raptor --use-cross-encoder
+```
+
+版本化产物位于 `data/eval/demo_corpus_cross_v1/`。该实验使用 31,879 个岗位、15 条查询和 852 个池化判定对；标签由 LLM 评审，未经人工复核，Recall 是池内口径，因此适合比较同一批实验通道，不等同于线上真实录用效果。
+
+| 通道 | P@5 | R@10 | MRR | NDCG@5 |
+|---|---:|---:|---:|---:|
+| base 混合主线 | 0.720 | 0.262 | 0.822 | 0.720 |
+| RAPTOR | 0.800 | 0.284 | 0.967 | 0.839 |
+| Cross-Encoder | 0.907 | 0.310 | 0.900 | 0.897 |
+| RAPTOR + Cross-Encoder | 0.920 | 0.323 | 1.000 | 0.939 |
+
+数字来源：`data/eval/demo_corpus_cross_v1/manifest.json` 与 `docs/validation/2026-08-06-cross-encoder-ablation.md`。不要与不同池化口径的其他轮次直接横比。
+
+## 进一步阅读
+
+- `docs/product_guide.md`：答辩时按用户看到的页面与状态讲产品。
+- `docs/code_guide.md`：按模块、文件和关键函数走读实现。
+- `docs/project_functionality_and_code_guide.md`：完整功能与代码详解，也是 V2 Word 文档的唯一 Markdown 源稿。
+- `docs/validation/2026-08-07-batch9-acceptance.md`：冻结验收与四项测试计数。
+- `docs/validation/2026-08-06-cross-encoder-ablation.md`：四通道消融方法与限制。
