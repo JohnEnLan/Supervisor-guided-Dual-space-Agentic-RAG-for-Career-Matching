@@ -1437,3 +1437,96 @@ describe("run message rendering", () => {
     }
   });
 });
+
+describe("resume lifecycle regressions (audit round 3)", () => {
+  const READY_PREVIEW = {
+    session_id: "sess-x",
+    resume_version: 1,
+    confirmed: false,
+    education: [],
+    experience: [],
+    projects: [],
+    skills: ["Python"],
+    resume_quality_issues: [],
+    evidence: [],
+  };
+
+  function renderWithRouter(initialEntry: string) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    queryClient.setQueryData(["me"], ME);
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/app/sessions/:sessionId",
+          element: (
+            <>
+              <WorkbenchPage />
+              <LocationProbe />
+            </>
+          ),
+        },
+      ],
+      { initialEntries: [initialEntry] },
+    );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    return router;
+  }
+
+  it("resets upload state on session switch so a fresh session shows the upload entry", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let sess1Uploaded = false;
+    vi.mocked(api.resumePreview).mockImplementation(async (sessionId: string) => {
+      if (sessionId === "sess-1" && sess1Uploaded) return READY_PREVIEW;
+      throw new ApiError(409, "resume_missing");
+    });
+    vi.spyOn(api, "uploadResume").mockImplementation(async () => {
+      sess1Uploaded = true;
+      return { session_id: "sess-1", status: "resume_queued" };
+    });
+    const router = renderWithRouter("/app/sessions/sess-1");
+
+    expect(await screen.findByText("选择简历文件")).toBeVisible();
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, new File(["resume"], "r.txt", { type: "text/plain" }));
+    await screen.findByRole("button", { name: "确认简历档案" });
+
+    await act(async () => {
+      await router.navigate("/app/sessions/sess-2");
+    });
+
+    // 泄漏形态：A 的 upload.isSuccess 把 B 的 resume_missing 桥接成"处理中"，
+    // 上传入口消失且不轮询——切会话必须 upload.reset()
+    expect(await screen.findByText("选择简历文件")).toBeVisible();
+    expect(screen.queryByText(/正在归一化你的简历/)).not.toBeInTheDocument();
+  });
+
+  it("recovers from resume_error through re-upload to a ready profile", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let phase: "error" | "ready" = "error";
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      if (phase === "error") throw new ApiError(409, "resume_error");
+      return READY_PREVIEW;
+    });
+    vi.spyOn(api, "uploadResume").mockImplementation(async () => {
+      phase = "ready";
+      return { session_id: "sess-1", status: "resume_queued" };
+    });
+    renderWithRouter("/app/sessions/sess-1");
+
+    expect(await screen.findByText("旧档案已作废，请重传")).toBeVisible();
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, new File(["resume"], "r2.txt", { type: "text/plain" }));
+
+    await screen.findByRole("button", { name: "确认简历档案" });
+    expect(screen.queryByText("旧档案已作废，请重传")).not.toBeInTheDocument();
+  });
+});
+

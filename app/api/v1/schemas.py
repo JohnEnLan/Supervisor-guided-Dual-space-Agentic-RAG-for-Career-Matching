@@ -101,6 +101,24 @@ class ResumeVersionRequiredResponse(PublicDTO):
     detail: Literal["expected_resume_version_required"]
 
 
+class ValidationErrorItem(BaseModel):
+    """FastAPI/Pydantic 默认校验错误条目的契约镜像（宽容额外键）。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    loc: list[str | int] = Field(default_factory=list)
+    msg: str = ""
+    type: str = ""
+
+
+class RequestValidationErrorResponse(BaseModel):
+    """默认 422 数组形态——与自定义必填 detail 组成 anyOf，保证契约加性。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    detail: list[ValidationErrorItem] = Field(default_factory=list)
+
+
 class ResumeEducationPreview(PublicDTO):
     institution: str = ""
     degree: str = ""

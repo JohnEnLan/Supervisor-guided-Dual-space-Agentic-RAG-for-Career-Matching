@@ -669,7 +669,11 @@ export function WorkbenchPage() {
     setResumeRecovery(null);
     setRetryModal(null);
     executeAttempted.current = false;
-  }, [sessionId]);
+    // upload.isSuccess 是实例级状态：不重置会把 A 会话的上传成功带进从未
+    // 上传的 B 会话，使 resume_missing 被桥接成"处理中"而丢失上传入口
+    // （审计三轮阻断修复）。
+    upload.reset();
+  }, [sessionId, upload.reset]);
 
   useEffect(() => {
     if (!runId || !me.data?.user_id || !(status.error instanceof ApiError)) return;

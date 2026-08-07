@@ -41,6 +41,7 @@ from app.api.v1.schemas import (
     ResumeProjectPreview,
     ResumeLifecycleConflictResponse,
     ResumeVersionRequiredResponse,
+    RequestValidationErrorResponse,
     SessionCreateRequest,
     SessionResponse,
 )
@@ -220,8 +221,9 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
     response_model=ResumeConfirmResponse,
     responses={
         409: {"model": ResumeLifecycleConflictResponse},
-        # 开关开启时 expected_resume_version 必填的稳定契约（审计二轮 B4 补账）
-        422: {"model": ResumeVersionRequiredResponse},
+        # 422 = anyOf(必填 detail 稳定契约, 默认校验数组形态)——运行时两种
+        # 形状并存，契约必须加性保留而非替换（审计三轮修正）。
+        422: {"model": ResumeVersionRequiredResponse | RequestValidationErrorResponse},
     },
     dependencies=[Depends(require_owned_session)],
 )

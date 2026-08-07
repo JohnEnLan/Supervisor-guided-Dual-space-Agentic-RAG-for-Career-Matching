@@ -964,6 +964,16 @@ export interface components {
             /** Stage */
             stage: string;
         };
+        /**
+         * RequestValidationErrorResponse
+         * @description 默认 422 数组形态——与自定义必填 detail 组成 anyOf，保证契约加性。
+         */
+        RequestValidationErrorResponse: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationErrorItem"][];
+        } & {
+            [key: string]: unknown;
+        };
         /** ResumeAcceptedResponse */
         ResumeAcceptedResponse: {
             /** Session Id */
@@ -1270,6 +1280,26 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * ValidationErrorItem
+         * @description FastAPI/Pydantic 默认校验错误条目的契约镜像（宽容额外键）。
+         */
+        ValidationErrorItem: {
+            /** Loc */
+            loc?: (string | number)[];
+            /**
+             * Msg
+             * @default
+             */
+            msg: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
         };
     };
     responses: never;
@@ -1992,7 +2022,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ResumeVersionRequiredResponse"];
+                    "application/json": components["schemas"]["ResumeVersionRequiredResponse"] | components["schemas"]["RequestValidationErrorResponse"];
                 };
             };
         };

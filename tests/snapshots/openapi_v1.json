@@ -1548,6 +1548,21 @@
         "title": "RecoveryEventResponse",
         "type": "object"
       },
+      "RequestValidationErrorResponse": {
+        "additionalProperties": true,
+        "description": "默认 422 数组形态——与自定义必填 detail 组成 anyOf，保证契约加性。",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationErrorItem"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "RequestValidationErrorResponse",
+        "type": "object"
+      },
       "ResumeAcceptedResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2314,6 +2329,38 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationErrorItem": {
+        "additionalProperties": true,
+        "description": "FastAPI/Pydantic 默认校验错误条目的契约镜像（宽容额外键）。",
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "default": "",
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "default": "",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "ValidationErrorItem",
         "type": "object"
       }
     }
@@ -3231,7 +3278,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResumeVersionRequiredResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ResumeVersionRequiredResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Resume Confirm Api V1 Sessions  Session Id  Resume Confirm Post"
                 }
               }
             },

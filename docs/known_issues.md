@@ -10,7 +10,7 @@
 | 3 | RAPTOR 重建代际清理：数据源消失的旧节点不删除 | app/retrieval/raptor.py:518-602 | RAPTOR 主线关闭，仅消融实验用 | 重跑消融前 |
 | 4 | RAPTOR role-summary 绕过 allow_ids：job_id 为 NULL 的节点不受硬过滤白名单约束 | app/retrieval/raptor.py:368-384 | 同上，主线关闭 | 重跑消融前 |
 | 5 | case 软偏好从未被排序消费：`case_target_roles/case_bridge_roles` 持久化后无读取方 | app/memory/feedback_loop.py:59-63 | 产品决策（是否让历史案例影响排序）未定 | 与 #1/#2 一起 |
-| 6 | resume 错误码细分：归一化失败只存 `resume_error`，preview 对 processing/error 同为 409 | app/api/v1/sessions.py:243-246 | 前端目前不区分，UX 优化级 | 前端打磨期 |
+| 6 | ~~resume 错误码细分~~ **已解决（2026-08-07 审计）**：preview 现按 `resume_missing/resume_processing/resume_error` 三个稳定 detail 区分，前端纯契约分流并有钉死测试 | app/api/v1/sessions.py resume_preview | — | 已关闭 |
 | 7 | vector 维度启动核验：DB 列固定 vector(1024)，`EMBED_DIM` 改动要到运行时才报错 | app/db/schema.sql, app/config.py | 单机部署维度不会变；加启动断言属防御性 | 部署工程化时 |
 | 8 | 评估集重复 case ID 静默覆盖 | scripts/evaluate_system.py:30-48 | 当前数据集无重复；策略（报错 vs 合并）待定 | 扩数据集前 |
 | 9 | AsyncOpenAI 客户端无 aclose：测试反复启停可能残留 transport | app/llm/*.py | 无生产影响，进程退出即释放 | 顺手时 |
