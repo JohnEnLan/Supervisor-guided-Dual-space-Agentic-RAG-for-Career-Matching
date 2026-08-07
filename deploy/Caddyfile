@@ -1,0 +1,15 @@
+zhangen.cn, www.zhangen.cn {
+	encode gzip
+
+	# API 反代到 FastAPI
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# 前端静态文件（SPA 回退到 index.html）
+	handle {
+		root * /opt/career-rag/frontend-dist
+		try_files {path} /index.html
+		file_server
+	}
+}
