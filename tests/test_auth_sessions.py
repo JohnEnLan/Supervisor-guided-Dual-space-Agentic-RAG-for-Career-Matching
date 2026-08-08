@@ -122,6 +122,16 @@ class _AccountConnection:
             return "UPDATE 1"
         raise AssertionError("unexpected execute: " + " ".join(sql.split()))
 
+    async def fetch(self, sql: str, *args):
+        if "FROM user_identities" in sql and "provider = 'email'" in sql:
+            user_id = str(args[0])
+            return [
+                {"provider_uid": provider_uid}
+                for (provider, provider_uid), owner_id in self.identities.items()
+                if provider == "email" and owner_id == user_id
+            ]
+        raise AssertionError("unexpected fetch: " + " ".join(sql.split()))
+
     async def fetchrow(self, sql: str, *args):
         if "FROM user_identities AS identity" in sql:
             user_id = self.identities.get((str(args[0]), str(args[1])))
@@ -135,6 +145,11 @@ class _AccountConnection:
             return {"user_id": user_id}
         if "UPDATE users" in sql and "RETURNING" in sql:
             user = self.users[str(args[0])]
+            if len(args) == 2:
+                recalculated = bool(args[1])
+                if user["is_admin"] != recalculated:
+                    user["token_version"] += 1
+                user["is_admin"] = recalculated
             user["last_login_at"] = datetime(2026, 8, 5, tzinfo=UTC)
             return dict(user)
         raise AssertionError("unexpected fetchrow: " + " ".join(sql.split()))
@@ -206,6 +221,7 @@ async def test_login_or_register_is_idempotent_for_same_identity(monkeypatch) ->
         ]
     )
     monkeypatch.setattr(sessions.uuid, "uuid4", lambda: next(values))
+    monkeypatch.setattr(sessions.settings, "admin_emails", "")
 
     first = await sessions.login_or_register(
         provider="email",
@@ -221,6 +237,41 @@ async def test_login_or_register_is_idempotent_for_same_identity(monkeypatch) ->
     assert first.user_id == second.user_id
     assert len(connection.users) == 1
     assert connection.profiles == {first.user_id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "provider_uid", "expected_admin", "expected_version"),
+    [
+        ("email", "admin@example.com", True, 1),
+        ("phone", "+447700900123", False, 0),
+    ],
+)
+async def test_new_account_admin_state_depends_only_on_email_login(
+    monkeypatch,
+    provider,
+    provider_uid,
+    expected_admin,
+    expected_version,
+) -> None:
+    from app.api.auth import sessions
+
+    connection = _AccountConnection()
+    monkeypatch.setattr(
+        sessions.uuid,
+        "uuid4",
+        lambda: uuid.UUID("11111111-1111-1111-1111-111111111111"),
+    )
+    monkeypatch.setattr(sessions.settings, "admin_emails", "admin@example.com")
+
+    user = await sessions.login_or_register(
+        provider=provider,
+        provider_uid=provider_uid,
+        pool=_Pool(connection),
+    )
+
+    assert user.is_admin is expected_admin
+    assert user.token_version == expected_version
 
 
 @pytest.mark.asyncio

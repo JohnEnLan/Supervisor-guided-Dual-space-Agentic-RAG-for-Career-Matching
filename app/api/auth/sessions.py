@@ -12,7 +12,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from app.config import settings
+from app.config import parse_admin_emails, settings
 from app.db.pool import get_pool
 
 try:
@@ -48,6 +48,7 @@ class AuthedUser:
     is_admin: bool
     created_at: datetime
     last_login_at: datetime | None
+    provider: str | None = None
 
     @classmethod
     def from_row(cls, row: Any) -> "AuthedUser":
@@ -77,7 +78,12 @@ def issue_session_token(
     ttl_days: int | None = None,
     now: datetime | None = None,
     jti: str | None = None,
+    idp: str | None = None,
 ) -> str:
+    if idp is not None and (
+        not isinstance(idp, str) or idp not in {"email", "phone"}
+    ):
+        raise ValueError("unsupported identity provider")
     issued_at = now or datetime.now(UTC)
     ttl = ttl_days if ttl_days is not None else settings.auth_session_ttl_days
     payload = {
@@ -87,6 +93,8 @@ def issue_session_token(
         "jti": jti or secrets.token_urlsafe(24),
         "token_version": user.token_version,
     }
+    if idp is not None:
+        payload["idp"] = idp
     return str(
         _jwt_library().encode(
             payload,
@@ -119,6 +127,10 @@ def decode_session_token(
             raise library.PyJWTError("invalid user_id")
         if not isinstance(payload.get("token_version"), int):
             raise library.PyJWTError("invalid token_version")
+        if "idp" in payload:
+            idp = payload["idp"]
+            if not isinstance(idp, str) or idp not in {"email", "phone"}:
+                raise library.PyJWTError("invalid idp")
     except library.PyJWTError as exc:
         raise ValueError("invalid session token") from exc
     return dict(payload)
@@ -184,17 +196,54 @@ async def _identity_user(
     )
 
 
-async def _complete_login(connection: Any, user_id: str) -> AuthedUser:
-    row = await connection.fetchrow(
-        """
-        UPDATE users
-        SET last_login_at = now()
-        WHERE user_id = $1::uuid
-        RETURNING user_id, display_name, avatar_url, status,
-                  token_version, is_admin, created_at, last_login_at
-        """,
-        user_id,
-    )
+async def _complete_login(
+    connection: Any,
+    user_id: str,
+    *,
+    provider: str,
+) -> AuthedUser:
+    if provider == "email":
+        identities = await connection.fetch(
+            """
+            SELECT provider_uid
+            FROM user_identities
+            WHERE user_id = $1::uuid AND provider = 'email'
+            ORDER BY identity_id ASC
+            """,
+            user_id,
+        )
+        allowlist = parse_admin_emails(settings.admin_emails)
+        is_admin = any(
+            str(identity["provider_uid"]).casefold() in allowlist
+            for identity in identities
+        )
+        row = await connection.fetchrow(
+            """
+            UPDATE users
+            SET last_login_at = now(),
+                token_version = token_version + CASE
+                    WHEN is_admin IS DISTINCT FROM $2::boolean THEN 1
+                    ELSE 0
+                END,
+                is_admin = $2::boolean
+            WHERE user_id = $1::uuid
+            RETURNING user_id, display_name, avatar_url, status,
+                      token_version, is_admin, created_at, last_login_at
+            """,
+            user_id,
+            is_admin,
+        )
+    else:
+        row = await connection.fetchrow(
+            """
+            UPDATE users
+            SET last_login_at = now()
+            WHERE user_id = $1::uuid
+            RETURNING user_id, display_name, avatar_url, status,
+                      token_version, is_admin, created_at, last_login_at
+            """,
+            user_id,
+        )
     return AuthedUser.from_row(row)
 
 
@@ -226,7 +275,9 @@ async def login_or_register(
                     provider_uid,
                 )
                 return await _complete_login(
-                    connection, str(existing["user_id"])
+                    connection,
+                    str(existing["user_id"]),
+                    provider=provider,
                 )
 
             new_user_id = str(uuid.uuid4())
@@ -261,7 +312,9 @@ async def login_or_register(
                 if winner is None:
                     raise RuntimeError("identity registration race did not resolve")
                 return await _complete_login(
-                    connection, str(winner["user_id"])
+                    connection,
+                    str(winner["user_id"]),
+                    provider=provider,
                 )
 
             await connection.execute(
@@ -272,7 +325,11 @@ async def login_or_register(
                 """,
                 new_user_id,
             )
-            return await _complete_login(connection, new_user_id)
+            return await _complete_login(
+                connection,
+                new_user_id,
+                provider=provider,
+            )
 
 
 def _request_origin(request: Request) -> str:

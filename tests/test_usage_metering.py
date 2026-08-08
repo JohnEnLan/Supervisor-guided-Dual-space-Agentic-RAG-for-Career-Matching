@@ -1030,7 +1030,10 @@ async def test_u8_login_event_is_written_only_for_active_verified_user(
 
     monkeypatch.setattr(routes, "verify_otp", verified)
     monkeypatch.setattr(routes, "login_or_register", login)
-    monkeypatch.setattr(routes, "issue_session_token", lambda _user: "token")
+    # 桩签名随 J-2 强制 idp 签发链路（M2 白名单冲突，协调者批准落行）
+    monkeypatch.setattr(
+        routes, "issue_session_token", lambda _user, *, idp=None: "token"
+    )
     monkeypatch.setattr(routes.usage_context, "record_product_event", record)
     payload = OtpVerifyRequest(
         channel="email",

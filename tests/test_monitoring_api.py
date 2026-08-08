@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.domain.monitoring import (
     MonitoringOverviewSnapshot,
@@ -10,30 +11,52 @@ from app.domain.monitoring import (
 )
 
 
-def _client() -> TestClient:
+def _client(*, admin_dependency=None) -> TestClient:
+    from app.api.auth.deps import require_admin
     from app.api.v1.router import router
 
     app = FastAPI()
     app.include_router(router)
+    if admin_dependency is not None:
+        app.dependency_overrides[require_admin] = admin_dependency
     return TestClient(app)
 
 
 def test_monitoring_routes_are_hidden_when_capability_is_disabled(
     monkeypatch,
 ) -> None:
-    from app.api.v1 import monitoring
+    from app.api.auth import deps
+    from app.api.auth.sessions import session_cookie_name
 
-    monkeypatch.setattr(monitoring.settings, "monitoring_enabled", False)
+    monkeypatch.setattr(deps.settings, "monitoring_enabled", False)
+    admin_calls = 0
 
-    with _client() as client:
-        overview = client.get("/api/v1/monitoring/overview")
-        recent = client.get("/api/v1/monitoring/runs")
+    async def forbidden_admin():
+        nonlocal admin_calls
+        admin_calls += 1
+        raise AssertionError("disabled monitoring must not resolve identity")
 
-    assert overview.status_code == 404
-    assert recent.status_code == 404
+    with _client(admin_dependency=forbidden_admin) as client:
+        responses = []
+        for cookie in (None, "bad-cookie", "non-admin-cookie", "admin-cookie"):
+            headers = (
+                {}
+                if cookie is None
+                else {"Cookie": f"{session_cookie_name()}={cookie}"}
+            )
+            responses.extend(
+                [
+                    client.get("/api/v1/monitoring/overview", headers=headers),
+                    client.get("/api/v1/monitoring/runs", headers=headers),
+                ]
+            )
+
+    assert {response.status_code for response in responses} == {404}
+    assert admin_calls == 0
 
 
 def test_monitoring_overview_returns_typed_safe_projection(monkeypatch) -> None:
+    from app.api.auth import deps
     from app.api.v1 import monitoring
 
     now = datetime.now(UTC)
@@ -59,10 +82,10 @@ def test_monitoring_overview_returns_typed_safe_projection(monkeypatch) -> None:
             reordered_run_count=2,
         )
 
-    monkeypatch.setattr(monitoring.settings, "monitoring_enabled", True)
+    monkeypatch.setattr(deps.settings, "monitoring_enabled", True)
     monkeypatch.setattr(monitoring, "get_monitoring_overview", overview)
 
-    with _client() as client:
+    with _client(admin_dependency=lambda: None) as client:
         response = client.get("/api/v1/monitoring/overview?window_hours=24")
 
     assert response.status_code == 200
@@ -78,6 +101,7 @@ def test_monitoring_overview_returns_typed_safe_projection(monkeypatch) -> None:
 
 
 def test_monitoring_recent_runs_returns_only_allow_list_fields(monkeypatch) -> None:
+    from app.api.auth import deps
     from app.api.v1 import monitoring
 
     now = datetime.now(UTC)
@@ -99,10 +123,10 @@ def test_monitoring_recent_runs_returns_only_allow_list_fields(monkeypatch) -> N
             )
         ]
 
-    monkeypatch.setattr(monitoring.settings, "monitoring_enabled", True)
+    monkeypatch.setattr(deps.settings, "monitoring_enabled", True)
     monkeypatch.setattr(monitoring, "list_recent_runs", recent)
 
-    with _client() as client:
+    with _client(admin_dependency=lambda: None) as client:
         response = client.get(
             "/api/v1/monitoring/runs?window_hours=24&limit=20"
         )
@@ -124,33 +148,58 @@ def test_monitoring_recent_runs_returns_only_allow_list_fields(monkeypatch) -> N
     }
 
 
-def test_monitoring_admin_mode_requires_is_admin_even_when_enabled(
-    monkeypatch,
-) -> None:
-    from app.api.auth.deps import optional_current_user
-    from app.api.auth.sessions import AuthedUser
+def test_monitoring_dependency_chain_is_capability_then_admin() -> None:
+    from fastapi.routing import APIRoute
+
+    from app.api.auth.deps import require_admin, require_monitoring_enabled
     from app.api.v1 import monitoring
-    from app.api.v1.router import router
 
-    monkeypatch.setattr(monitoring.settings, "monitoring_enabled", True)
-    monkeypatch.setattr(monitoring.settings, "monitoring_admin_mode", True)
-    app = FastAPI()
-    app.include_router(router)
+    for route in monitoring.router.routes:
+        assert isinstance(route, APIRoute)
+        dependencies = route.dependant.dependencies
+        assert [dependency.call for dependency in dependencies] == [
+            require_monitoring_enabled,
+            require_admin,
+        ]
+        assert dependencies[0].dependencies == []
 
-    def user(*, is_admin: bool):
-        return AuthedUser(
-            user_id="11111111-1111-1111-1111-111111111111",
-            display_name=None,
-            avatar_url=None,
-            status="active",
-            token_version=0,
-            is_admin=is_admin,
-            created_at=datetime.now(UTC),
-            last_login_at=None,
+
+@pytest.mark.parametrize("status_code", [401, 403, 200])
+def test_monitoring_enabled_preserves_admin_dependency_status(
+    monkeypatch, status_code
+) -> None:
+    from fastapi import HTTPException
+    from app.api.auth import deps
+    from app.api.v1 import monitoring
+
+    monkeypatch.setattr(deps.settings, "monitoring_enabled", True)
+
+    async def admin_result():
+        if status_code != 200:
+            raise HTTPException(status_code=status_code)
+
+    async def overview(*, window_hours: int):
+        now = datetime.now(UTC)
+        return MonitoringOverviewSnapshot(
+            window_hours=window_hours,
+            generated_at=now,
+            total_runs=0,
+            status_counts={},
+            completion_rate=0.0,
+            warning_rate=0.0,
+            failure_rate=0.0,
+            duration_p50_ms=None,
+            duration_p95_ms=None,
+            stage_latencies=[],
+            average_recommendation_count=0.0,
+            jd_evidence_coverage_rate=0.0,
+            implicit_usage_rate=0.0,
+            reordered_run_count=0,
         )
 
-    app.dependency_overrides[optional_current_user] = lambda: user(is_admin=False)
-    with TestClient(app) as client:
+    monkeypatch.setattr(monitoring, "get_monitoring_overview", overview)
+
+    with _client(admin_dependency=admin_result) as client:
         response = client.get("/api/v1/monitoring/overview")
 
-    assert response.status_code == 403
+    assert response.status_code == status_code

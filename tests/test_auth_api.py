@@ -119,7 +119,13 @@ def test_otp_verify_logs_in_and_sets_host_cookie(monkeypatch) -> None:
 
     monkeypatch.setattr(routes, "verify_otp", verified)
     monkeypatch.setattr(routes, "login_or_register", login)
-    monkeypatch.setattr(routes, "issue_session_token", lambda _user: "signed.jwt")
+    issued_for: list[str] = []
+
+    def issue_token(_user, *, idp: str):
+        issued_for.append(idp)
+        return "signed.jwt"
+
+    monkeypatch.setattr(routes, "issue_session_token", issue_token)
 
     with TestClient(_app(), base_url="https://testserver") as client:
         response = client.post(
@@ -132,6 +138,7 @@ def test_otp_verify_logs_in_and_sets_host_cookie(monkeypatch) -> None:
         )
 
     assert response.status_code == 200
+    assert issued_for == ["email"]
     assert response.json()["user_id"] == user.user_id
     assert response.json()["is_admin"] is False
     assert response.headers["set-cookie"].startswith(
@@ -153,7 +160,13 @@ def test_otp_verify_does_not_issue_cookie_for_banned_account(monkeypatch) -> Non
 
     monkeypatch.setattr(routes, "verify_otp", verified)
     monkeypatch.setattr(routes, "login_or_register", login)
-    monkeypatch.setattr(routes, "issue_session_token", lambda _user: "token")
+    monkeypatch.setattr(
+        routes,
+        "issue_session_token",
+        lambda _user, *, idp: pytest.fail(
+            f"banned account must not issue a {idp} token"
+        ),
+    )
     with TestClient(_app(), raise_server_exceptions=False) as client:
         response = client.post(
             "/api/v1/auth/otp/verify",

@@ -141,7 +141,7 @@ async def verify_login_otp(
     if user.status != "active":
         raise HTTPException(status_code=401, detail="account unavailable")
     await usage_context.record_product_event("login", user.user_id)
-    token = issue_session_token(user)
+    token = issue_session_token(user, idp=payload.channel)
     set_session_cookie(response, token)
     return _me(user)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
@@ -10,7 +11,7 @@ from app.api.auth.sessions import (
     load_user,
     session_cookie_name,
 )
-from app.config import settings
+from app.config import parse_admin_emails, settings
 from app.db.pool import get_pool
 
 
@@ -31,7 +32,7 @@ async def optional_current_user(request: Request) -> AuthedUser | None:
         or user.token_version != int(payload["token_version"])
     ):
         raise HTTPException(status_code=401, detail="invalid session")
-    return user
+    return replace(user, provider=payload.get("idp"))
 
 
 async def current_user(
@@ -84,12 +85,46 @@ async def require_owned_run(
         raise HTTPException(status_code=404, detail="run_id not found")
 
 
-async def require_monitoring_admin(
+async def require_admin(
     user: Annotated[AuthedUser | None, Depends(optional_current_user)],
 ) -> None:
-    if not settings.monitoring_enabled or not settings.monitoring_admin_mode:
-        return
     if user is None:
         raise HTTPException(status_code=401, detail="authentication required")
-    if not user.is_admin:
+    if user.provider != "email":
         raise HTTPException(status_code=403, detail="administrator required")
+    allowlist = parse_admin_emails(settings.admin_emails)
+    if not allowlist:
+        raise HTTPException(status_code=403, detail="administrator required")
+
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        rows = await connection.fetch(
+            """
+            SELECT account.is_admin, identity.provider_uid
+            FROM users AS account
+            LEFT JOIN user_identities AS identity
+                ON identity.user_id = account.user_id
+               AND identity.provider = 'email'
+            WHERE account.user_id = $1::uuid
+            ORDER BY identity.identity_id ASC
+            """,
+            user.user_id,
+        )
+    if (
+        not rows
+        or not bool(rows[0]["is_admin"])
+        or not any(
+            row["provider_uid"] is not None
+            and str(row["provider_uid"]).casefold() in allowlist
+            for row in rows
+        )
+    ):
+        raise HTTPException(status_code=403, detail="administrator required")
+
+
+async def require_monitoring_enabled() -> None:
+    if not settings.monitoring_enabled:
+        raise HTTPException(
+            status_code=404,
+            detail="monitoring capability disabled",
+        )
