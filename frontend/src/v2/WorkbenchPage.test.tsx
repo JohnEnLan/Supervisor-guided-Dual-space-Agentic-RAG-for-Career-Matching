@@ -1764,22 +1764,27 @@ describe("resume intake narration (B3 R2/R6)", () => {
         created_at: "2026-08-09T10:00:01Z",
       },
     ];
+    const doneEvent = {
+      seq: 100,
+      step: "done",
+      text: "档案生成完毕，用时 3.2 秒。来看看整理结果吧！",
+      elapsed_ms: 3200,
+      created_at: "2026-08-09T10:00:04Z",
+    };
     vi.mocked(api.resumeProgress).mockImplementation(async () =>
       phase === "processing"
-        ? { generation: 1, status: "resume_queued", events: narrationEvents, done: false }
+        ? {
+            generation: 1,
+            status: "resume_queued",
+            // 两读非同快照的真实形态：done=false 但 events 已含 seq=100——
+            // 叙事必须过滤终态事件（子 agent 审查 Major：钉死 seq<100 过滤）
+            events: [...narrationEvents, doneEvent],
+            done: false,
+          }
         : {
             generation: 1,
             status: "resume_ready",
-            events: [
-              ...narrationEvents,
-              {
-                seq: 100,
-                step: "done",
-                text: "档案生成完毕，用时 3.2 秒。来看看整理结果吧！",
-                elapsed_ms: 3200,
-                created_at: "2026-08-09T10:00:04Z",
-              },
-            ],
+            events: [...narrationEvents, doneEvent],
             done: true,
           },
     );
@@ -1789,6 +1794,8 @@ describe("resume intake narration (B3 R2/R6)", () => {
     expect(await screen.findByText(/收到！我现在就把你的简历完整读一遍/)).toBeVisible();
     expect(screen.getByText(/读完啦/)).toBeVisible();
     expect(screen.getByText(/小意整理中/)).toBeVisible();
+    // 解析中：终态文本绝不能以叙事气泡形式提前出现
+    expect(screen.queryByText(/用时 3.2 秒/)).not.toBeInTheDocument();
 
     // 下一拍轮询返回 done → 停轮询并刷新 preview → 档案摘要接棒
     phase = "ready";
@@ -1826,16 +1833,27 @@ describe("resume intake narration (B3 R2/R6)", () => {
       serverPhase = "parsing";
       return { session_id: "sess-1", status: "resume_queued" };
     });
+    let progressCalls = 0;
     vi.mocked(api.resumeProgress).mockImplementation(async () => {
-      // 另一标签页在任务启动后立刻重传：会话已是新代 uploaded
-      serverPhase = "reuploaded";
-      return { generation: 2, status: "resume_uploaded", events: [], done: true };
+      // 另一标签页重传并已确认解析新代：generation 换代但 done=false——
+      // done 分支与 parse onSuccess 的刷新都不可能把确认卡带回来，回场
+      // 只能来自双保险 mismatch 分支（子 agent 审查 minor：两分支可区分）。
+      // 第二拍才换代：确保 parse onSuccess 的刷新已按"parsing"完成（404/
+      // processing），排除 onSuccess 替 mismatch 背锅的假绿时序。
+      progressCalls += 1;
+      if (serverPhase === "parsing" && progressCalls >= 2) {
+        serverPhase = "reuploaded";
+        return { generation: 2, status: "resume_queued", events: [], done: false };
+      }
+      return { generation: 1, status: "resume_queued", events: [], done: false };
     });
     renderWorkbench();
 
     await user.click(await screen.findByRole("button", { name: "确认解析" }));
 
-    expect(await screen.findByText(/resume-v2\.pdf/)).toBeVisible();
+    expect(
+      await screen.findByText(/resume-v2\.pdf/, undefined, { timeout: 5000 }),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "确认解析" })).toBeVisible();
     expect(screen.queryByText(/小意整理中|正在归一化你的简历/)).not.toBeInTheDocument();
   });

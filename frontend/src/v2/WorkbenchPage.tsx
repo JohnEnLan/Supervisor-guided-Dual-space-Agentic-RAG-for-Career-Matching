@@ -627,8 +627,10 @@ export function WorkbenchPage() {
   // B3 双保险：记录发起 parse 时的 generation——进度响应换代=解析中重传，
   // 停叙事并刷新上传态回落确认卡（方案 §3.1）
   const parseGeneration = useRef<number | null>(null);
-  // B3 §3.2：只有"本次挂载亲历解析过程"才逐行动画，回访/刷新不重播
-  const watchedProcessing = useRef(false);
+  // B3 §3.2：只有"本次挂载亲历解析过程"才逐行动画，回访/刷新不重播。
+  // 存 sessionId 而非布尔：会话切换首帧 ref 尚未被 effect 重置，布尔会把
+  // 上个会话的"亲历"泄漏给新会话的缓存档案（子 agent 审查 minor）
+  const watchedProcessingFor = useRef<string | null>(null);
   const progressSettled = useRef(false);
 
   const consult = useQuery({
@@ -841,7 +843,6 @@ export function WorkbenchPage() {
     setPendingFile(null);
     executeAttempted.current = false;
     parseGeneration.current = null;
-    watchedProcessing.current = false;
     progressSettled.current = false;
     // mutation 实例级状态必须随会话切换重置：不重置会把 A 会话的
     // 上传成功/限额 409 带进 B 会话（审计三轮阻断修复；B2 扩展到 parse）。
@@ -909,10 +910,11 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     if (resumeProcessing) {
-      watchedProcessing.current = true;
+      watchedProcessingFor.current = sessionId;
       progressSettled.current = false;
     }
-  }, [resumeProcessing]);
+  }, [resumeProcessing, sessionId]);
+  const watchedProcessing = watchedProcessingFor.current === sessionId;
 
   useEffect(() => {
     const data = resumeProgress.data;
@@ -1228,7 +1230,9 @@ export function WorkbenchPage() {
             {/* B3 R2：小意边解析边说话——进度事件逐条进群（新事件才有到场延迟） */}
             {progressEvents.map((event) => (
               <Bubble
-                key={`intake-${event.seq}`}
+                // key 含代数：解析中换代且新代立即开始时，新代 seq=1 不复用
+                // 旧 DOM 节点（入场动画正常重播；子 agent 审查 minor）
+                key={`intake-${resumeProgress.data?.generation ?? 0}-${event.seq}`}
                 persona="intent_consultant"
                 style={progressStagger(`ev-${event.seq}`)}
               >
@@ -1249,16 +1253,16 @@ export function WorkbenchPage() {
         {resumeReady && !resumeConfirmed ? (
           <Bubble persona="intent_consultant" tone="card">
             {/* B3：终态事件带耗时（"用时 X.X 秒"）——亲历解析的这次挂载才展示 */}
-            {watchedProcessing.current && doneEvent ? (
+            {watchedProcessing && doneEvent ? (
               <p className="v2-intake-done">{doneEvent.text}</p>
             ) : null}
             <div className="v2-profile-summary">
               {buildProfileSummaryLines(preview.data).map((line, index) => (
                 <p
                   key={`${index}-${line}`}
-                  className={watchedProcessing.current ? "v2-profile-line" : undefined}
+                  className={watchedProcessing ? "v2-profile-line" : undefined}
                   style={
-                    watchedProcessing.current
+                    watchedProcessing
                       ? { animationDelay: `${index * 350}ms` }
                       : undefined
                   }
