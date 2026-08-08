@@ -1,14 +1,25 @@
-# v3 产品迭代方案（v2.5 · 2026-08-08 · 唯一权威全文）
+# v3 产品迭代方案（v2.6 · 2026-08-08 · 唯一权威全文）
 
-> 修订史：v1→v2.4 经六轮三方评审收敛（子 agent 第四/五/六轮 PASS；Codex
-> 第六轮残留 1B/7M/3m 于本版处置，见 §13）。v1–v2.2 为未入库草稿；git 内
-> 前版 v2.3（3368613）、v2.4（8c6ac50）。**正文自包含**；唯一跨文档指针：
-> 历史意见处置表存于 git v2.3 §12（非规范性）。
-> **规范性引用原则（评审裁定）**：凡"保留型约束"（不许改动的既有值——
-> role_clusters 词表、clarify 后缀键名、phase 枚举、120/80 上限、四开关
-> 矩阵语义、G17/G18、Feature A 行为），其权威源＝现行代码与钉死它们的
-> 测试（本文给出精确文件:行锚点）；本方案不复制其字面值，以免双源漂移。
-> 实施者以"锚点处测试保持全绿"为该类约束的完成判据。
+> 修订史：v1→v2.5 经七轮三方评审收敛（子 agent 四/五/六/七轮 PASS；Codex
+> 第七轮残留 1B/1M/2m 于本版处置，见 §14）。v1–v2.2 为未入库草稿；git 内
+> 前版 v2.3/v2.4/v2.5。**正文自包含**；唯一跨文档指针：历史意见处置表存于
+> git v2.3 §12（非规范性）。
+> **规范性引用原则（评审裁定，v2.6 锚点修正版）**：保留型约束的权威源＝
+> 现行代码与钉死它们的测试；本方案不复制字面值以防双源漂移（例外：引自
+> 钉死测试的短子串可内联，如 §3.3 存活子串）。完成判据＝锚点测试全绿。
+> **锚点表（经第七轮逐一核正）**：
+> - role_clusters **咨询词表**：权威源 consult_engine.py:50（prompt 词表，
+>   **不含 other**）。岗位侧聚类词表（含 other——consult_engine.py:818-831、
+>   scripts/load_jobs.py:145-160）是**另一个集合**、用途不同，不属本约束；
+>   两表并存非冲突，系有意分层（裁定记录于此）。现有测试只抽查三值，
+>   **B3 新增全集钉死快照测试**（见 §3.1）。
+> - clarify 后缀键名：test_resume_clarification_engine.py:**100-101**
+>   （answer_summary/clarification_action 断言处；原引 94-99 有偏，已正）。
+> - phase 枚举与 120/80 上限：定义源 consult_engine.py:24、94-95 +
+>   schemas.py:204-206、225-227；现无全值测试，**B3 钉死快照一并覆盖**
+>   （四值枚举 + 120/80 常量）。
+> - 四开关矩阵：test_consult_coach.py:944-1116（第七轮验证有效）。
+> - G17/G18 语义：docs/validation/2026-08-07-global-audit-findings.md:70。
 > 宪法裁决（用户 2026-08-08，已入库 de88946）：`asyncio.to_thread` 卸载阻塞
 > 库调用为"禁 threading"硬约束的明确允许例外（AGENTS.md §2.2 /
 > CLAUDE_LANGGRAPH.md §2.2）；仍禁自建线程/线程池/共享可变状态。
@@ -246,8 +257,10 @@ CREATE TABLE resume_intake_progress (
   generation 变化即停并刷新上传态。补该交错测试。
 - 前端：事件按小意气泡逐条出现（复用 B1 stagger）；done 展示"用时 X.X 秒"。
 - 测试：回调序列；DELETE 代数谓词交错（迟到旧任务删不掉新代）；终态事件
-  仅随 CAS 命中写入；所有权；**前端 1200ms 轮询渲染、done 停轮询、逐行
-  动画 + reduced-motion、§3.3 存活子串快照**。
+  仅随 CAS 命中写入；所有权；前端 1200ms 轮询渲染、done 停轮询、逐行
+  动画 + reduced-motion；**契约钉死快照测试（B3 新增，补齐头部锚点表
+  声明的缺失权威）**：CONSULT_PROMPT 内 role_clusters 咨询词表**全集**、
+  phase 四值枚举、120/80 上限常量、五条存活子串——全部逐字断言。
 
 ### 3.2 档案逐行 print（前端动画）
 
@@ -279,9 +292,10 @@ CREATE TABLE resume_intake_progress (
   - PDF：页文本 `< RESUME_OCR_PAGE_MIN_CHARS(50)` → 读 mediabox，
     `scale = min(RESUME_OCR_RENDER_SCALE(2.0),
     sqrt(RESUME_OCR_MAX_PIXELS(4_000_000)/(w*h)))` 光栅化 → JPEG q70 →
-    base64 ≤10MB？否则 q50 重试 → 仍超则**跳过该页**（保留原生文本 +
-    进度事件说明，不硬失败）→ OCR。**合并＝按页替换**，页序不变；
-    `RESUME_OCR_MAX_PAGES(6)` 只限 OCR 页数，其后页保留原生文本。
+    base64 ≤10MB？否则 q50 重试 → 仍超则**跳过该页**（保留原生文本，
+    不硬失败）→ OCR。**合并＝按页替换**，页序不变；
+    `RESUME_OCR_MAX_PAGES(6)` 只限 OCR 页数，其后页保留原生文本；
+    **全部跳页/截断说明合并为单条汇总进度事件**（控制每代事件行数）。
   - 图片：**解码防炸=显式尺寸检查**——`Image.open` 后读 header 尺寸，
     `width*height > RESUME_OCR_MAX_IMAGE_PIXELS_DECODE(40_000_000)` →
     硬拒绝（上传态 422 / 解析态 resume_error）；不依赖 Pillow
@@ -335,7 +349,8 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
 - 两表均 **await 写入 + fail-open**（遥测异常不得影响 P0；单测覆盖）。
 - `app/llm/usage_context.py::usage_scope(user_id, session_id, purpose)`
   （contextvars），**全部在任务体内设置**：`_normalize_resume`
-  （owner_user_id 来自 §1.2 步骤①；normalize，OCR 段嵌套 ocr）、consult
+  （owner_user_id 来自 §1.2 **begin_resume_parse 步骤①** 的 SELECT；
+  normalize，OCR 段嵌套 ocr）、consult
   端点（consult）、coach（coach）、**run 统一包装器
   `_run_with_usage_scope(...)`——透传 executor 既有全部参数与注入（含
   LangGraph checkpointer，runs.py:68-74 注入原样保留），仅额外包 scope，
@@ -380,16 +395,20 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
   清该会话 resume_uploads 的 content/extracted_text；③
   status='resume_uploaded'（合法待解析）及其余状态 → 仅清零计数、不动
   上传与状态。响应 `{session_id, resume_parse_count: 0, status}`。
-- **admin 响应 DTO（OpenAPI 可生成级）**：
-  `AdminOverviewResponse{users_total, logins_today/7d/30d,
-  sessions_total, consult_turns_total, runs_total,
-  tokens_by_day: [{date, total_tokens}], tokens_by_model:
-  [{model, prompt_tokens, completion_tokens, total_tokens}]}`；
-  `AdminUsersPageResponse{items: [AdminUserRow{user_id, email,
-  created_at, last_login_at, session_count, resume_name, resume_phone,
-  resume_school, resume_degree}], page, page_size(=20), has_more}`；
-  `AdminUserResumeResponse{user_id, session_id|null, resume_state:
-  object|null}`（无简历 → session_id/resume_state 为 null，200 不 404）；
+- **admin 响应 DTO（OpenAPI 可生成级，字段名与空值类型写死）**：
+  `AdminOverviewResponse{users_total: int, logins_today: int,
+  logins_7d: int, logins_30d: int, sessions_total: int,
+  consult_turns_total: int, runs_total: int,
+  tokens_by_day: [{date: str, total_tokens: int}],
+  tokens_by_model: [{model: str, prompt_tokens: int|null,
+  completion_tokens: int|null, total_tokens: int}]}`；
+  `AdminUsersPageResponse{items: [AdminUserRow{user_id: str,
+  email: str|null, created_at: datetime, last_login_at: datetime|null,
+  session_count: int, resume_name: str|null, resume_phone: str|null,
+  resume_school: str|null, resume_degree: str|null}], page: int,
+  page_size: int(=20), has_more: bool}`；
+  `AdminUserResumeResponse{user_id: str, session_id: str|null,
+  resume_state: object|null}`（无简历 → null 字段，200 不 404）；
   admin explain 复用现有 explain DTO；不存在的 user/session/run → 404。
 - 前端 `/admin` 轻 shell（入口仅 `me.is_admin` 可见）：Dashboard + 用户表
   + 简历详情抽屉 + 重置按钮；「评估（答辩）」「监控（答辩）」入口移入
@@ -425,7 +444,10 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
    detail；`_RESUME_LIFECYCLE_DETAILS` 同步增补；`resume_missing` 仍仅
    API 层抛。
 3. consult 契约与 §3.3 存活子串不动。
-4. G17/G18 不变（parse 计数 + 预外呼返还恰为保 G17）。
+4. G17/G18 语义不变。G17＝"解析失败 → 明确要求重传，不复活旧档案"
+   （权威源见头部锚点表）：B2 的限额与返还**不触碰** resume_error →
+   重传这条路径本身；"resume_error 留 flag 门控"条款关乎 consult 可达性、
+   与 G17（重传要求）无涉。
 5. `-m app.serve`、Semaphore、无状态沿用；in-flight 字节与任务同实例，
    不跨实例寻址。
 6. 每批 OpenAPI 快照 + generated.ts + apiFixtures 再生。
@@ -464,17 +486,22 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
 ## 8. 风险与回滚
 
 - B1/B3/B4/B5：回滚＝部署上一包（0010/0011 additive，留表无害）。
-- **B2 回滚诚实条款**：B2 改变了待解析数据的存放（BYTEA）与状态机
-  （resume_uploaded），**前滚修复优先**；若必须回滚到旧包，须先执行
-  状态迁移脚本：`UPDATE session_state SET status='awaiting_resume'
-  WHERE status IN ('resume_uploaded'); DELETE FROM resume_uploads;`
-  （处于新状态的会话回到"请重新上传"，旧后端可正常消费；0009 表保留
-  无害）。脚本随 B2 批入库 `deploy/rollback_b2.sql`。
+- **B2 回滚诚实条款**：B2 改变了待解析数据的存放（BYTEA）与状态机，
+  **前滚修复优先**；若必须回滚到旧包，先执行状态迁移脚本
+  `deploy/rollback_b2.sql`（单事务）：
+  `BEGIN; UPDATE session_state SET status='awaiting_resume'
+  WHERE status IN ('resume_uploaded','resume_queued');
+  DELETE FROM resume_uploads; COMMIT;`
+  （**含 resume_queued**——回滚 restart 杀死在途任务后该状态无人认领，
+  不迁移会让旧前端永久轮询；两方评审独立确认）。执行方式
+  `psql -v ON_ERROR_STOP=1 -f`。0009 表保留无害。
 - OCR 成本闸：确认制 + 解析限额 + VL Semaphore + 页数/像素/解码防炸/
   base64 上限。
 - 返还偏置只向用户（GREATEST + CHECK 双下限；reset 交错上界 1/任务）。
 - 遥测 fail-open；ADMIN_EMAILS 空 → /admin 全 403，主线无影响。
-- 进度孤儿行无害且有界（每代 ≤1）。
+- 进度孤儿行无害且有界：**每个已启动旧代 ≤ 其非终态事件数（≤99，常态
+  个位数）**，新任务首事件事务按 `generation < $2` 清理旧代；跳页说明
+  合并为**单条汇总事件**（§4），常态每代总行数 ≤10。
 
 ## 9. 流程
 
@@ -523,3 +550,14 @@ diff 查 bug（正确性/契约/并发/安全/回归），修复回审至三方�
 | 子 agent m6-2 | 终态 CAS 漏 session_id | §1.2 WHERE 补全 |
 | 子 agent m6-3 | PUBLic_PATHS 笔误 | §1.5 改正 |
 | 子 agent nit | reset 三态显式/RESUME_PARSE_LIMIT 入 env | §5.3 ③ 显式 + §7 B2 env |
+
+## 14. 第七轮意见处置（v2.6）
+
+| 来源 | 意见 | 处置 |
+|---|---|---|
+| Codex B1 | 四个锚点虚设（词表双源冲突/clarify 键行号偏/phase·120·80 无测试/G17 映射错） | 头部锚点表全面核正：裁定咨询词表与岗位聚类词表为两个集合（consult_engine.py:50 为咨询侧权威）；clarify 键改 :100-101；phase/120/80 给定义源 + B3 契约钉死快照测试补齐缺失权威（§3.1）；§6.4 G17 措辞修正 |
+| Codex M1 / 子 m1 | 回滚漏 resume_queued（两方独立同发现） | §8 脚本 IN 双态 + 单事务 + ON_ERROR_STOP |
+| Codex m1 / 子 nit1 | 孤儿行上界表述失真/跳页事件可击穿 ≤10 | §8 上界改"每旧代 ≤ 非终态数"；§4 跳页合并单条汇总事件 |
+| Codex m2 | Admin DTO 字段名/空值类型 | §5.3 逐字段类型与 nullable 写死 |
+| 子 nit2 | 引用原则 120/80 自张力 | 头部原则加"钉死测试短子串可内联"豁免 |
+| 子 nit3 | owner_user_id 指代歧义 | §5.1 改"begin 步骤①" |
