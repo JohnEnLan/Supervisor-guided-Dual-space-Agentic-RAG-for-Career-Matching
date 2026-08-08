@@ -2036,6 +2036,82 @@ describe("resume intake narration (B3 R2/R6)", () => {
     expect(document.querySelectorAll(".v2-profile-line").length).toBe(0);
   });
 
+  it("clears watched provenance on upload so a remotely-parsed successor shows no stale celebration", async () => {
+    // Codex 三轮 Major：本页亲历 gen1 完成后上传 gen2，远端标签页秒解析
+    // ——本页从未观察到 gen2 的 queued 态（progress 查询全程停用），旧
+    // gen1 的 done 缓存/亲历标记若不随上传清场，gen1 的用时庆祝与逐行
+    // 动画会挂到 gen2 的档案上。上传即换代，归属全部作废。
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let phase: "processing1" | "ready1" | "remote2" = "processing1";
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      if (phase === "processing1") throw new ApiError(409, "resume_processing");
+      return NARRATION_PREVIEW;
+    });
+    vi.mocked(api.pendingResumeUpload).mockImplementation(async () => {
+      throw new ApiError(404, "no pending resume upload");
+    });
+    vi.spyOn(api, "uploadResume").mockImplementation(async () => {
+      phase = "remote2"; // 远端标签页在本页刷新前已确认解析并完成 gen2
+      return apiFixtures.resumeUploaded({ generation: 2, filename: "resume-v2.pdf" });
+    });
+    let progressCalls = 0;
+    vi.mocked(api.resumeProgress).mockImplementation(async () => {
+      progressCalls += 1;
+      if (progressCalls >= 2) {
+        phase = "ready1";
+        return {
+          generation: 1,
+          status: "resume_ready",
+          events: [
+            {
+              seq: 100,
+              step: "done",
+              text: "档案生成完毕，用时 3.2 秒。来看看整理结果吧！",
+              elapsed_ms: 3200,
+              created_at: "2026-08-09T10:00:04Z",
+            },
+          ],
+          done: true,
+        };
+      }
+      return {
+        generation: 1,
+        status: "resume_queued",
+        events: [
+          {
+            seq: 1,
+            step: "received",
+            text: "收到！我现在就把你的简历完整读一遍～",
+            elapsed_ms: 6,
+            created_at: "2026-08-09T10:00:00Z",
+          },
+        ],
+        done: false,
+      };
+    });
+    renderWorkbench();
+
+    // 亲历 gen1 完成：庆祝与逐行动画合法在场
+    expect(
+      await screen.findByText(/用时 3.2 秒/, undefined, { timeout: 5000 }),
+    ).toBeVisible();
+    expect(document.querySelectorAll(".v2-profile-line").length).toBeGreaterThan(0);
+
+    // 上传 gen2（远端秒解析，本页直接从 unparsed 跳到 ready）
+    const attach = screen.getByLabelText("上传简历");
+    const fileInput = attach.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, new File(["resume"], "r2.txt", { type: "text/plain" }));
+    await user.click(await screen.findByRole("button", { name: "确认上传" }));
+
+    // gen2 档案上屏：gen1 的用时与动画不得残留
+    await screen.findByRole("button", { name: "确认简历档案" });
+    await waitFor(() =>
+      expect(screen.queryByText(/用时 3.2 秒/)).not.toBeInTheDocument(),
+    );
+    expect(document.querySelectorAll(".v2-profile-line").length).toBe(0);
+  });
+
   it("falls back to the confirm card when a re-upload lands mid-parse (uploaded interleave)", async () => {
     // 换代语义之一（自洽夹具，Codex 二轮 M2 修正）：远端标签页重传但未确认
     // → 新代 resume_uploaded → progress done=true。三端状态一致：progress=
@@ -2118,6 +2194,13 @@ describe("resume intake narration (B3 R2/R6)", () => {
               elapsed_ms: 8,
               created_at: "2026-08-09T10:01:00Z",
             },
+            {
+              seq: 2,
+              step: "extracted",
+              text: "新一版读完啦，片段更充实了！",
+              elapsed_ms: 60,
+              created_at: "2026-08-09T10:01:01Z",
+            },
           ],
           done: false,
         };
@@ -2129,9 +2212,20 @@ describe("resume intake narration (B3 R2/R6)", () => {
     await user.click(await screen.findByRole("button", { name: "确认解析" }));
 
     // 接管：新代叙事上屏（轮询继续，渲染的是现行解析）
+    const takeoverBubble = await screen.findByText(/新一版简历收到/, undefined, {
+      timeout: 5000,
+    });
+    expect(takeoverBubble).toBeVisible();
+    // freshBaseline 的代数比对（Codex 三轮 m2）：本页自发的是 gen1，gen2
+    // 是远端流——旁观模式首批整批即时到场，两条 gen2 气泡都不得有到场
+    // 延迟（若退化为只比会话，第二条会被编排 450ms）
+    const secondBubble = await screen.findByText(/新一版读完啦/);
     expect(
-      await screen.findByText(/新一版简历收到/, undefined, { timeout: 5000 }),
-    ).toBeVisible();
+      (takeoverBubble.closest(".v2-msg") as HTMLElement).style.animationDelay,
+    ).toBe("");
+    expect(
+      (secondBubble.closest(".v2-msg") as HTMLElement).style.animationDelay,
+    ).toBe("");
     // mismatch 分支的上传态刷新：mount(1) + onSuccess(2) + mismatch(3)
     await waitFor(() => expect(uploadCalls).toBe(3));
     expect(screen.queryByText(/收到！我现在就把你的简历完整读一遍/)).not.toBeInTheDocument();

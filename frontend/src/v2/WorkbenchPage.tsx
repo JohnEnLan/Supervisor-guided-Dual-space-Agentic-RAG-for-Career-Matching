@@ -698,6 +698,17 @@ export function WorkbenchPage() {
       // （preview 将返回 409 resume_unparsed，由确认卡驱动后续）。
       setPendingFile(null);
       setResumeRecovery(null);
+      // 上传即换代（Codex 三轮 Major）：旧代的亲历/补拉/自发标记与 done
+      // 缓存全部作废——否则"远端标签页秒解析新代、本页未观察到 queued"
+      // 时，旧代的用时庆祝与逐行动画会挂到新代档案上。
+      parseGeneration.current = null;
+      watchedProcessingFor.current = null;
+      doneBackfilledFor.current = null;
+      progressSettled.current = false;
+      queryClient.removeQueries({
+        queryKey: ["resume-progress", variables.forSession],
+        exact: true,
+      });
       void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
       void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
     },
@@ -1322,9 +1333,9 @@ export function WorkbenchPage() {
             {/* B3 R2：小意边解析边说话——进度事件逐条进群（新事件才有到场延迟） */}
             {progressEvents.map((event) => (
               <Bubble
-                // key 含代数：解析中换代且新代立即开始时，新代 seq=1 不复用
-                // 旧 DOM 节点（入场动画正常重播；子 agent 审查 minor）
-                key={`intake-${resumeProgress.data?.generation ?? 0}-${event.seq}`}
+                // key 含会话+代数（§3.1 绑定口径）：换代或切会话后同 seq
+                // 不复用旧 DOM 节点（入场动画正常重播）
+                key={`intake-${sessionId}-${resumeProgress.data?.generation ?? 0}-${event.seq}`}
                 persona="intent_consultant"
                 style={progressStagger(`ev-${event.seq}`)}
               >

@@ -183,7 +183,9 @@ async def test_save_terminal_failure_falls_back_to_error_marking(monkeypatch):
         return ResumeState(skills=["Python"])
 
     async def failing_save(**_kwargs):
-        raise RuntimeError("duplicate key value violates unique constraint")
+        # 中性异常文本（Codex 三轮 m3）：本测试覆盖"任意 save 失败"，
+        # 不要伪装成已被排除的 seq=100 双 PK 冲突场景
+        raise RuntimeError("save failed")
 
     async def mark_error(*, session_id, expected_generation, terminal_event=None):
         marks.append(
