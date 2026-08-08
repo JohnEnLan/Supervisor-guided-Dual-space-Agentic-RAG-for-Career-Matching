@@ -343,3 +343,21 @@ CREATE TABLE IF NOT EXISTS run_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_run_metrics_created
     ON run_metrics (created_at DESC);
+
+-- v3 B5: 计量双表（migration 0011；DDL 逐字对齐方案 §5）
+CREATE TABLE IF NOT EXISTS llm_usage (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id TEXT, session_id TEXT,
+  provider TEXT NOT NULL, model TEXT NOT NULL, purpose TEXT NOT NULL,
+  prompt_tokens INT, completion_tokens INT,
+  total_tokens INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage (created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_user ON llm_usage (user_id, created_at);
+CREATE TABLE IF NOT EXISTS product_events (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind TEXT NOT NULL, user_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_product_events_kind ON product_events (kind, created_at);

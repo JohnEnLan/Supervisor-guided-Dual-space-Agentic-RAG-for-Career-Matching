@@ -1292,3 +1292,4 @@ async def test_codexM4_zero_page_pdf_upload_gate_tracks_flag(monkeypatch) -> Non
     )
     assert response.pages == 0
     assert len(accepted) == 1
+

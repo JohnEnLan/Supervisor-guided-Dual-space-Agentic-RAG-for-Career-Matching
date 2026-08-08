@@ -104,10 +104,23 @@ class Settings(BaseSettings):
     resume_ocr_max_image_pixels_decode: int = Field(
         default=40_000_000, ge=1_000_000
     )
+    # v3 B5：管理员邮箱白名单（逗号分隔）。空串=无管理员（require_admin
+    # fail-closed 恒 403）。解析规范见 parse_admin_emails。
+    admin_emails: str = ""
     consult_coach_enabled: bool = False
     consult_coach_max: int = Field(default=3, ge=1, le=5)
     max_reretrieval_loops: int = 1
     max_repair_loops: int = 1
+
+
+def parse_admin_emails(raw: str) -> frozenset[str]:
+    """B5 白名单解析规范（方案 §5.2 逐字）：逗号分隔、trim、casefold、
+    去重；空串/纯分隔符 → 空集（require_admin fail-closed）。"""
+    return frozenset(
+        item.strip().casefold()
+        for item in raw.split(",")
+        if item.strip()
+    )
 
 
 def validate_runtime_security(
