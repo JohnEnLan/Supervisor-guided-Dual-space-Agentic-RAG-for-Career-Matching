@@ -71,12 +71,17 @@ cd /opt/career-rag && bash server_setup.sh
 ```bash
 cd /opt/career-rag
 useradd -r -m -s /bin/bash career 2>/dev/null || true
-mkdir -p app frontend-dist
+mkdir -p app releases/frontend-initial
 tar -xzf app.tar.gz -C app
-tar -xzf frontend-dist.tar.gz -C frontend-dist
+tar -xzf frontend-dist.tar.gz -C releases/frontend-initial
+ln -sfn /opt/career-rag/releases/frontend-initial /opt/career-rag/frontend-current
 cp env.production.template app/.env
 nano app/.env    # 按模板注释逐项填：DB 密码、各 API key、新 JWT 秘钥、QQ 授权码
 ```
+
+> 前端采用 **releases 版本目录 + `frontend-current` 符号链接** 布局
+> （B2 起，Caddyfile 的 root 指向 frontend-current）：每次发版解包到
+> `releases/frontend-<版本>` 新目录，再原子翻链切换，无 404 窗口、可秒回滚。
 
 Python 环境：
 
@@ -127,6 +132,33 @@ systemctl reload caddy
 ```
 
 Caddy 会在域名解析生效后**自动申请 HTTPS 证书**（首次访问约几秒）。
+
+## 升级部署（B2 起的标准顺序，含前后端契约变更时）
+
+顺序写死：**后端先行，前端后切**（反过来会让新前端撞上旧后端的自动解析，
+绕过确认制烧钱）：
+
+```bash
+# ① 后端：解包 → 迁移 → 重启 → 健康检查
+cd /opt/career-rag && tar -xzf app.tar.gz -C app && chown -R career:career app
+cd /opt/career-rag/app && sudo -u career ../venv/bin/python -m app.db.migrate
+systemctl restart career-rag && sleep 8
+curl -s http://127.0.0.1:8000/api/v1/capabilities   # 吐 JSON 才继续
+
+# ② 前端：解包到新 release 目录 → 原子翻链（rename，无空窗）
+REL=/opt/career-rag/releases/frontend-$(date +%Y%m%d%H%M)
+mkdir -p "$REL" && tar -xzf /opt/career-rag/frontend-dist.tar.gz -C "$REL"
+ln -sfn "$REL" /opt/career-rag/current.tmp
+mv -Tf /opt/career-rag/current.tmp /opt/career-rag/frontend-current
+
+# ③ Caddyfile 有变更时：先校验再热加载
+cp /opt/career-rag/Caddyfile /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+```
+
+已打开的旧标签页刷新即恢复（index.html 为 no-store，新访客即刻拿新版）。
+若必须回滚 B2 到旧包：**先** `systemctl stop career-rag`，再执行
+`deploy/rollback_b2.sql`（见文件头注释的四步顺序），换包后 start。
 
 ## 第 7 步：验证
 

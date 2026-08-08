@@ -116,20 +116,25 @@ SharedState
 
 区分两者后，旧后台任务即使晚到，也不能覆盖较新的上传。
 
-### 7.2 202 窗口
+### 7.2 两步确认制与 202 窗口（v3 B2）
 
-`app/api/v1/sessions.py:156` 接受文件后返回 HTTP 202。**202** 的白话解释是“服务器已经接单，但工作还没做完”。数据库操作 `app/db/state_store.py:207` `accept_resume_upload` 在同一事务内：
+上传现在分两步（防烧钱确认制）：
 
-```text
-resume_generation += 1
-resume_processing_status = queued
-confirmed_resume_version = null
-旧错误清空
-```
+1. **上传（200）**：`POST /resume` 存库（`resume_uploads` BYTEA）+ 本地
+   提取，状态置 `resume_uploaded`，**零 LLM 成本**；返回页数/字数/预览与
+   本会话解析额度（`RESUME_PARSE_LIMIT`，默认 3 次）。
+2. **确认解析（202）**：`POST /resume/parse` 带 `{generation}`，单事务
+   FOR UPDATE 分类后扣一次额度、置 queued，并把字节读进内存交给后台任务。
 
-从 202 返回到后台保存结果之间就是“202 窗口”。在这段时间，预览接口以稳定 detail=`resume_processing` 返回 409，前端每 2.5 秒继续轮询。新上传已被接受，所以旧档案即刻不能用于新一轮咨询。
+**202** 的白话解释是”服务器已经接单，但工作还没做完”。从 202 返回到后台
+保存结果之间就是”202 窗口”：预览接口以稳定 detail=`resume_processing`
+返回 409，前端每 2.5 秒轮询。等待确认解析期间则是 `resume_unparsed`，
+由「确认解析」卡驱动，不轮询。
 
-后台入口 `app/api/v1/sessions.py:913` `_normalize_resume` 携带 `expected_generation`。成功保存 `app/db/state_store.py:229` 与失败保存 `:271` 都先锁行核对 generation；不相等说明自己已经过期，直接丢弃写回。
+后台任务 `_normalize_resume` 携带 `expected_generation`；成功保存
+`save_normalized_resume` 与失败保存 `mark_resume_error` 都先锁行核对
+generation **和** `status='resume_queued'` 双前置；不满足说明自己已过期，
+直接丢弃写回。LLM 外呼发起前失败会自动返还解析额度。
 
 ### 7.3 重确认洞如何被堵住
 
@@ -141,12 +146,18 @@ confirmed_resume_version = null
 
 ### 7.4 稳定 409 契约与三态恢复
 
-**409** 表示请求依据的资源状态已经过期。预览接口 `app/api/v1/sessions.py:186` 使用 `resume_missing`、`resume_processing`、`resume_error`；动作接口还会使用 `resume_changed`。前端 `frontend/src/v2/WorkbenchPage.tsx:535` 统一清空过期 Brief，并同时失效 preview 与 consult 查询。
+**409** 表示请求依据的资源状态已经过期。预览接口使用 `resume_missing`、
+`resume_unparsed`（B2：已上传待确认解析）、`resume_processing`、
+`resume_error`；动作接口还会使用 `resume_changed` 与
+`resume_parse_limit`（B2：解析额度用尽）。前端统一清空过期 Brief，并同时
+失效 preview 与 consult 查询。
 
 | 恢复态 | 固定文案 | 行为 |
 |---|---|---|
+| unparsed | （确认解析卡） | 展示预览与额度，等待用户确认解析。 |
 | processing | 新简历处理中 | 保持轮询，不提交旧轮次。 |
-| error | 旧档案已作废，请重传 | 停止轮询，显示重传入口。 |
+| error | 这份文件我没能整理成功，旧档案已作废 | 停止轮询，引导用 📎 重传。 |
+| parse_limit | 本会话解析次数已用完（3/3） | 新建会话继续或联系管理员重置。 |
 | updated | 简历已更新，本轮未提交；请确认新档案后重试 | 新预览 ready 后要求重新确认。 |
 
 三段文案定义在 `frontend/src/v2/WorkbenchPage.tsx:38`。这是一份前后端恢复合同，不是普通 toast。

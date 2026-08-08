@@ -68,18 +68,30 @@ frontend/e2e/        浏览器端流程回归
 
 这样既保留旧字段兼容性，也让新增证据只有一条消费路径。
 
-## 5. 简历上传、generation 与 version
+## 5. 简历上传、generation、parse_count 与 version（v3 B2 确认制）
 
-这里有两个容易混淆的编号：**generation** 是“这是第几次上传尝试”，**resume_version** 是“第几份成功归一化的简历”。失败上传会增加 generation，但不会伪造一个成功版本。
+三个编号各司其职：**generation** 是”这是第几次上传”（CAS 令牌），
+**resume_parse_count** 是”本会话确认解析了几次”（防烧钱额度，默认 3，
+`RESUME_PARSE_LIMIT`），**resume_version** 是”第几份成功归一化的简历”。
+上传/预览零成本不计额；LLM 外呼发起前失败的解析自动返还额度。
 
 | 阶段 | 文件与关键函数 | 行为 |
 |---|---|---|
-| 接受上传 | `app/api/v1/sessions.py:156` 上传路由；`app/db/state_store.py:207` `accept_resume_upload` | 同一事务把状态置为 queued、generation 加一、旧确认作废；API 返回 202。 |
-| 后台归一化 | `app/api/v1/sessions.py:913` `_normalize_resume` | 携带 `expected_generation` 做外部解析和模型调用。 |
-| 保存成功 | `app/db/state_store.py:229` `save_normalized_resume` | 先锁行；只允许当前 generation 写回，然后增加 resume_version 并置 ready。旧后台任务晚到会被丢弃。 |
-| 保存失败 | `app/db/state_store.py:271` `mark_resume_error` | 同样受 generation 保护，旧失败不能覆盖新成功。 |
-| 预览状态 | `app/api/v1/sessions.py:186` `get_resume_preview` | queued/error/missing 用稳定 409 `detail`，ready 返回 generation、version 和确认态。 |
-| 确认档案 | `app/api/v1/sessions.py:219`；`app/db/state_store.py:292` `confirm_resume` | 客户端提交期望 version；行锁内再次核对 ready 与版本。 |
+| 接受上传 | 上传路由 `POST /resume`（200）；`accept_resume_upload` | 单事务：状态置 `resume_uploaded`、generation+1、旧确认作废、文件与本地提取结果写入 `resume_uploads`（BYTEA，不落磁盘）；只留最新一代。非白名单后缀 415，损坏文件 422（不入库不占代）。 |
+| 恢复待解析 | `GET /resume-upload`；`get_pending_resume_upload` | 仅 `resume_uploaded` 态返回元数据，刷新/换设备恢复确认卡。 |
+| 确认解析 | `POST /resume/parse`（body `{generation}`，202）；`begin_resume_parse` | 单事务 FOR UPDATE 单快照分类（优先级：额度满→`resume_parse_limit` ＞ 换代→`resume_changed` ＞ 解析中→`resume_processing` ＞ 未上传态→`resume_unparsed`），扣一次额度、置 queued，并在同事务内把字节读进内存交给后台任务——并发重传的 DELETE 伤不到在途任务。 |
+| 后台归一化 | `_normalize_resume` | 输入为上传时的提取文本；`external_started` 阶段标记在首个 LLM 外呼前置位，之前失败走 `refund_parse_count`（无 generation 谓词 + GREATEST 下限，单 finally=每任务至多一次）。 |
+| 保存成功 | `save_normalized_resume` | 行锁 + generation **和** `status='resume_queued'` 双前置；命中才 resume_version+1 并置 ready。 |
+| 保存失败 | `mark_resume_error` | 同双前置；旧任务晚到一律 no-op。 |
+| 收尾清理 | `clear_resume_upload_content` | 定向 `session_id+generation` 把 BYTEA 与提取副本置 NULL（隐私：原件不留存）。 |
+| 预览状态 | `get_resume_preview` | 稳定 409 detail 增加 `resume_unparsed`（已上传待确认解析）；ready 返回 version 与确认态。 |
+| 确认档案 | `confirm_resume` | 行锁内核对 ready 与版本；uploaded 态返回 `resume_unparsed`。 |
+
+**无条件生命周期保护（与澄清开关解耦）**：consult/finalize 端点对
+`resume_uploaded`/`resume_queued` 一律 409；consult 落库经
+`MutationOutcome`（mutator 第四参拿到行锁内 status）在发现换代/新状态时
+降级为只追加 transcript、不覆盖 status；match-brief 的 generation CAS
+无条件生效（version 比对维持 Feature A 门控）。
 
 这套生命周期堵住“重确认洞”：用户上传新简历后，旧确认立即失效；即使旧请求稍后返回，也不能让旧档案重新变成 current。发生竞态时后端返回 409，前端统一失效并重取 preview 与 consult 数据，入口在 `frontend/src/v2/WorkbenchPage.tsx:535`。
 
