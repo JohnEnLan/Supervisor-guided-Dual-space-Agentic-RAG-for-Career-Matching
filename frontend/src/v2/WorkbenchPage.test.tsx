@@ -1974,6 +1974,68 @@ describe("resume intake narration (B3 R2/R6)", () => {
     expect(await screen.findByText(/用时 5.0 秒/)).toBeVisible();
   });
 
+  it("does not claim another generation's completion after tab-back focus race", async () => {
+    // 子 agent 三轮 minor：切走期间远端完成了 gen2，切回时 progress
+    // （staleTime 0）先于 preview 解决——data 已是 gen2 终态而 processing
+    // 还 stale-true。亲历标记不得被终态数据盖写：gen2 的耗时庆祝与逐行
+    // 动画都不属于本页（本页只亲历过 gen1 的进行时）。
+    mockWorkbenchApi();
+    let progressCalls = 0;
+    let remoteDone = false;
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      if (remoteDone) return NARRATION_PREVIEW;
+      throw new ApiError(409, "resume_processing");
+    });
+    vi.mocked(api.resumeProgress).mockImplementation(async () => {
+      progressCalls += 1;
+      if (progressCalls >= 2) {
+        remoteDone = true; // 远端 gen2 已完成：progress 先带回终态
+        return {
+          generation: 2,
+          status: "resume_ready",
+          events: [
+            {
+              seq: 100,
+              step: "done",
+              text: "档案生成完毕，用时 9.9 秒。来看看整理结果吧！",
+              elapsed_ms: 9900,
+              created_at: "2026-08-09T10:02:00Z",
+            },
+          ],
+          done: true,
+        };
+      }
+      return {
+        generation: 1,
+        status: "resume_queued",
+        events: [
+          {
+            seq: 1,
+            step: "received",
+            text: "收到！我现在就把你的简历完整读一遍～",
+            elapsed_ms: 6,
+            created_at: "2026-08-09T10:00:00Z",
+          },
+        ],
+        done: false,
+      };
+    });
+    renderWorkbench();
+
+    // 亲历 gen1 进行时
+    expect(await screen.findByText(/收到！我现在就把你的简历完整读一遍/)).toBeVisible();
+
+    // 第二拍带回 gen2 终态 → settle 刷新 preview → gen2 档案上屏
+    await screen.findByRole(
+      "button",
+      { name: "确认简历档案" },
+      { timeout: 5000 },
+    );
+    // gen2 的完成不属于本页：无耗时庆祝、无逐行动画
+    expect(screen.queryByText(/用时 9.9 秒/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".v2-profile-line").length).toBe(0);
+  });
+
   it("falls back to the confirm card when a re-upload lands mid-parse (uploaded interleave)", async () => {
     // 换代语义之一（自洽夹具，Codex 二轮 M2 修正）：远端标签页重传但未确认
     // → 新代 resume_uploaded → progress done=true。三端状态一致：progress=

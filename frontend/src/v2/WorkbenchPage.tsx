@@ -945,6 +945,11 @@ export function WorkbenchPage() {
   // ——比对键里带代数，串代即失配。
   useEffect(() => {
     if (resumeProcessing) {
+      // 焦点竞态收紧（子 agent 三轮 minor）：切回标签页时 progress
+      // （staleTime 0）常先于 preview 解决——data 可能已是别代终态而
+      // resumeProcessing 还 stale-true，此帧不得盖写亲历标记（只有仍在
+      // 进行中的解析才算"亲历中"；data 缺席时保留 parseGeneration 回退）。
+      if (resumeProgress.data?.done) return;
       const generation =
         resumeProgress.data?.generation ?? parseGeneration.current;
       if (generation != null) {
@@ -952,7 +957,12 @@ export function WorkbenchPage() {
       }
       progressSettled.current = false;
     }
-  }, [resumeProcessing, resumeProgress.data?.generation, sessionId]);
+  }, [
+    resumeProcessing,
+    resumeProgress.data?.done,
+    resumeProgress.data?.generation,
+    sessionId,
+  ]);
   const watchedProcessing =
     resumeProgress.data?.generation != null &&
     watchedProcessingFor.current ===
