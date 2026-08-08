@@ -10,8 +10,10 @@ import { api, type Me } from "../api/queries";
 import { apiFixtures, RUN_STAGES } from "../test/apiFixtures";
 import {
   PERSONAS,
+  buildProfileSummaryLines,
   conversationInterval,
   resumePreviewInterval,
+  resumeProgressInterval,
   statusInterval,
   useStaggeredReveal,
 } from "./WorkbenchPage";
@@ -36,6 +38,13 @@ function mockWorkbenchApi() {
   vi.spyOn(api, "pendingResumeUpload").mockRejectedValue(
     new ApiError(404, "no pending resume upload"),
   );
+  // B3：默认空闲进度（done=true 即停轮询）——叙事只在显式 mock 时出现
+  vi.spyOn(api, "resumeProgress").mockResolvedValue({
+    generation: null,
+    status: "pending",
+    events: [],
+    done: true,
+  });
   vi.spyOn(api, "resumePreview").mockResolvedValue({
     session_id: "sess-1",
     resume_version: 1,
@@ -1670,5 +1679,164 @@ describe("useStaggeredReveal concurrent safety (B1 review r3)", () => {
     expect(screen.getByTestId("sus-b").style.animationDelay).toBe("");
     expect(screen.getByTestId("sus-c").style.animationDelay).toBe("450ms");
     expect(screen.getByTestId("sus-d").style.animationDelay).toBe("900ms");
+  });
+});
+
+describe("resume intake narration (B3 R2/R6)", () => {
+  const NARRATION_PREVIEW = {
+    session_id: "sess-1",
+    resume_version: 1,
+    confirmed: false,
+    education: [
+      {
+        institution: "伯明翰大学",
+        degree: "MSc Data Science",
+        field: "",
+        dates: "2024-2025",
+        details: [],
+        evidence_span_ids: ["S001"],
+      },
+    ],
+    experience: [
+      {
+        organization: "字节跳动",
+        title: "数据分析实习生",
+        dates: "2023",
+        location: "",
+        responsibilities: [],
+        achievements: [],
+        technologies: [],
+        evidence_span_ids: ["S002"],
+      },
+    ],
+    projects: [
+      {
+        name: "简历匹配系统",
+        dates: "",
+        summary: "",
+        actions: [],
+        technologies: [],
+        outcomes: [],
+        evidence_span_ids: ["S003"],
+      },
+    ],
+    skills: ["Python", "SQL"],
+    resume_quality_issues: [],
+    evidence: [],
+  };
+
+  it("polls every 1200ms until done then stops", () => {
+    expect(resumeProgressInterval(undefined)).toBe(1200);
+    expect(resumeProgressInterval({ done: false })).toBe(1200);
+    expect(resumeProgressInterval({ done: true })).toBe(false);
+  });
+
+  it("builds the line-by-line profile summary from preview data", () => {
+    const lines = buildProfileSummaryLines(NARRATION_PREVIEW);
+    expect(lines[0]).toContain("伯明翰大学");
+    expect(lines[1]).toContain("字节跳动 · 数据分析实习生");
+    expect(lines[2]).toContain("简历匹配系统");
+    expect(lines[3]).toContain("Python");
+    expect(lines.at(-1)).toContain("完整档案");
+    expect(buildProfileSummaryLines(undefined)).toEqual([]);
+  });
+
+  it("streams Xiaoyi narration during parsing and lands in an animated line-by-line summary with elapsed time", async () => {
+    mockWorkbenchApi();
+    let phase: "processing" | "ready" = "processing";
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      if (phase === "processing") throw new ApiError(409, "resume_processing");
+      return NARRATION_PREVIEW;
+    });
+    const narrationEvents = [
+      {
+        seq: 1,
+        step: "received",
+        text: "收到！我现在就把你的简历完整读一遍～",
+        elapsed_ms: 6,
+        created_at: "2026-08-09T10:00:00Z",
+      },
+      {
+        seq: 2,
+        step: "extracted",
+        text: "读完啦！我从简历里整理出 12 条原文片段。",
+        elapsed_ms: 60,
+        created_at: "2026-08-09T10:00:01Z",
+      },
+    ];
+    vi.mocked(api.resumeProgress).mockImplementation(async () =>
+      phase === "processing"
+        ? { generation: 1, status: "resume_queued", events: narrationEvents, done: false }
+        : {
+            generation: 1,
+            status: "resume_ready",
+            events: [
+              ...narrationEvents,
+              {
+                seq: 100,
+                step: "done",
+                text: "档案生成完毕，用时 3.2 秒。来看看整理结果吧！",
+                elapsed_ms: 3200,
+                created_at: "2026-08-09T10:00:04Z",
+              },
+            ],
+            done: true,
+          },
+    );
+    renderWorkbench();
+
+    // 叙事气泡逐条进群（终态 seq=100 不作为叙事气泡渲染）
+    expect(await screen.findByText(/收到！我现在就把你的简历完整读一遍/)).toBeVisible();
+    expect(screen.getByText(/读完啦/)).toBeVisible();
+    expect(screen.getByText(/小意整理中/)).toBeVisible();
+
+    // 下一拍轮询返回 done → 停轮询并刷新 preview → 档案摘要接棒
+    phase = "ready";
+    expect(await screen.findByText(/用时 3.2 秒/, undefined, { timeout: 5000 })).toBeVisible();
+    await screen.findByRole("button", { name: "确认简历档案" });
+    expect(screen.queryByText(/小意整理中/)).not.toBeInTheDocument();
+
+    // 亲历解析的挂载：逐行 350ms 递进（reduced-motion 由 theme.css 全局归零）
+    const lines = document.querySelectorAll(".v2-profile-line");
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    expect((lines[0] as HTMLElement).style.animationDelay).toBe("0ms");
+    expect((lines[1] as HTMLElement).style.animationDelay).toBe("350ms");
+  });
+
+  it("falls back to the confirm card when a re-upload lands mid-parse (generation mismatch)", async () => {
+    // 方案 §3.1 双保险：进度响应换代（新代 resume_uploaded, done=true）→
+    // 停叙事轮询 + 刷新上传态 → 确认卡回场展示新代文件
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let serverPhase: "unparsed" | "parsing" | "reuploaded" = "unparsed";
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      throw new ApiError(
+        409,
+        serverPhase === "parsing" ? "resume_processing" : "resume_unparsed",
+      );
+    });
+    vi.mocked(api.pendingResumeUpload).mockImplementation(async () => {
+      if (serverPhase === "parsing") throw new ApiError(404, "no pending resume upload");
+      if (serverPhase === "reuploaded") {
+        return apiFixtures.resumeUploaded({ generation: 2, filename: "resume-v2.pdf" });
+      }
+      return apiFixtures.resumeUploaded();
+    });
+    vi.spyOn(api, "parseResume").mockImplementation(async () => {
+      serverPhase = "parsing";
+      return { session_id: "sess-1", status: "resume_queued" };
+    });
+    vi.mocked(api.resumeProgress).mockImplementation(async () => {
+      // 另一标签页在任务启动后立刻重传：会话已是新代 uploaded
+      serverPhase = "reuploaded";
+      return { generation: 2, status: "resume_uploaded", events: [], done: true };
+    });
+    renderWorkbench();
+
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
+
+    expect(await screen.findByText(/resume-v2\.pdf/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "确认解析" })).toBeVisible();
+    expect(screen.queryByText(/小意整理中|正在归一化你的简历/)).not.toBeInTheDocument();
   });
 });

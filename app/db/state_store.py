@@ -25,6 +25,18 @@ _RESUME_LIFECYCLE_DETAILS = {
 }
 
 
+# B3 终态进度事件（done/error, seq=100）：由 save_normalized_resume /
+# mark_resume_error 在其 CAS 事务内写入——CAS 未命中则整体 no-op 零事件。
+_TERMINAL_PROGRESS_SEQ = 100
+
+
+@dataclass(frozen=True)
+class TerminalEvent:
+    step: str  # "done" | "error"
+    text: str
+    elapsed_ms: int = 0
+
+
 class ResumeLifecycleConflict(ValueError):
     def __init__(self, detail: str):
         if detail not in _RESUME_LIFECYCLE_DETAILS:
@@ -325,6 +337,92 @@ async def begin_resume_parse(
             }
 
 
+async def record_intake_progress(
+    *,
+    session_id: str,
+    generation: int,
+    seq: int,
+    step: str,
+    text: str,
+    elapsed_ms: int = 0,
+    first: bool = False,
+) -> None:
+    """B3 非终态进度事件（seq 1..99，任务内计数器分配）。
+
+    守卫：INSERT 仅在会话仍处于本代 resume_queued 时生效（迟到的旧任务
+    写不进新代）；首事件在同一事务内先按代数谓词清理旧代（generation <
+    本代），旧任务同样删不到新代。EXISTS 为快照读，极端交错可残留有界
+    孤儿行（读端按当前代过滤，无害）。"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if first:
+                await conn.execute(
+                    """
+                    DELETE FROM resume_intake_progress
+                    WHERE session_id = $1 AND generation < $2
+                    """,
+                    session_id,
+                    generation,
+                )
+            await conn.execute(
+                """
+                INSERT INTO resume_intake_progress
+                    (session_id, generation, seq, step, text, elapsed_ms)
+                SELECT $1, $2, $3, $4, $5, $6
+                WHERE EXISTS (
+                    SELECT 1 FROM session_state
+                    WHERE session_id = $1
+                      AND resume_upload_generation = $2
+                      AND status = 'resume_queued'
+                )
+                ON CONFLICT (session_id, generation, seq) DO NOTHING
+                """,
+                session_id,
+                generation,
+                seq,
+                step,
+                text,
+                elapsed_ms,
+            )
+
+
+async def load_intake_progress(*, session_id: str) -> dict[str, Any] | None:
+    """B3 进度读取：当前代全量事件（ORDER BY seq，每代 ≤100 行无需游标）。
+    会话不存在 → None；从未上传（generation=0）→ generation=None。"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT status, resume_upload_generation
+            FROM session_state
+            WHERE session_id = $1
+            """,
+            session_id,
+        )
+        if row is None:
+            return None
+        generation = int(row["resume_upload_generation"] or 0)
+        events: list[dict[str, Any]] = []
+        if generation > 0:
+            records = await conn.fetch(
+                """
+                SELECT seq, step, text, elapsed_ms, created_at
+                FROM resume_intake_progress
+                WHERE session_id = $1 AND generation = $2
+                ORDER BY seq
+                """,
+                session_id,
+                generation,
+            )
+            events = [dict(record) for record in records]
+    return {
+        "status": str(row["status"] or "pending"),
+        "generation": generation if generation > 0 else None,
+        "events": events,
+    }
+
+
 async def refund_parse_count(*, session_id: str) -> None:
     """预外呼失败返还：无 generation 谓词（扣费先于任务启动已提交）；
     每任务至多一次返还由唯一调用点（_normalize_resume 的唯一 except
@@ -384,12 +482,34 @@ async def get_pending_resume_upload(*, session_id: str) -> dict[str, Any] | None
     return dict(row)
 
 
+async def _insert_terminal_progress(
+    conn: Any, session_id: str, generation: int, event: TerminalEvent
+) -> None:
+    # 不带 EXISTS 守卫：正当性由外层 CAS（generation+status 命中）保证；
+    # 每代单任务 + CAS 单命中使 PK 冲突按构造不可达，兜底 DO NOTHING。
+    await conn.execute(
+        """
+        INSERT INTO resume_intake_progress
+            (session_id, generation, seq, step, text, elapsed_ms)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (session_id, generation, seq) DO NOTHING
+        """,
+        session_id,
+        generation,
+        _TERMINAL_PROGRESS_SEQ,
+        event.step,
+        event.text,
+        event.elapsed_ms,
+    )
+
+
 async def save_normalized_resume(
     *,
     session_id: str,
     resume_state: ResumeState,
     content_hash: str,
     expected_generation: int,
+    terminal_event: TerminalEvent | None = None,
 ) -> dict[str, Any] | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -425,30 +545,47 @@ async def save_normalized_resume(
                 session_id,
                 expected_generation,
             )
+            if row is not None and terminal_event is not None:
+                # B3：终态事件与状态翻转同事务（CAS 命中才写，miss 零事件）
+                await _insert_terminal_progress(
+                    conn, session_id, expected_generation, terminal_event
+                )
     if row is None:
         return None
     return {"exists": True, **dict(row)}
 
 
 async def mark_resume_error(
-    *, session_id: str, expected_generation: int
+    *,
+    session_id: str,
+    expected_generation: int,
+    terminal_event: TerminalEvent | None = None,
 ) -> bool:
-    """Mark only the currently accepted upload as failed."""
+    """Mark only the currently accepted upload as failed.
+
+    B3：改为单事务 UPDATE…RETURNING——命中才（同事务）写终态进度事件，
+    未命中整体 no-op 零事件（旧任务晚到不产生旧代孤儿终态）。"""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute(
-            """
-            UPDATE session_state
-            SET status = 'resume_error',
-                updated_at = now()
-            WHERE session_id = $1
-              AND resume_upload_generation = $2
-              AND status = 'resume_queued'
-            """,
-            session_id,
-            expected_generation,
-        )
-    return result == "UPDATE 1"
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE session_state
+                SET status = 'resume_error',
+                    updated_at = now()
+                WHERE session_id = $1
+                  AND resume_upload_generation = $2
+                  AND status = 'resume_queued'
+                RETURNING session_id
+                """,
+                session_id,
+                expected_generation,
+            )
+            if row is not None and terminal_event is not None:
+                await _insert_terminal_progress(
+                    conn, session_id, expected_generation, terminal_event
+                )
+    return row is not None
 
 
 async def confirm_resume(

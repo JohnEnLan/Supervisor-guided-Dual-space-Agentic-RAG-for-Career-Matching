@@ -9,6 +9,8 @@ export type Session = Schemas["SessionResponse"];
 export type ResumeAccepted = Schemas["ResumeAcceptedResponse"];
 export type ResumeUploaded = Schemas["ResumeUploadedResponse"];
 export type ResumeParseRequest = Schemas["ResumeParseRequest"];
+export type ResumeProgress = Schemas["ResumeProgressResponse"];
+export type ResumeProgressEvent = Schemas["ResumeProgressEvent"];
 export type ResumePreview = Schemas["ResumePreviewResponse"];
 export type ResumeConfirmRequest = Schemas["ResumeConfirmRequest"];
 export type ResumeConfirm = Schemas["ResumeConfirmResponse"];
@@ -53,6 +55,8 @@ export const api = {
     apiRequest(`/sessions/${id(sessionId)}/resume-upload`),
   parseResume: (sessionId: string, body: ResumeParseRequest): Promise<ResumeAccepted> =>
     jsonRequest(`/sessions/${id(sessionId)}/resume/parse`, "POST", body),
+  resumeProgress: (sessionId: string): Promise<ResumeProgress> =>
+    apiRequest(`/sessions/${id(sessionId)}/resume-progress`),
   resumePreview: (sessionId: string): Promise<ResumePreview> =>
     apiRequest(`/sessions/${id(sessionId)}/resume-preview`),
   confirmResume: (sessionId: string, body: ResumeConfirmRequest): Promise<ResumeConfirm> =>

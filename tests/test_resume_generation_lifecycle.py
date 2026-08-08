@@ -332,9 +332,16 @@ async def test_stale_normalization_failure_is_a_quiet_noop(monkeypatch) -> None:
     calls = []
 
     class Connection:
-        async def execute(self, sql, *args):
+        def transaction(self):
+            return _Transaction()
+
+        async def fetchrow(self, sql, *args):
+            # B3：mark 改为单事务 UPDATE…RETURNING，miss 返回 None
             calls.append((sql, args))
-            return "UPDATE 0"
+            return None
+
+        async def execute(self, sql, *args):
+            raise AssertionError("CAS miss must not write any progress event")
 
     async def fake_get_pool():
         return _Pool(Connection())
@@ -995,18 +1002,19 @@ async def test_a_b_out_of_order_stale_success_and_failure_do_not_affect_b(
                     "resume_upload_generation": self.resume_upload_generation,
                     "status": self.status,
                 }
+            if "status = 'resume_error'" in sql:
+                # B3：mark 走 UPDATE…RETURNING（命中行 / miss None）
+                if (
+                    args[1] == self.resume_upload_generation
+                    and self.status == "resume_queued"
+                ):
+                    self.status = "resume_error"
+                    return {"session_id": args[0]}
+                return None
             raise AssertionError(sql)
 
         async def execute(self, sql, *args):
-            if "status = 'resume_error'" not in sql:
-                raise AssertionError(sql)
-            if (
-                args[1] == self.resume_upload_generation
-                and self.status == "resume_queued"
-            ):
-                self.status = "resume_error"
-                return "UPDATE 1"
-            return "UPDATE 0"
+            raise AssertionError(sql)
 
     connection = Connection()
 

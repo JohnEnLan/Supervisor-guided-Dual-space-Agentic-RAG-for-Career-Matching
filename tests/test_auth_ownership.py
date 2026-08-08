@@ -57,8 +57,9 @@ def test_every_v1_resource_id_route_has_the_matching_ownership_dependency() -> N
         checked.append(route.path)
         assert expected in _dependency_calls(route.dependant), route.path
 
-    # B2 新增 GET /resume-upload 与 POST /resume/parse 两条会话路由（13→15）
-    assert len(checked) == 15
+    # B2 新增 GET /resume-upload 与 POST /resume/parse（13→15）；
+    # B3 新增 GET /resume-progress（15→16）
+    assert len(checked) == 16
 
 
 class _Acquire:

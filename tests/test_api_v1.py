@@ -19,6 +19,7 @@ PUBLIC_PATHS = {
     "/api/v1/sessions/{session_id}/resume",
     "/api/v1/sessions/{session_id}/resume-upload",
     "/api/v1/sessions/{session_id}/resume/parse",
+    "/api/v1/sessions/{session_id}/resume-progress",
     "/api/v1/sessions/{session_id}/resume-preview",
     "/api/v1/sessions/{session_id}/resume-confirm",
     "/api/v1/sessions/{session_id}/consult",
@@ -63,6 +64,11 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     async def cleanup(**kwargs):
         cleanup_calls.append(kwargs)
 
+    progress_events = []
+
+    async def record_progress(**kwargs):
+        progress_events.append(kwargs)
+
     monkeypatch.setattr(sessions, "normalize_resume_text", fake_normalize_text)
     monkeypatch.setattr(
         sessions,
@@ -73,6 +79,7 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     monkeypatch.setattr(sessions, "save_state", forbidden)
     monkeypatch.setattr(sessions, "load_state", missing)
     monkeypatch.setattr(sessions, "clear_resume_upload_content", cleanup)
+    monkeypatch.setattr(sessions, "record_intake_progress", record_progress)
 
     await sessions._normalize_resume(
         session_id="session-1",
@@ -85,8 +92,24 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     assert calls[0]["resume_state"].skills == ["Python"]
     assert len(calls[0]["content_hash"]) == 64
     assert calls[0]["expected_generation"] == 7
+    # B3：终态 done 事件随 save 的 CAS 事务写入（intake 回调不落终态）
+    assert calls[0]["terminal_event"].step == "done"
+    assert "用时" in calls[0]["terminal_event"].text
     # B2：任务收尾定向清理 BYTEA 与临时提取副本
     assert cleanup_calls == [{"session_id": "session-1", "generation": 7}]
+    # B3 叙事回调序列：received → extracted → normalizing → validated，
+    # seq 任务内单调，首事件带 first=True（触发旧代清理）
+    assert [event["step"] for event in progress_events] == [
+        "received", "extracted", "normalizing", "validated",
+    ]
+    assert [event["seq"] for event in progress_events] == [1, 2, 3, 4]
+    assert [event["first"] for event in progress_events] == [
+        True, False, False, False,
+    ]
+    assert all(
+        event["session_id"] == "session-1" and event["generation"] == 7
+        for event in progress_events
+    )
 
 
 @pytest.mark.asyncio
@@ -99,8 +122,14 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
     async def failing_normalize(_raw_text, _spans):
         raise ValueError("bad resume")
 
-    async def mark_error(*, session_id: str, expected_generation: int):
-        calls.append((session_id, expected_generation))
+    async def mark_error(*, session_id: str, expected_generation: int, terminal_event=None):
+        calls.append(
+            (
+                session_id,
+                expected_generation,
+                terminal_event.step if terminal_event else None,
+            )
+        )
         return True
 
     async def refund(*, session_id: str):
@@ -112,12 +141,16 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
     async def cleanup(**_kwargs):
         return None
 
+    async def record_progress(**_kwargs):
+        return None
+
     monkeypatch.setattr(sessions, "normalize_resume_text", failing_normalize)
     monkeypatch.setattr(sessions, "mark_resume_error", mark_error)
     monkeypatch.setattr(sessions, "refund_parse_count", refund)
     monkeypatch.setattr(sessions, "clear_resume_upload_content", cleanup)
     monkeypatch.setattr(sessions, "load_state", forbidden)
     monkeypatch.setattr(sessions, "save_state", forbidden)
+    monkeypatch.setattr(sessions, "record_intake_progress", record_progress)
 
     await sessions._normalize_resume(
         session_id="session-1",
@@ -126,7 +159,8 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
         expected_generation=11,
     )
 
-    assert calls == [("session-1", 11)]
+    # B3：错误终态事件经 terminal_event 随 mark 的 CAS 事务写入
+    assert calls == [("session-1", 11, "error")]
     # LLM 外呼已发起（normalize 阶段）才失败 → 不返还解析额度
     assert refunds == []
 

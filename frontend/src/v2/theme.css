@@ -289,6 +289,11 @@
 .v2-result-actions { padding-top: 12px; display: flex; flex-wrap: wrap; gap: 7px; border-top: 1px solid var(--v2-line); }
 .v2-result-actions button { min-height: 34px; padding: 5px 11px; border: 1px solid var(--v2-line); border-radius: 999px; background: var(--v2-surface); color: var(--v2-ink); cursor: pointer; font: 650 0.76rem/1.2 var(--v2-sans); }
 .v2-result-actions button:hover, .v2-result-actions button:focus-visible { border-color: var(--v2-accent); outline: 2px solid var(--v2-accent-soft); outline-offset: 1px; }
+/* B3 §3.2 档案逐行 print：每行 350ms 递进（reduced-motion 全局归零） */
+.v2-profile-summary { display: grid; gap: 4px; }
+.v2-profile-summary p { margin: 0; }
+.v2-profile-line { animation: v2messageenter 260ms ease-out both; }
+.v2-intake-done { color: var(--v2-accent); font-weight: 650; }
 .spin { animation: v2spin 1s linear infinite; }
 @keyframes v2spin { to { transform: rotate(360deg); } }
 @keyframes v2progresspulse { 50% { transform: scale(0.78); opacity: 0.55; } }
@@ -301,7 +306,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin, .v2-msg, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
+  .spin, .v2-msg, .v2-profile-line, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
   .v2-sidebar { transition: none; }
   .v2-message-meta { transition: none; }
   .v2-timeline { scroll-behavior: auto; }

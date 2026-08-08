@@ -264,6 +264,19 @@ ALTER TABLE session_state
     ADD COLUMN IF NOT EXISTS resume_parse_count INT NOT NULL DEFAULT 0
         CHECK (resume_parse_count >= 0);
 
+-- v3 B3: 小意解析叙事——进度事件表（非终态 seq 1..99 守卫写入；
+-- 终态 done/error seq=100 随 save/mark 的 CAS 事务写入）
+CREATE TABLE IF NOT EXISTS resume_intake_progress (
+    session_id  TEXT NOT NULL REFERENCES session_state(session_id) ON DELETE CASCADE,
+    generation  BIGINT NOT NULL,
+    seq         SMALLINT NOT NULL,
+    step        TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    elapsed_ms  INT NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (session_id, generation, seq)
+);
+
 -- v3 B2: 待解析上传持久化（上传确认流；内容解析结束后按 generation 置 NULL）
 CREATE TABLE IF NOT EXISTS resume_uploads (
     session_id  TEXT NOT NULL REFERENCES session_state(session_id) ON DELETE CASCADE,

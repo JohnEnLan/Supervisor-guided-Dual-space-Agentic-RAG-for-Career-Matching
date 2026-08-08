@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
@@ -39,6 +40,8 @@ from app.api.v1.schemas import (
     ResumeExperiencePreview,
     ResumeParseRequest,
     ResumePreviewResponse,
+    ResumeProgressEvent,
+    ResumeProgressResponse,
     ResumeProjectPreview,
     ResumeLifecycleConflictResponse,
     ResumeUploadedResponse,
@@ -74,6 +77,7 @@ from app.config import settings
 from app.db.state_store import (
     MutationOutcome,
     ResumeLifecycleConflict,
+    TerminalEvent,
     accept_resume_upload,
     begin_resume_parse,
     clear_resume_upload_content,
@@ -82,9 +86,11 @@ from app.db.state_store import (
     get_pending_resume_upload,
     get_resume_metadata,
     load_consult_context,
+    load_intake_progress,
     load_state,
     mutate_state_atomically,
     mark_resume_error,
+    record_intake_progress,
     refund_parse_count,
     save_normalized_resume,
     save_state,
@@ -270,6 +276,35 @@ async def pending_resume_upload(session_id: str) -> ResumeUploadedResponse:
         chars=int(pending["chars"]),
         ocr_suggested=bool(pending["ocr_suggested"]),
         parses_used=int(pending["resume_parse_count"]),
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/resume-progress",
+    response_model=ResumeProgressResponse,
+    dependencies=[Depends(require_owned_session)],
+)
+async def resume_progress(session_id: str) -> ResumeProgressResponse:
+    """B3 解析进度轮询：当前代全量事件（ORDER BY seq，≤100 行无需游标）。
+    done = 已离开 resume_queued——ready/error/uploaded 全部停轮询，覆盖
+    "解析中重传"交错（重传后新代为 resume_uploaded → done=true 回落确认卡）。"""
+    progress = await load_intake_progress(session_id=session_id)
+    if progress is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    return ResumeProgressResponse(
+        generation=progress["generation"],
+        status=progress["status"],
+        events=[
+            ResumeProgressEvent(
+                seq=int(event["seq"]),
+                step=str(event["step"]),
+                text=str(event["text"]),
+                elapsed_ms=int(event["elapsed_ms"]),
+                created_at=event["created_at"],
+            )
+            for event in progress["events"]
+        ],
+        done=progress["status"] != "resume_queued",
     )
 
 
@@ -1065,6 +1100,44 @@ def _skip_remaining_clarification_targets(resume: ResumeState) -> None:
     resume.pending_clarification_question = None
 
 
+class _IntakeNarrator:
+    """B3 小意解析叙事发射器：任务内单调分配非终态 seq（每代单任务，由
+    begin_resume_parse 的 CAS 保证，无并发分配者）；写失败只告警——
+    叙事是旁路，绝不允许影响解析主流程。"""
+
+    def __init__(self, session_id: str, generation: int) -> None:
+        self._session_id = session_id
+        self._generation = generation
+        self._seq = 0
+        self._started = time.monotonic()
+
+    def elapsed_ms(self) -> int:
+        return int((time.monotonic() - self._started) * 1000)
+
+    def elapsed_text(self) -> str:
+        return f"{self.elapsed_ms() / 1000:.1f} 秒"
+
+    async def emit(self, step: str, text: str) -> None:
+        if self._seq >= 99:
+            return  # 协议上界：非终态 seq 1..99，终态固定 100
+        self._seq += 1
+        try:
+            await record_intake_progress(
+                session_id=self._session_id,
+                generation=self._generation,
+                seq=self._seq,
+                step=step,
+                text=text,
+                elapsed_ms=self.elapsed_ms(),
+                first=self._seq == 1,
+            )
+        except Exception:
+            logger.warning(
+                "intake progress write failed for %s", self._session_id,
+                exc_info=True,
+            )
+
+
 async def _normalize_resume(
     *,
     session_id: str,
@@ -1078,19 +1151,37 @@ async def _normalize_resume(
     begin_resume_parse 事务取出并入内存，任何并发重传都影响不到本任务；
     B2 只消费 raw_text，suffix/content 为 B4 视觉 OCR 兜底预留的输入契约）。
     返还位于唯一的 except 分支且本函数是 begin 后的唯一任务体——
-    "每任务至多一次返还"由该唯一调用点保证；external_started 在首个
-    LLM 外呼前置位——之前失败返还额度（用户没花到钱），之后不返。
+    "每任务至多一次返还"由该唯一调用点保证；external_started 与
+    normalizing 进度阶段同点置位——之前失败返还额度（用户没花到钱），
+    之后不返。B3：终态事件经 terminal_event 随 save/mark 的 CAS 事务写入，
+    CAS 未命中（解析中重传换代）则零事件。
     """
     del suffix, content  # B4 起用于低文本 OCR 路由；B2 契约先行贯通
+    narrator = _IntakeNarrator(session_id, expected_generation)
     external_started = False
     try:
+        await narrator.emit("received", "收到！我现在就把你的简历完整读一遍～")
         if not raw_text.strip():
             raise ValueError("empty resume text")
         evidence_spans = build_evidence_spans(raw_text)
         if not evidence_spans:
             raise ValueError("no usable evidence spans")
+        await narrator.emit(
+            "extracted",
+            f"读完啦！我从简历里整理出 {len(evidence_spans)} 条原文片段，"
+            "每一条后面都会当作证据来用。",
+        )
         external_started = True
+        await narrator.emit(
+            "normalizing",
+            "正在把这些经历梳理成结构化档案——这一步最花心思，稍等我一下…",
+        )
         resume_state = await normalize_resume_text(raw_text, evidence_spans)
+        await narrator.emit(
+            "validated",
+            "梳理完成！我逐条核对过：档案里的每个条目都能对回你的简历原文，"
+            "绝不无中生有。",
+        )
         digest = hashlib.sha256(
             raw_text.encode("utf-8", errors="ignore")
         ).hexdigest()
@@ -1099,6 +1190,14 @@ async def _normalize_resume(
             resume_state=resume_state,
             content_hash=digest,
             expected_generation=expected_generation,
+            terminal_event=TerminalEvent(
+                step="done",
+                text=(
+                    f"档案生成完毕，用时 {narrator.elapsed_text()}。"
+                    "来看看整理结果吧！"
+                ),
+                elapsed_ms=narrator.elapsed_ms(),
+            ),
         )
     except Exception:
         try:
@@ -1107,6 +1206,15 @@ async def _normalize_resume(
             await mark_resume_error(
                 session_id=session_id,
                 expected_generation=expected_generation,
+                terminal_event=TerminalEvent(
+                    step="error",
+                    text=(
+                        f"抱歉，这次解析中途出了点问题（用时 "
+                        f"{narrator.elapsed_text()}）。别担心，你可以再试一次，"
+                        "或换一份文件重新上传～"
+                    ),
+                    elapsed_ms=narrator.elapsed_ms(),
+                ),
             )
         except Exception:
             logger.exception("resume error bookkeeping failed for %s", session_id)

@@ -12,6 +12,8 @@ import {
   type ConversationMessage,
   type MatchBriefResponse,
   type Recommendation,
+  type ResumePreview,
+  type ResumeProgress,
   type RunConversation,
   type RunStatus,
 } from "../api/queries";
@@ -88,6 +90,47 @@ export function statusInterval(
 ): number | false {
   if (!data || TERMINAL.has(data.status) || data.retry_after_ms == null) return false;
   return data.retry_after_ms;
+}
+
+// B3 R2：解析叙事轮询节拍——done=已离开 resume_queued（含解析中重传的
+// 新代 resume_uploaded），立即停轮询。
+export const RESUME_PROGRESS_POLL_MS = 1200;
+
+export function resumeProgressInterval(
+  data: Pick<ResumeProgress, "done"> | undefined,
+): number | false {
+  if (data?.done) return false;
+  return RESUME_PROGRESS_POLL_MS;
+}
+
+// B3 §3.2：档案摘要逐行文案——由 preview 数据纯函数合成（教育 1 行、每段
+// 经历 1 行、每个项目 1 行、技能 1 行、末行指向完整档案）。
+export function buildProfileSummaryLines(preview: ResumePreview | undefined): string[] {
+  if (!preview) return [];
+  const lines: string[] = [];
+  const education = preview.education ?? [];
+  if (education.length) {
+    const first = education[0];
+    const label = [first.institution, first.degree].filter(Boolean).join(" · ");
+    lines.push(
+      `🎓 教育：${label}${education.length > 1 ? `（等 ${education.length} 段）` : ""}`,
+    );
+  }
+  for (const item of preview.experience ?? []) {
+    const label = [item.organization, item.title].filter(Boolean).join(" · ");
+    if (label) lines.push(`💼 经历：${label}`);
+  }
+  for (const item of preview.projects ?? []) {
+    if (item.name) lines.push(`🧩 项目：${item.name}`);
+  }
+  const skills = preview.skills ?? [];
+  if (skills.length) {
+    lines.push(
+      `🛠️ 技能：${skills.slice(0, 6).join("、")}${skills.length > 6 ? `（共 ${skills.length} 项）` : ""}`,
+    );
+  }
+  lines.push("完整档案就在下方，点开可逐条核对原文出处 →");
+  return lines;
 }
 
 // B1 R5：到场编排——只对"首批数据之后新增"的消息按批内顺序附加动画延迟。
@@ -581,6 +624,12 @@ export function WorkbenchPage() {
   const resultRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const executeAttempted = useRef(false);
+  // B3 双保险：记录发起 parse 时的 generation——进度响应换代=解析中重传，
+  // 停叙事并刷新上传态回落确认卡（方案 §3.1）
+  const parseGeneration = useRef<number | null>(null);
+  // B3 §3.2：只有"本次挂载亲历解析过程"才逐行动画，回访/刷新不重播
+  const watchedProcessing = useRef(false);
+  const progressSettled = useRef(false);
 
   const consult = useQuery({
     queryKey: ["consult", sessionId],
@@ -654,6 +703,7 @@ export function WorkbenchPage() {
       api.parseResume(forSession, { generation }),
     onSuccess: (_data, variables) => {
       if (variables.forSession !== sessionId) return;
+      parseGeneration.current = variables.generation;
       void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
       void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
     },
@@ -790,6 +840,9 @@ export function WorkbenchPage() {
     setRetryModal(null);
     setPendingFile(null);
     executeAttempted.current = false;
+    parseGeneration.current = null;
+    watchedProcessing.current = false;
+    progressSettled.current = false;
     // mutation 实例级状态必须随会话切换重置：不重置会把 A 会话的
     // 上传成功/限额 409 带进 B 会话（审计三轮阻断修复；B2 扩展到 parse）。
     upload.reset();
@@ -833,6 +886,56 @@ export function WorkbenchPage() {
     !resumeProcessing && (previewDetail === "resume_error" || resumeRecovery === "error");
   const previewLoadError = preview.isError && !preview409;
   const resumeConfirmed = resumeReady && Boolean(preview.data?.confirmed);
+
+  // B3 R2：解析中每 1200ms 轮询进度事件，小意叙事逐条进群；done 停轮询
+  const resumeProgress = useQuery({
+    queryKey: ["resume-progress", sessionId],
+    queryFn: () => api.resumeProgress(sessionId),
+    enabled: Boolean(sessionId) && resumeProcessing,
+    retry: false,
+    refetchInterval: (query) => resumeProgressInterval(query.state.data),
+  });
+  const progressEvents = resumeProcessing
+    ? (resumeProgress.data?.events ?? []).filter((event) => event.seq < 100)
+    : [];
+  const progressStagger = useStaggeredReveal(
+    progressEvents.map((event) => `ev-${event.seq}`),
+    `${sessionId}:intake-${resumeProgress.data?.generation ?? ""}`,
+  );
+  // 终态 done 事件（seq=100，含"用时 X.X 秒"）：解析完成后并入档案摘要气泡
+  const doneEvent = (resumeProgress.data?.events ?? []).find(
+    (event) => event.step === "done",
+  );
+
+  useEffect(() => {
+    if (resumeProcessing) {
+      watchedProcessing.current = true;
+      progressSettled.current = false;
+    }
+  }, [resumeProcessing]);
+
+  useEffect(() => {
+    const data = resumeProgress.data;
+    if (!data) return;
+    // 双保险：响应代数 ≠ 发起 parse 时的代数 → 解析中已重传，刷新回确认卡
+    if (
+      parseGeneration.current != null &&
+      data.generation != null &&
+      data.generation !== parseGeneration.current
+    ) {
+      parseGeneration.current = null;
+      void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+      return;
+    }
+    // done=离开 resume_queued：立刻刷新 preview/upload，让叙事无缝切换到
+    // 档案摘要（不等 preview 自身 2.5s 轮询）；ref 防重复 invalidate 循环
+    if (data.done && !progressSettled.current) {
+      progressSettled.current = true;
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
+    }
+  }, [queryClient, resumeProgress.data, sessionId]);
 
   useEffect(() => {
     if (!resumeRecovery || preview.isFetching) return;
@@ -913,6 +1016,8 @@ export function WorkbenchPage() {
   const timelineContentKey = [
     resumeReady,
     resumeProcessing,
+    // B3：叙事事件逐条进群也要推动时间线跟随滚动
+    progressEvents.map((event) => event.seq).join(","),
     consultBubbles.length,
     consultBubbles
       .map((item) => [item.key, item.persona, item.text].join("~"))
@@ -1119,22 +1224,51 @@ export function WorkbenchPage() {
         ) : null}
 
         {resumeProcessing ? (
-          <Bubble persona="intent_consultant">
-            <p className="v2-inline-loading">
-              <LoaderCircle className="spin" size={15} /> 正在归一化你的简历（解析 → 切证据片段 →
-              结构化 → 防编造校验）…
-            </p>
-          </Bubble>
+          <Fragment>
+            {/* B3 R2：小意边解析边说话——进度事件逐条进群（新事件才有到场延迟） */}
+            {progressEvents.map((event) => (
+              <Bubble
+                key={`intake-${event.seq}`}
+                persona="intent_consultant"
+                style={progressStagger(`ev-${event.seq}`)}
+              >
+                <p>{event.text}</p>
+              </Bubble>
+            ))}
+            <Bubble persona="intent_consultant">
+              <p className="v2-inline-loading">
+                <LoaderCircle className="spin" size={15} />{" "}
+                {progressEvents.length
+                  ? "小意整理中，马上就好…"
+                  : "正在归一化你的简历（解析 → 切证据片段 → 结构化 → 防编造校验）…"}
+              </p>
+            </Bubble>
+          </Fragment>
         ) : null}
 
         {resumeReady && !resumeConfirmed ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p>
-              档案整理好了：{preview.data?.education?.length ?? 0} 段教育、
-              {preview.data?.experience?.length ?? 0} 段经历、{preview.data?.skills?.length ?? 0}{" "}
-              项技能。请确认无误后我们开始聊方向。
-            </p>
+            {/* B3：终态事件带耗时（"用时 X.X 秒"）——亲历解析的这次挂载才展示 */}
+            {watchedProcessing.current && doneEvent ? (
+              <p className="v2-intake-done">{doneEvent.text}</p>
+            ) : null}
+            <div className="v2-profile-summary">
+              {buildProfileSummaryLines(preview.data).map((line, index) => (
+                <p
+                  key={`${index}-${line}`}
+                  className={watchedProcessing.current ? "v2-profile-line" : undefined}
+                  style={
+                    watchedProcessing.current
+                      ? { animationDelay: `${index * 350}ms` }
+                      : undefined
+                  }
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
             <ResumeProfileAccordion preview={preview.data} />
+            <p>确认无误后，我们就开始聊方向！</p>
             <button
               type="button"
               className="v2-btn primary"

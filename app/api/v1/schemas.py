@@ -105,6 +105,27 @@ class ResumeParseRequest(PublicDTO):
     generation: int
 
 
+class ResumeProgressEvent(PublicDTO):
+    """B3 小意解析叙事：单条进度事件（非终态 seq 1..99，终态 done/error=100）。"""
+
+    seq: int
+    step: str
+    text: str
+    elapsed_ms: int
+    created_at: datetime
+
+
+class ResumeProgressResponse(PublicDTO):
+    """B3 解析进度轮询契约：events 恒为当前代全量（ORDER BY seq，协议上界
+    ≤100 行）；从未上传 → generation=null + events=[]；done = 已离开
+    resume_queued（ready/error/uploaded 全部停轮询，覆盖解析中重传交错）。"""
+
+    generation: int | None
+    status: str
+    events: list[ResumeProgressEvent] = Field(default_factory=list)
+    done: bool
+
+
 class ResumeConfirmRequest(PublicDTO):
     expected_resume_version: int | None = None
 
