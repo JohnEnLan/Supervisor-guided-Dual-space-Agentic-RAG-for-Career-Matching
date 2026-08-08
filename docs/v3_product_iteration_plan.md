@@ -426,6 +426,11 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
   清该会话 resume_uploads 的 content/extracted_text；③
   status='resume_uploaded'（合法待解析）及其余状态 → 仅清零计数、不动
   上传与状态。响应 `{session_id, resume_parse_count: 0, status}`。
+  **运维备忘（B3 二轮复审收编）**：若未来任何救济路径把**同一代**重新置回
+  resume_queued（当前端点不这么做；正常流每代至多一次入队），必须连带
+  `DELETE FROM resume_intake_progress WHERE session_id=$1 AND
+  generation=$2`——该代曾达终态时残留的 seq=100 行会让新任务的终态 CAS
+  永久回滚、mark 兜底同撞 PK，会话卡死在 queued。写入 B5 运维手册。
 - **admin 响应 DTO（OpenAPI 可生成级，字段名与空值类型写死）**：
   `AdminOverviewResponse{users_total: int, logins_today: int,
   logins_7d: int, logins_30d: int, sessions_total: int,

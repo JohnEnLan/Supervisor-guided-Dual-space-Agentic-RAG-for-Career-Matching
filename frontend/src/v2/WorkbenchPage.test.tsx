@@ -1829,6 +1829,70 @@ describe("resume intake narration (B3 R2/R6)", () => {
     expect((lines[1] as HTMLElement).style.animationDelay).toBe("350ms");
   });
 
+  it("backfills the terminal done event exactly once when preview wins the race", async () => {
+    // Codex C4 反向竞态回归钉死（子 agent 二轮 minor）：preview 先翻 ready
+    // → 进度查询停用时缓存里还没有 seq=100 → 补拉 effect 恰好一次 refetch
+    // 把"用时 X.X 秒"拉回来；此后查询已停用+ref 防重，不再有请求。
+    mockWorkbenchApi();
+    let previewReady = false;
+    let progressServesDone = false;
+    let progressCalls = 0;
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      if (!previewReady) throw new ApiError(409, "resume_processing");
+      return NARRATION_PREVIEW;
+    });
+    const receivedEvent = {
+      seq: 1,
+      step: "received",
+      text: "收到！我现在就把你的简历完整读一遍～",
+      elapsed_ms: 6,
+      created_at: "2026-08-09T10:00:00Z",
+    };
+    vi.mocked(api.resumeProgress).mockImplementation(async () => {
+      progressCalls += 1;
+      if (!progressServesDone) {
+        return {
+          generation: 1,
+          status: "resume_queued",
+          events: [receivedEvent],
+          done: false,
+        };
+      }
+      return {
+        generation: 1,
+        status: "resume_ready",
+        events: [
+          receivedEvent,
+          {
+            seq: 100,
+            step: "done",
+            text: "档案生成完毕，用时 3.2 秒。来看看整理结果吧！",
+            elapsed_ms: 3200,
+            created_at: "2026-08-09T10:00:04Z",
+          },
+        ],
+        done: true,
+      };
+    });
+    const { queryClient } = renderWorkbench();
+
+    expect(await screen.findByText(/收到！我现在就把你的简历完整读一遍/)).toBeVisible();
+    expect(progressCalls).toBe(1);
+
+    // 服务端已达终态；preview 抢先翻 ready（progress 下一拍还没到就被停用）
+    progressServesDone = true;
+    previewReady = true;
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["resume-preview", "sess-1"] });
+    });
+
+    expect(await screen.findByText(/用时 3.2 秒/)).toBeVisible();
+    // 恰好一次补拉：首拍 1 次 + 补拉 1 次，无第三次
+    expect(progressCalls).toBe(2);
+    await screen.findByRole("button", { name: "确认简历档案" });
+    expect(progressCalls).toBe(2);
+  });
+
   it("falls back to the confirm card when a re-upload lands mid-parse (generation mismatch)", async () => {
     // 方案 §3.1 双保险：进度响应换代（新代 resume_uploaded, done=true）→
     // 停叙事轮询 + 刷新上传态 → 确认卡回场展示新代文件
