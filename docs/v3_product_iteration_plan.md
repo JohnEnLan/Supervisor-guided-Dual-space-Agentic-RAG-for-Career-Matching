@@ -257,23 +257,23 @@ CREATE TABLE resume_intake_progress (
 );
 ```
 
-- 非终态事件（intake 回调发出：received/extracted/normalizing/ocr/
-  validated）：首事件事务 = `DELETE ... WHERE session_id=$1 AND
-  generation < $2` + 守卫 INSERT；每条 INSERT 带 `WHERE EXISTS(SELECT 1
+- 非终态事件（parse 任务体 `_IntakeNarrator` 发出：received/extracted/
+  normalizing/ocr/validated）：首事件事务 = `DELETE ... WHERE
+  session_id=$1 AND generation < $2` + 守卫 INSERT；每条 INSERT 带
+  `WHERE EXISTS(SELECT 1
   FROM session_state WHERE session_id=$1 AND resume_upload_generation=$2
   AND status='resume_queued')`；EXISTS 为快照读，极端交错下旧代可残留
   无害孤儿行（上界＝该代非终态事件数，与 §8 口径一致；PK 含 generation、
   读端按当前代过滤）。
 - **终态事件（done/error）**：由 save_normalized_resume/mark_resume_error
   经 `terminal_event` 参数在 §1.2 的单事务 CAS 内写入（RETURNING 命中才
-  写）；intake 回调**不落**终态事件，仅承载信息（含 §1.2 阶段标记信息源）。
-- `intake_resume` 增可选异步回调 `progress`（默认 None 行为与现状一致）。
-  **勘误（B3 执行期三方复审裁定）**：B2 已把生产解析任务体定为
+  写）；任务体叙事**不落**终态事件，仅承载信息（含 §1.2 阶段标记信息源）。
+- **进度发射点（B3 执行期三方复审勘误，替代原"intake_resume 增可选回调
+  progress"要求——该要求作废）**：B2 已把生产解析任务体定为
   `sessions._normalize_resume`（begin CAS 后的唯一任务体，intake_resume
-  仅存 CLI 路径），progress 发射点随任务体锚定在 `_normalize_resume` 内
-  （`_IntakeNarrator`，fail-open）；B4 的 OCR 事件在同一任务体内同点发射
-  （suffix/content 输入契约已预先贯通）。`intake_resume` 不再另加回调
-  ——CLI 路径无进度消费方，加了即死代码。
+  仅存 CLI 路径、无进度消费方），叙事由任务体内 `_IntakeNarrator` 发射
+  （fail-open 旁路，写失败仅告警不影响解析）；B4 的 OCR 事件在同一任务
+  体内同点发射（suffix/content 输入契约已预先贯通）。
 - **`GET /sessions/{id}/resume-progress`（require_owned_session）契约**：
   200 `ResumeProgressResponse{generation: int|null, status: str,
   events: [{seq, step, text, elapsed_ms, created_at}], done: bool}`——
@@ -283,8 +283,14 @@ CREATE TABLE resume_intake_progress (
   `generation=null, events=[]`；**`done = status != 'resume_queued'`**
   （离开 queued 即终——ready/error/uploaded 全部停轮询，覆盖"解析中重传"
   交错：重传后状态为新代 resume_uploaded → done=true，前端停进度轮询并
-  回落确认卡）。前端双保险：记录发起 parse 时的 generation，响应
-  generation 变化即停并刷新上传态。补该交错测试。
+  回落确认卡）。前端双保险：记录发起 parse 时的 generation，响应换代即
+  清旧代归属并刷新上传态。**换代语义细化（B3 二轮复审勘误码定）**：
+  ① 新代为 resume_uploaded（远端重传未确认）→ done=true 停轮询、回落
+  确认卡展示新代；② 新代已 resume_queued（远端重传并确认解析）→ 共享
+  会话**跟随新代叙事**（轮询继续渲染现行解析）；两种情形下叙事气泡
+  key、stagger resetKey、亲历/耗时/自发流归属一律绑定
+  `(session_id, generation)`，串代即失配。交错测试拆 uploaded 与 queued
+  两个各自状态自洽的夹具（progress/upload GET/preview 三端一致）。
 - 前端：事件按小意气泡逐条出现（复用 B1 stagger）；done 展示"用时 X.X 秒"。
 - 测试：回调序列；DELETE 代数谓词交错（迟到旧任务删不掉新代）；终态事件
   仅随 CAS 命中写入；所有权；前端 1200ms 轮询渲染、done 停轮询、逐行

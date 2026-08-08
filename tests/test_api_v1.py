@@ -167,9 +167,12 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
 
 @pytest.mark.asyncio
 async def test_save_terminal_failure_falls_back_to_error_marking(monkeypatch):
-    """C1/C2 裁决闭环：终态 INSERT 冲突 → save 全事务回滚并抛出 → 任务唯一
-    except 分支用 mark_resume_error 落 error 终态——状态机不悬空、不返还
-    （LLM 外呼已发生）、上传内容照常清理。"""
+    """C1/C2 裁决闭环（口径按 Codex 二轮 m1 收窄）：本测试证明的是"save
+    因任意异常失败 → 任务唯一 except 分支必然尝试 mark_resume_error 落
+    error 终态、不返还（LLM 外呼已发生）、上传内容照常清理"。mark 自身
+    也撞 seq=100 PK 的双冲突场景在代码内不可达（每代至多一次入队+一次
+    终态，见方案 §1.2 论证），属部署/手工救济不变量——运维红线已记
+    方案 §5.3（同代重置必须连删该代进度行）。"""
     from app.api.v1 import sessions
     from app.state.schema import ResumeState
 

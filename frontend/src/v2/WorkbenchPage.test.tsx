@@ -1795,8 +1795,9 @@ describe("resume intake narration (B3 R2/R6)", () => {
         ? {
             generation: 1,
             status: "resume_queued",
-            // 两读非同快照的真实形态：done=false 但 events 已含 seq=100——
-            // 叙事必须过滤终态事件（子 agent 审查 Major：钉死 seq<100 过滤）
+            // 纵深防御夹具（Codex 二轮 m3 更正口径）：服务端已单快照
+            // （C6 repeatable read），该形态只可能来自异常/迟到响应——
+            // 叙事仍必须过滤终态事件（子 agent 审查 Major：钉死 seq<100）
             events: [...narrationEvents, doneEvent],
             done: false,
           }
@@ -1893,9 +1894,91 @@ describe("resume intake narration (B3 R2/R6)", () => {
     expect(progressCalls).toBe(2);
   });
 
-  it("falls back to the confirm card when a re-upload lands mid-parse (generation mismatch)", async () => {
-    // 方案 §3.1 双保险：进度响应换代（新代 resume_uploaded, done=true）→
-    // 停叙事轮询 + 刷新上传态 → 确认卡回场展示新代文件
+  it("backfills again for a second self-parsed generation (no stale dedup key)", async () => {
+    // Codex 二轮 M1：progress 缓存被 onSuccess 清空时，补拉去重键不得退化
+    // 复用（旧实现两代都是 "sess-1:" → 第二代跳过补拉丢失耗时行）。
+    // 轮询全程悬置（never-resolve），终态只能靠补拉取回——同会话连续两代
+    // preview 抢跑，两代的"用时"都必须出现。
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let gen = 1;
+    let phase: "unparsed" | "processing" | "ready" = "unparsed";
+    let progressServesDone = false;
+    vi.mocked(api.pendingResumeUpload).mockImplementation(async () => {
+      if (phase === "unparsed") {
+        return apiFixtures.resumeUploaded({ generation: gen, filename: `resume-v${gen}.pdf` });
+      }
+      throw new ApiError(404, "no pending resume upload");
+    });
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      if (phase === "ready") return NARRATION_PREVIEW;
+      throw new ApiError(
+        409,
+        phase === "processing" ? "resume_processing" : "resume_unparsed",
+      );
+    });
+    vi.spyOn(api, "uploadResume").mockImplementation(async () => {
+      gen = 2;
+      phase = "unparsed";
+      progressServesDone = false;
+      return apiFixtures.resumeUploaded({ generation: 2, filename: "resume-v2.pdf" });
+    });
+    vi.spyOn(api, "parseResume").mockImplementation(async () => {
+      phase = "processing";
+      return { session_id: "sess-1", status: "resume_queued" };
+    });
+    const progressCallLog: boolean[] = [];
+    vi.mocked(api.resumeProgress).mockImplementation(() => {
+      progressCallLog.push(progressServesDone);
+      if (!progressServesDone) return new Promise(() => {});
+      return Promise.resolve({
+        generation: gen,
+        status: "resume_ready",
+        events: [
+          {
+            seq: 100,
+            step: "done",
+            text: gen === 1 ? "档案生成完毕，用时 3.2 秒。" : "档案生成完毕，用时 5.0 秒。",
+            elapsed_ms: gen === 1 ? 3200 : 5000,
+            created_at: "2026-08-09T10:00:04Z",
+          },
+        ],
+        done: true,
+      });
+    });
+    const { queryClient } = renderWorkbench();
+
+    // 第一代：确认解析 → preview 抢跑 ready → 补拉取回耗时
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
+    await screen.findByText(/正在归一化你的简历|小意整理中/);
+    phase = "ready";
+    progressServesDone = true;
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["resume-preview", "sess-1"] });
+    });
+    await waitFor(() => expect(JSON.stringify(progressCallLog)).toContain("true"));
+    expect(await screen.findByText(/用时 3.2 秒/)).toBeVisible();
+
+    // 第二代：重传 → 确认上传 → 确认解析 → 再次 preview 抢跑
+    const attach = screen.getByLabelText("上传简历");
+    const fileInput = attach.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, new File(["resume"], "r2.txt", { type: "text/plain" }));
+    await user.click(await screen.findByRole("button", { name: "确认上传" }));
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
+    await screen.findByText(/正在归一化你的简历|小意整理中/);
+    phase = "ready";
+    progressServesDone = true;
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["resume-preview", "sess-1"] });
+    });
+    expect(await screen.findByText(/用时 5.0 秒/)).toBeVisible();
+  });
+
+  it("falls back to the confirm card when a re-upload lands mid-parse (uploaded interleave)", async () => {
+    // 换代语义之一（自洽夹具，Codex 二轮 M2 修正）：远端标签页重传但未确认
+    // → 新代 resume_uploaded → progress done=true。三端状态一致：progress=
+    // uploaded/done、upload GET=新代 200、preview=unparsed。结果钉死"确认卡
+    // 回场展示新代"（done 分支与双保险殊途同归，此用例钉结果不钉分支）。
     const user = userEvent.setup();
     mockWorkbenchApi();
     let serverPhase: "unparsed" | "parsing" | "reuploaded" = "unparsed";
@@ -1918,15 +2001,11 @@ describe("resume intake narration (B3 R2/R6)", () => {
     });
     let progressCalls = 0;
     vi.mocked(api.resumeProgress).mockImplementation(async () => {
-      // 另一标签页重传并已确认解析新代：generation 换代但 done=false——
-      // done 分支与 parse onSuccess 的刷新都不可能把确认卡带回来，回场
-      // 只能来自双保险 mismatch 分支（子 agent 审查 minor：两分支可区分）。
-      // 第二拍才换代：确保 parse onSuccess 的刷新已按"parsing"完成（404/
-      // processing），排除 onSuccess 替 mismatch 背锅的假绿时序。
+      // 第二拍才换代：确保 parse onSuccess 的刷新已按"parsing"消化完
       progressCalls += 1;
       if (serverPhase === "parsing" && progressCalls >= 2) {
         serverPhase = "reuploaded";
-        return { generation: 2, status: "resume_queued", events: [], done: false };
+        return { generation: 2, status: "resume_uploaded", events: [], done: true };
       }
       return { generation: 1, status: "resume_queued", events: [], done: false };
     });
@@ -1939,5 +2018,60 @@ describe("resume intake narration (B3 R2/R6)", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "确认解析" })).toBeVisible();
     expect(screen.queryByText(/小意整理中|正在归一化你的简历/)).not.toBeInTheDocument();
+  });
+
+  it("follows the successor generation when the other tab already confirmed it (queued takeover)", async () => {
+    // 换代语义之二（钉死双保险 mismatch 分支）：远端标签页重传并已确认解析
+    // → 新代 resume_queued → done=false。done 分支永不触发，upload 第三次
+    // 请求只能来自 mismatch 分支的刷新；叙事跟随新代事件（共享会话模型，
+    // key/stagger/归属按代绑定）。
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let takenOver = false;
+    let uploadCalls = 0;
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      throw new ApiError(409, takenOver ? "resume_processing" : "resume_unparsed");
+    });
+    vi.mocked(api.pendingResumeUpload).mockImplementation(async () => {
+      uploadCalls += 1;
+      if (uploadCalls === 1) return apiFixtures.resumeUploaded();
+      throw new ApiError(404, "no pending resume upload");
+    });
+    vi.spyOn(api, "parseResume").mockImplementation(async () => {
+      takenOver = true; // 远端在任务启动瞬间接管：会话已是新代 queued
+      return { session_id: "sess-1", status: "resume_queued" };
+    });
+    let progressCalls = 0;
+    vi.mocked(api.resumeProgress).mockImplementation(async () => {
+      progressCalls += 1;
+      if (progressCalls >= 2) {
+        return {
+          generation: 2,
+          status: "resume_queued",
+          events: [
+            {
+              seq: 1,
+              step: "received",
+              text: "新一版简历收到！我重新读一遍～",
+              elapsed_ms: 8,
+              created_at: "2026-08-09T10:01:00Z",
+            },
+          ],
+          done: false,
+        };
+      }
+      return { generation: 1, status: "resume_queued", events: [], done: false };
+    });
+    renderWorkbench();
+
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
+
+    // 接管：新代叙事上屏（轮询继续，渲染的是现行解析）
+    expect(
+      await screen.findByText(/新一版简历收到/, undefined, { timeout: 5000 }),
+    ).toBeVisible();
+    // mismatch 分支的上传态刷新：mount(1) + onSuccess(2) + mismatch(3)
+    await waitFor(() => expect(uploadCalls).toBe(3));
+    expect(screen.queryByText(/收到！我现在就把你的简历完整读一遍/)).not.toBeInTheDocument();
   });
 });

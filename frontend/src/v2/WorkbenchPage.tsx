@@ -640,6 +640,8 @@ export function WorkbenchPage() {
   // 上个会话的"亲历"泄漏给新会话的缓存档案（子 agent 审查 minor）
   const watchedProcessingFor = useRef<string | null>(null);
   const progressSettled = useRef(false);
+  // done 补拉去重（按会话+代数；parse onSuccess 重置）
+  const doneBackfilledFor = useRef<string | null>(null);
 
   const consult = useQuery({
     queryKey: ["consult", sessionId],
@@ -714,6 +716,8 @@ export function WorkbenchPage() {
     onSuccess: (_data, variables) => {
       if (variables.forSession !== sessionId) return;
       parseGeneration.current = variables.generation;
+      // 新一轮解析开始：补拉去重键随之作废（Codex 二轮 M1）
+      doneBackfilledFor.current = null;
       // 上一轮解析的 done=true 缓存必须清场，否则新一轮轮询被闷死
       // （enabled 翻转时无数据才必然重取；Codex B3 审查 C4）
       queryClient.removeQueries({
@@ -924,28 +928,43 @@ export function WorkbenchPage() {
   const progressStagger = useStaggeredReveal(
     progressEvents.map((event) => `ev-${event.seq}`),
     `${sessionId}:intake-${resumeProgress.data?.generation ?? ""}`,
-    // 本页点击确认解析（variables 随 mutate 同步落地且跨 success 保留）＝
-    // 自发流：首批事件也逐条出现；刷新恢复（未在本挂载点击过）＝历史，
-    // 整批即时到场不重播（Codex B3 审查 C8）
-    parseResume.variables?.forSession === sessionId,
+    // 自发流判定绑定到具体代数（Codex 二轮 M2 溯源修正）：本页点击确认
+    // 解析的那一代（variables 随 mutate 同步落地且跨 success 保留）才是
+    // 自发流，首批事件也逐条出现；刷新恢复或远端标签页启动的新代＝历史/
+    // 旁观，整批即时到场不重播（Codex B3 审查 C8）
+    parseResume.variables?.forSession === sessionId &&
+      parseResume.variables?.generation === resumeProgress.data?.generation,
   );
   // 终态 done 事件（seq=100，含"用时 X.X 秒"）：解析完成后并入档案摘要气泡
   const doneEvent = (resumeProgress.data?.events ?? []).find(
     (event) => event.step === "done",
   );
 
+  // 亲历标记绑定 (session, generation)（Codex 二轮 M2）：跨标签页场景下，
+  // 我看着 gen1 解析、远端 gen2 完成时，gen2 的耗时/逐行动画不得挂到本页
+  // ——比对键里带代数，串代即失配。
   useEffect(() => {
     if (resumeProcessing) {
-      watchedProcessingFor.current = sessionId;
+      const generation =
+        resumeProgress.data?.generation ?? parseGeneration.current;
+      if (generation != null) {
+        watchedProcessingFor.current = `${sessionId}#${generation}`;
+      }
       progressSettled.current = false;
     }
-  }, [resumeProcessing, sessionId]);
-  const watchedProcessing = watchedProcessingFor.current === sessionId;
+  }, [resumeProcessing, resumeProgress.data?.generation, sessionId]);
+  const watchedProcessing =
+    resumeProgress.data?.generation != null &&
+    watchedProcessingFor.current ===
+      `${sessionId}#${resumeProgress.data.generation}`;
 
   useEffect(() => {
     const data = resumeProgress.data;
     if (!data) return;
-    // 双保险：响应代数 ≠ 发起 parse 时的代数 → 解析中已重传，刷新回确认卡
+    // 双保险（换代语义，方案 §3.1 勘误码定）：响应代数 ≠ 发起 parse 时的
+    // 代数 → 停掉旧代归属并刷新上传态。新代为 uploaded → done=true 停轮询
+    // 回落确认卡；新代已 queued（远端标签页确认解析）→ 共享会话跟随新代
+    // 叙事（气泡 key/stagger/亲历归属全部按代绑定，无串代）。
     if (
       parseGeneration.current != null &&
       data.generation != null &&
@@ -969,15 +988,31 @@ export function WorkbenchPage() {
   // 翻 false → 进度查询停用，seq=100 终态（"用时 X.X 秒"）可能还没拉到。
   // 亲历解析且缺 done 事件时一次性补拉（refetch 对 disabled 查询照常执行；
   // ref 按会话+代数防重复，不构成循环）。
-  const doneBackfilledFor = useRef<string | null>(null);
   const refetchResumeProgress = resumeProgress.refetch;
   useEffect(() => {
-    if (!resumeReady || !watchedProcessing || doneEvent) return;
-    const backfillKey = `${sessionId}:${resumeProgress.data?.generation ?? ""}`;
+    // 门控：watchedProcessing（数据在场的亲历比对）∨ parseGeneration
+    // （本页自发 parse 的标记——progress 缓存被 onSuccess 清空时数据缺席，
+    // 仅靠前者会漏掉抢跑补拉）；两者都空 = 旁观/回访，不补拉。
+    const selfParsed = parseGeneration.current != null;
+    if (!resumeReady || (!watchedProcessing && !selfParsed) || doneEvent) return;
+    // 去重键优先取本次 parse 的代数（Codex 二轮 M1：progress 缓存被
+    // onSuccess 清空时 data.generation 为空，键若退化为 "sess#" 且不随
+    // 新 parse 重置，同会话第二代 preview 抢跑会漏补拉）；onSuccess 同时
+    // 重置本 ref，双保险。
+    const backfillKey = `${sessionId}#${
+      parseGeneration.current ?? resumeProgress.data?.generation ?? ""
+    }`;
     if (doneBackfilledFor.current === backfillKey) return;
     doneBackfilledFor.current = backfillKey;
-    void refetchResumeProgress();
+    // 必须先显式 cancel 再 refetch：v5 的 cancelRefetch 仅在缓存有数据时
+    // 才取消在途请求——缓存为空 + 请求悬停（慢网/被清缓存后重启的轮询）
+    // 时 refetch 会直接搭车在途请求，可能拿到终态提交前的旧快照、丢失
+    // seq=100（Codex 二轮 M1 修复过程中实测发现）。
+    void queryClient
+      .cancelQueries({ queryKey: ["resume-progress", sessionId], exact: true })
+      .then(() => refetchResumeProgress());
   }, [
+    queryClient,
     doneEvent,
     refetchResumeProgress,
     resumeProgress.data?.generation,
