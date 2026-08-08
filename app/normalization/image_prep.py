@@ -14,8 +14,11 @@ _MAX_OCR_BASE64_BYTES = 10 * 1024 * 1024
 # 会放进 GIF/BMP/TIFF 等改名文件，白名单形同虚设且扩大解码器攻击面。
 _FORMATS_BY_SUFFIX: dict[str, frozenset[str]] = {
     ".png": frozenset({"PNG"}),
-    ".jpg": frozenset({"JPEG"}),
-    ".jpeg": frozenset({"JPEG"}),
+    # MPO＝多帧 JPEG（三星动态照片/3D 相机的真实 .jpg），Pillow 的
+    # MpoImageFile 是 JpegImageFile 子类——同族解码器，不扩大攻击面
+    # （B4 终审二轮子 agent 裁定放宽）
+    ".jpg": frozenset({"JPEG", "MPO"}),
+    ".jpeg": frozenset({"JPEG", "MPO"}),
     ".webp": frozenset({"WEBP"}),
 }
 
