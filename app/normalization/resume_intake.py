@@ -142,15 +142,38 @@ def _compact_text(text: str) -> str:
     return "\n".join(compact_lines).strip()
 
 
-def _read_pdf(path: "Path | io.BytesIO") -> tuple[str, int]:
+def _extract_pdf_pages(
+    path: "Path | io.BytesIO",
+) -> tuple[list[tuple[int, str]], int]:
     reader = PdfReader(path if isinstance(path, io.BytesIO) else str(path))
+    pages = [
+        (page_number, page.extract_text() or "")
+        for page_number, page in enumerate(reader.pages, start=1)
+    ]
+    return pages, len(reader.pages)
+
+
+def extract_resume_pages_from_bytes(
+    content: bytes,
+    suffix: str,
+) -> tuple[list[tuple[int, str]], int]:
+    if suffix.casefold() != ".pdf":
+        raise ValueError(f"Unsupported resume file type: {suffix}")
+    return _extract_pdf_pages(io.BytesIO(content))
+
+
+def join_pdf_pages(pages: list[tuple[int, str]]) -> str:
     page_texts: list[str] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        text = _compact_text(text)
+    for page_number, raw_text in pages:
+        text = _compact_text(raw_text)
         if text:
             page_texts.append(f"[Page {page_number}]\n{text}")
-    return "\n\n".join(page_texts).strip(), len(reader.pages)
+    return "\n\n".join(page_texts).strip()
+
+
+def _read_pdf(path: "Path | io.BytesIO") -> tuple[str, int]:
+    pages, total_pages = _extract_pdf_pages(path)
+    return join_pdf_pages(pages), total_pages
 
 
 def _read_docx(path: "Path | io.BytesIO") -> tuple[str, int]:

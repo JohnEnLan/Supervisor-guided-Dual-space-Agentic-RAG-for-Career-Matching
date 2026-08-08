@@ -10,6 +10,65 @@ os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test")
 os.environ.setdefault("QWEN_API_KEY", "sk-test")
 
 
+def test_extract_resume_pages_from_bytes_preserves_blank_pages_and_raw_text():
+    from app.normalization import resume_intake as intake
+
+    fixture = (
+        Path(__file__).parent
+        / "fixtures"
+        / "extraction_golden"
+        / "multi_blank.pdf"
+    )
+
+    pages, total_pages = intake.extract_resume_pages_from_bytes(
+        fixture.read_bytes(),
+        ".PDF",
+    )
+
+    assert total_pages == 3
+    assert [page_number for page_number, _text in pages] == [1, 2, 3]
+    assert "Page one resume line" in pages[0][1]
+    assert pages[1] == (2, "")
+    assert "Page three" in pages[2][1]
+
+
+def test_extract_resume_pages_from_bytes_preserves_all_blank_pages():
+    from app.normalization import resume_intake as intake
+
+    fixture = (
+        Path(__file__).parent
+        / "fixtures"
+        / "extraction_golden"
+        / "all_blank.pdf"
+    )
+
+    pages, total_pages = intake.extract_resume_pages_from_bytes(
+        fixture.read_bytes(),
+        ".pdf",
+    )
+
+    assert pages == [(1, ""), (2, "")]
+    assert total_pages == 2
+    assert intake.join_pdf_pages(pages) == ""
+
+
+def test_extract_resume_pages_from_bytes_rejects_non_pdf_suffix():
+    from app.normalization import resume_intake as intake
+
+    with pytest.raises(ValueError):
+        intake.extract_resume_pages_from_bytes(b"not a pdf", ".docx")
+
+
+def test_join_pdf_pages_compacts_text_filters_blanks_and_preserves_page_numbers():
+    from app.normalization import resume_intake as intake
+
+    result = intake.join_pdf_pages(
+        [(1, "a  b\n\n\nc"), (2, ""), (3, "x")]
+    )
+
+    assert result == "[Page 1]\na b\n\nc\n\n[Page 3]\nx"
+
+
 def test_docx_extraction_preserves_paragraph_and_table_order(tmp_path):
     from app.normalization import resume_intake as intake
 
