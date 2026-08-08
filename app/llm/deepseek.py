@@ -5,12 +5,17 @@ Agent 只调用 chat()，不直接 new 客户端。
 """
 import asyncio
 import json
+import logging
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from app.config import settings
 from app.llm.context_budget import fit_user_prompt_to_budget
+from app.llm import usage_context
+
+
+logger = logging.getLogger(__name__)
 
 _client = AsyncOpenAI(
     api_key=settings.deepseek_api_key,
@@ -60,4 +65,26 @@ async def chat(
 
     async with _sem:
         resp = await _client.chat.completions.create(**kwargs)
-    return resp.choices[0].message.content
+    content = resp.choices[0].message.content
+    try:
+        usage = getattr(resp, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens")
+        completion_tokens = getattr(usage, "completion_tokens")
+        total_tokens = getattr(usage, "total_tokens")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (prompt_tokens, completion_tokens, total_tokens)
+        ):
+            raise ValueError("invalid token usage")
+        await usage_context.record_llm_usage(
+            "deepseek",
+            model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("deepseek usage recording failed", exc_info=True)
+    return content

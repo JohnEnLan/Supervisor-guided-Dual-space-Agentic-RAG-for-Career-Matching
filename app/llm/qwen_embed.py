@@ -7,11 +7,16 @@
 """
 import asyncio
 import hashlib
+import logging
 from collections import OrderedDict
 
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.llm import usage_context
+
+
+logger = logging.getLogger(__name__)
 
 # DashScope 提供 OpenAI 兼容 endpoint
 _client = AsyncOpenAI(
@@ -64,6 +69,26 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             vector = resp.data[position].embedding
             results[index] = vector
             _cache_put(keys[index], vector)
+        try:
+            usage = getattr(resp, "usage", None)
+            prompt_tokens = getattr(usage, "prompt_tokens")
+            total_tokens = getattr(usage, "total_tokens")
+            if any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in (prompt_tokens, total_tokens)
+            ):
+                raise ValueError("invalid token usage")
+            await usage_context.record_llm_usage(
+                "dashscope",
+                settings.qwen_embed_model,
+                prompt_tokens,
+                None,
+                total_tokens,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("qwen embedding usage recording failed", exc_info=True)
     return [vector for vector in results if vector is not None]
 
 

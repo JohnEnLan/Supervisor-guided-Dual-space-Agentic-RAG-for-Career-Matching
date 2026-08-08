@@ -437,7 +437,8 @@ async def test_execute_graph_path_passes_lifespan_checkpointer_to_runner(
     assert response.status == RunStatus.QUEUED.value
     assert len(background_tasks.tasks) == 1
     task = background_tasks.tasks[0]
-    assert task.func is graph_executor
+    assert task.func is runs._run_with_usage_scope
+    assert task.args == ("run-1", graph_executor)
     assert task.kwargs == {
         "run_id": "run-1",
         "checkpointer": checkpointer,

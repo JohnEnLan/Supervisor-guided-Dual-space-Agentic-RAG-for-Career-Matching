@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import settings
+from app.llm import usage_context
 
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,31 @@ async def rerank_documents(query: str, documents: list[str]) -> list[float]:
                 elif status_code >= 300:
                     raise RerankUnavailable(f"rerank_http_{status_code}")
                 else:
-                    return _aligned_scores(response, len(documents))
+                    scores = _aligned_scores(response, len(documents))
+                    try:
+                        usage = response.json()["usage"]
+                        total_tokens = usage["total_tokens"]
+                        if (
+                            isinstance(total_tokens, bool)
+                            or not isinstance(total_tokens, int)
+                            or total_tokens < 0
+                        ):
+                            raise ValueError("invalid token usage")
+                        await usage_context.record_llm_usage(
+                            "dashscope",
+                            settings.rerank_model,
+                            None,
+                            None,
+                            total_tokens,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.warning(
+                            "reranker usage recording failed",
+                            exc_info=True,
+                        )
+                    return scores
 
             if retry_reason is not None:
                 logger.warning("rerank_retry reason=%s", retry_reason)

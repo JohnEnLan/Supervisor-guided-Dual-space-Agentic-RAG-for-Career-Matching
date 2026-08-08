@@ -99,6 +99,7 @@ from app.db.state_store import (
     save_state,
 )
 from app.domain.match_brief import create_match_brief
+from app.llm import usage_context
 from app.llm.qwen_vl import ocr_image_jpeg
 from app.normalization.image_prep import prepare_image_jpeg, validate_image_header
 from app.normalization.resume_intake import (
@@ -177,6 +178,10 @@ async def create_session(
             status="awaiting_resume",
             owner_user_id=None,
         )
+    await usage_context.record_product_event(
+        "session_created",
+        user.user_id if user is not None else None,
+    )
     return SessionResponse(session_id=session_id, status="awaiting_resume")
 
 
@@ -393,10 +398,19 @@ async def parse_resume(
         raise HTTPException(status_code=404, detail="session_id not found") from None
     except ResumeLifecycleConflict as exc:
         raise HTTPException(status_code=409, detail=exc.detail) from None
+    raw_owner_user_id = started["owner_user_id"]
+    owner_user_id = (
+        str(raw_owner_user_id) if raw_owner_user_id is not None else None
+    )
+    await usage_context.record_product_event(
+        "resume_parse",
+        owner_user_id,
+    )
     background_tasks.add_task(
-        _normalize_resume,
+        _normalize_resume_with_scope,
+        owner_user_id,
         session_id=session_id,
-        user_id=str(started["owner_user_id"] or session_id),
+        user_id=str(raw_owner_user_id or session_id),
         raw_text=str(started["extracted_text"] or ""),
         suffix=str(started["suffix"] or ""),
         content=bytes(started["content"] or b""),
@@ -520,14 +534,19 @@ async def continue_consultation(
     request: ConsultRequest,
     user: Annotated[AuthedUser | None, Depends(optional_current_user)],
 ) -> ConsultResponse:
-    turn, persisted = await _execute_consult_round(
-        session_id=session_id,
-        mode=request.mode,
-        message=request.message,
-        expected_round=request.expected_round,
-        status="intent_consulting",
-        user_id=user.user_id if user is not None else None,
-    )
+    async with usage_context.usage_scope(
+        user.user_id if user is not None else None,
+        session_id,
+        "consult",
+    ):
+        turn, persisted = await _execute_consult_round(
+            session_id=session_id,
+            mode=request.mode,
+            message=request.message,
+            expected_round=request.expected_round,
+            status="intent_consulting",
+            user_id=user.user_id if user is not None else None,
+        )
     # Select the public DTO fields explicitly. ConsultTurn also carries private
     # Feature-A CAS facts that must never leak into OpenAPI responses.
     return ConsultResponse(
@@ -880,16 +899,18 @@ async def _execute_consult_round(
         raise HTTPException(status_code=409, detail="resume_changed") from None
     except KeyError:
         raise HTTPException(status_code=404, detail="session_id not found") from None
+    await usage_context.record_product_event("consult_turn", user_id)
     if settings.consult_coach_enabled:
         reservation = _reserved_coach_attempt_for_round(persisted, turn.round)
         if reservation is not None:
             l1_facts = _consult_l1_for_round(persisted, turn.round)
             try:
-                outcome = await run_consult_coach(
-                    persisted,
-                    reservation=reservation,
-                    l1_facts=l1_facts,
-                )
+                async with usage_context.usage_purpose("coach"):
+                    outcome = await run_consult_coach(
+                        persisted,
+                        reservation=reservation,
+                        l1_facts=l1_facts,
+                    )
             except asyncio.CancelledError:
                 # CAS1 already burned the reservation. Cancellation must remain
                 # observable to the server and must not release or retry it.
@@ -1248,6 +1269,18 @@ def _ocr_summary_text(
     return "；".join(parts) + "——档案可能不完整，可重新上传重试"
 
 
+async def _normalize_resume_with_scope(
+    owner_user_id: str | None,
+    **task_kwargs,
+) -> None:
+    async with usage_context.usage_scope(
+        owner_user_id,
+        str(task_kwargs["session_id"]),
+        "normalize",
+    ):
+        await _normalize_resume(**task_kwargs)
+
+
 async def _normalize_resume(
     *,
     session_id: str,
@@ -1288,9 +1321,10 @@ async def _normalize_resume(
                 "ocr",
                 "这份是扫描件/图片，我用视觉识别读一读～",
             )
-            raw_text = await ocr_image_jpeg(
-                jpeg, on_attempt=_mark_external_attempt
-            )
+            async with usage_context.usage_purpose("ocr"):
+                raw_text = await ocr_image_jpeg(
+                    jpeg, on_attempt=_mark_external_attempt
+                )
         elif settings.resume_ocr_enabled and suffix.casefold() == ".pdf" and content:
             pages, _total_pages = await asyncio.to_thread(
                 extract_resume_pages_from_bytes,
@@ -1332,9 +1366,10 @@ async def _normalize_resume(
                     )
                     ocr_narrated = True
                 try:
-                    ocr_text = await ocr_image_jpeg(
-                        jpeg, on_attempt=_mark_external_attempt
-                    )
+                    async with usage_context.usage_purpose("ocr"):
+                        ocr_text = await ocr_image_jpeg(
+                            jpeg, on_attempt=_mark_external_attempt
+                        )
                 except Exception:
                     interrupted_pages = len(candidates) - candidate_index
                     break

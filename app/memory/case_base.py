@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.config import settings
 from app.db.pool import get_pool
 from app.db.vector import to_pgvector
+from app.llm import usage_context
 from app.llm.qwen_embed import embed_one
 
 
@@ -119,7 +120,8 @@ async def upsert_career_case(
 ) -> None:
     case.validate_anonymous()
     if embedding is None and embed_if_missing:
-        embedding = await embed_one(build_case_embedding_text(case))
+        async with usage_context.usage_purpose("case_embed"):
+            embedding = await embed_one(build_case_embedding_text(case))
     if embedding is not None and len(embedding) != settings.embed_dim:
         raise ValueError(
             f"Embedding dimension mismatch: got {len(embedding)}, "

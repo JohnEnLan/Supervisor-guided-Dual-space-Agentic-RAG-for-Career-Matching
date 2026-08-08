@@ -9,11 +9,16 @@ v3 B4 视觉 OCR 兜底：
 """
 import asyncio
 import base64
+import logging
 from collections.abc import Callable
 
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.llm import usage_context
+
+
+logger = logging.getLogger(__name__)
 
 # 与 qwen_embed 同一 DashScope OpenAI 兼容 endpoint。
 # timeout/max_retries 写死（B4 方案三轮 Codex 裁定）：J1 熔断语义承诺
@@ -75,4 +80,26 @@ async def ocr_image_jpeg(
             ),
             timeout=_VL_WALL_CLOCK_SECONDS,
         )
-    return (response.choices[0].message.content or "").strip()
+    content = (response.choices[0].message.content or "").strip()
+    try:
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens")
+        completion_tokens = getattr(usage, "completion_tokens")
+        total_tokens = getattr(usage, "total_tokens")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (prompt_tokens, completion_tokens, total_tokens)
+        ):
+            raise ValueError("invalid token usage")
+        await usage_context.record_llm_usage(
+            "dashscope",
+            settings.qwen_vl_model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("qwen VL usage recording failed", exc_info=True)
+    return content

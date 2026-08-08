@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from typing import Annotated
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
-from app.api.auth.deps import require_owned_run
+from app.api.auth.deps import optional_current_user, require_owned_run
+from app.api.auth.sessions import AuthedUser
 from app.agents.orchestrator import run_persisted_agentic_match_run
 from app.agents.trace import (
     build_public_explain,
@@ -20,6 +25,7 @@ from app.api.v1.schemas import (
     RunStatusResponse,
 )
 from app.config import settings
+from app.db.pool import get_pool
 from app.db.run_store import (
     RunConflict,
     get_run,
@@ -29,10 +35,12 @@ from app.db.run_store import (
 from app.domain.run import RunStage, RunStatus, TERMINAL_STATUSES
 from app.domain.results import ProductResult
 from app.graph.runner import run_graph_match
+from app.llm import usage_context
 from app.state.schema import SharedState
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 PUBLIC_STAGE_ORDER = (
     "resume",
@@ -56,6 +64,7 @@ async def execute_run(
     request: ExecuteRunRequest,
     background_tasks: BackgroundTasks,
     http_request: Request,
+    user: Annotated[AuthedUser | None, Depends(optional_current_user)] = None,
 ) -> RunStatusResponse:
     try:
         run = await queue_run(
@@ -65,13 +74,22 @@ async def execute_run(
         )
     except RunConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    await usage_context.record_product_event(
+        "run_started",
+        user.user_id if user is not None else None,
+    )
     executor = _select_run_executor()
     execution_kwargs = {"run_id": run_id}
     if settings.langgraph_orchestrator_enabled:
         execution_kwargs["checkpointer"] = (
             http_request.app.state.langgraph_checkpointer
         )
-    background_tasks.add_task(executor, **execution_kwargs)
+    background_tasks.add_task(
+        _run_with_usage_scope,
+        run_id,
+        executor,
+        **execution_kwargs,
+    )
     return _status_response(run)
 
 
@@ -212,6 +230,44 @@ def _select_run_executor():
     if settings.langgraph_orchestrator_enabled:
         return run_graph_match
     return run_persisted_agentic_match_run
+
+
+async def _run_with_usage_scope(scope_run_id: str, executor, **kwargs) -> None:
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT run.session_id, session.owner_user_id
+                FROM match_runs AS run
+                INNER JOIN session_state AS session
+                    ON session.session_id = run.session_id
+                WHERE run.run_id = $1
+                """,
+                scope_run_id,
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "run usage attribution lookup failed for %s",
+            scope_run_id,
+            exc_info=True,
+        )
+        await executor(**kwargs)
+        return
+    if row is None:
+        logger.warning("run usage attribution missing for %s", scope_run_id)
+        await executor(**kwargs)
+        return
+
+    owner_user_id = row["owner_user_id"]
+    async with usage_context.usage_scope(
+        str(owner_user_id) if owner_user_id is not None else None,
+        str(row["session_id"]),
+        "run",
+    ):
+        await executor(**kwargs)
 
 
 def _projection_context_from_snapshot(
