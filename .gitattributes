@@ -1,3 +1,5 @@
 # B4 golden 冻结 fixtures：字节精确（PDF xref 偏移 / 编码测试的原始字节），
 # 禁止任何行尾转换——否则 checkout 即损坏、等价线假红。
 tests/fixtures/extraction_golden/** binary
+# golden.json 是 JSON 清单（内容经字符串转义，行尾无关）：按文本归一化
+tests/fixtures/extraction_golden/golden.json text
