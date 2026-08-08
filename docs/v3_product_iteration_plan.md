@@ -1,4 +1,8 @@
-# v3 产品迭代方案（v2.7 · 2026-08-08 · 唯一权威全文）
+# v3 产品迭代方案（v2.7-final · 2026-08-08 · 唯一权威全文 · 三方评审收敛）
+
+> **收敛声明**：本方案经九轮三方评审于 2026-08-08 收敛——Claude 自审 +
+> 子 agent（第四至九轮连续六 PASS）+ Codex（第九轮 PASS，0B/0M/0m）。
+> 自此进入执行阶段：每批四门 + 对侧抽查；五批完成后三方全量 diff 查 bug。
 
 > 修订史：v1→v2.6 经八轮三方评审收敛（子 agent 四至八轮连续 PASS；Codex
 > 第八轮残留 1M/3m/1nit 于本版处置，见 §15）。v1–v2.2 为未入库草稿；git 内
@@ -502,8 +506,8 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
      脚本内容（单事务）：`BEGIN; UPDATE session_state SET
      status='awaiting_resume' WHERE status IN
      ('resume_uploaded','resume_queued'); DELETE FROM resume_uploads;
-     COMMIT;`（**含 resume_queued**——restart 杀死在途任务后该状态
-     无人认领；两方评审独立确认）；
+     COMMIT;`（**含 resume_queued**——停服完成后该状态无人认领；
+     两方评审独立确认）；
   ③ 换回旧 app 包 + 旧前端（symlink 翻回旧 release）；
   ④ `systemctl start career-rag` 恢复流量。
   0009 表保留无害。脚本随 B2 批入库 `deploy/rollback_b2.sql`。
