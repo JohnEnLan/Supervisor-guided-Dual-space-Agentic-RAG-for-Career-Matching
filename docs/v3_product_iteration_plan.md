@@ -1,8 +1,14 @@
-# v3 产品迭代方案（v2.4 · 2026-08-08 · 唯一权威全文）
+# v3 产品迭代方案（v2.5 · 2026-08-08 · 唯一权威全文）
 
-> 修订史：v1→v2.3 经五轮三方评审收敛（子 agent 第四、五轮 PASS；Codex 第五轮
-> 残留 1B/7M 于本版处置，见 §12）。v1–v2.2 仅为工作草稿、未曾入库——**本版
-> 为唯一权威全文，无任何外部引用**；git 内前版仅 v2.3（3368613）。
+> 修订史：v1→v2.4 经六轮三方评审收敛（子 agent 第四/五/六轮 PASS；Codex
+> 第六轮残留 1B/7M/3m 于本版处置，见 §13）。v1–v2.2 为未入库草稿；git 内
+> 前版 v2.3（3368613）、v2.4（8c6ac50）。**正文自包含**；唯一跨文档指针：
+> 历史意见处置表存于 git v2.3 §12（非规范性）。
+> **规范性引用原则（评审裁定）**：凡"保留型约束"（不许改动的既有值——
+> role_clusters 词表、clarify 后缀键名、phase 枚举、120/80 上限、四开关
+> 矩阵语义、G17/G18、Feature A 行为），其权威源＝现行代码与钉死它们的
+> 测试（本文给出精确文件:行锚点）；本方案不复制其字面值，以免双源漂移。
+> 实施者以"锚点处测试保持全绿"为该类约束的完成判据。
 > 宪法裁决（用户 2026-08-08，已入库 de88946）：`asyncio.to_thread` 卸载阻塞
 > 库调用为"禁 threading"硬约束的明确允许例外（AGENTS.md §2.2 /
 > CLAUDE_LANGGRAPH.md §2.2）；仍禁自建线程/线程池/共享可变状态。
@@ -83,12 +89,17 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
      内存传 BackgroundTask（行缺失→回滚，按 resume_changed）。
   已证：与 accept 的全部交错在行锁串行化下安全；双击单扣。
 - `save_normalized_resume` / `mark_resume_error`（**改造为单事务 CAS +
-  终态事件**）：两函数各增可选 `terminal_event` 参数；实现为**同一事务内**
-  `UPDATE session_state ... WHERE resume_upload_generation=$n AND
-  status='resume_queued' RETURNING session_id` —— **RETURNING 命中才**
-  INSERT 终态进度事件（不带 §3.1 的 EXISTS 守卫，事件正当性由 CAS 保证）；
-  未命中则整体 no-op、不写任何事件（杜绝旧代孤儿终态事件；补 CAS miss
-  全回滚测试）。
+  终态事件**）：两函数各增可选 `terminal_event` 参数，类型
+  `TerminalEvent{step: Literal["done","error"], text: str,
+  elapsed_ms: int}`；实现为**同一事务内**
+  `UPDATE session_state ... WHERE session_id=$1 AND
+  resume_upload_generation=$n AND status='resume_queued'
+  RETURNING session_id` —— **RETURNING 命中才** INSERT 终态进度事件
+  （不带 §3.1 的 EXISTS 守卫，正当性由 CAS 保证）；未命中整体 no-op、
+  不写任何事件（补 CAS miss 全回滚测试）。**seq 分配协议**：非终态事件
+  由任务内计数器分配 1..99；终态固定 `seq=100`（保留段）——每代仅一个
+  任务（begin CAS 保证）且终态至多一次（本 CAS 保证），PK 冲突按构造
+  不可达；万一发生则事务回滚整体 no-op。
 - **返还**：`_normalize_resume` 单 try/finally 内维护 `external_started`
   （进度阶段 normalizing/ocr 置位）；失败且未置位 →
   `UPDATE session_state SET resume_parse_count =
@@ -106,12 +117,16 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
   - **consult 落库保护（generation 为主判据）+ 所需契约扩展（三件，
     实现前置写死）**：(i) `mutate_state_atomically` 向 mutator 增传
     locked.status（`_load_locked_state` 已 SELECT 该列，仅穿参）；
-    (ii) 允许 mutator 返回值覆写本次落库的 status（动态降级为 None＝
-    不写状态列，只落 state；`status=None` 写路径已存在）；(iii) flag-off
-    consult 读路径由 `load_state` 换为带 generation 的 context loader。
+    (ii) **mutator 返回协议**：由"返回业务结果"改为返回
+    `MutationOutcome{result: Any, status_override: str | None |
+    KEEP_SENTINEL}`——`KEEP`（默认）＝沿用调用方传入的 persisted_status；
+    `None`＝本次不写 status 列只落 state（该写路径已存在）；`str`＝覆写。
+    既有调用点以 KEEP 语义零行为变化地迁移；(iii) flag-off consult 读路径
+    由 `load_state` 换为带 generation 的 context loader。
     判定：行锁内 `locked.generation != loaded_generation ∨ locked.status ∈
-    {uploaded, queued}` → 只追加 transcript（降级路径跳过
-    `_merge_feature_a_resume_state`），不覆盖 status。双 flag 配置各测。
+    {'resume_uploaded', 'resume_queued'}`（全名，与状态机字面一致）→
+    status_override=None 只追加 transcript（降级路径跳过
+    `_merge_feature_a_resume_state`）。双 flag 配置各测。
   - **match-brief**：generation 比对提出 flag 门控（无条件生效，失配→409
     resume_changed）；**version 比对维持 flag 门控不变**（防打破
     test_api_v1.py:198 既有 fixture 基线；如该批顺手补 fake 实参亦可，
@@ -126,9 +141,10 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
   422 `unreadable_file`。
 - `GET /sessions/{id}/resume-upload`（require_owned_session）：仅
   `status='resume_uploaded'` 返回上述同构元数据（不含 content），否则 404。
-- `POST /sessions/{id}/resume/parse`（require_owned_session，202
-  `resume_queued`）：**请求 DTO `ResumeParseRequest{generation: int}`**——
-  必须回传预览所得 generation；旧标签页解析未预览新代 → 409 resume_changed。
+- `POST /sessions/{id}/resume/parse`（require_owned_session，202）：
+  请求 DTO `ResumeParseRequest{generation: int}`——必须回传预览所得
+  generation；旧标签页解析未预览新代 → 409 resume_changed。**响应复用
+  现有 `ResumeAcceptedResponse{session_id, status:"resume_queued"}`**。
 - `resume-preview` / `resume-confirm` 在 uploaded 态 → 409 `resume_unparsed`。
 - OpenAPI 快照 + generated.ts + apiFixtures.ts 同批再生。
 - **文档同步（B2 批内完成）**：project_functionality_and_code_guide.md、
@@ -155,8 +171,8 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
 ### 1.5 测试
 
 - 必改后端：test_resume_generation_lifecycle.py（L233/263/425/819 区）、
-  test_api_v1.py（`PUBLic_PATHS` 常量为 `PUBLIC_PATHS`，加 2 新端点 +
-  快照重生成）、test_uploads.py（整文件）、test_memory_phase_e.py:583、
+  test_api_v1.py（`PUBLIC_PATHS` 常量加 2 新端点 + 快照重生成）、
+  test_uploads.py（整文件）、test_memory_phase_e.py:583、
   test_auth_ownership.py（GET resume-upload、POST parse）、
   test_config_env_boundary.py（RESUME_PARSE_LIMIT）。
 - 必改前端：WorkbenchPage.test.tsx（~L409/700/706/716/1481/1510，6–10 个
@@ -222,9 +238,12 @@ CREATE TABLE resume_intake_progress (
   200 `ResumeProgressResponse{generation: int|null, status: str,
   events: [{seq, step, text, elapsed_ms, created_at}], done: bool}`——
   events 取 `session_state.resume_upload_generation` 当前代、`ORDER BY seq`
-  全量返回（每代 ≤10 条，无需游标）；无记录 → `events=[]`；
-  `done = status ∈ {resume_ready, resume_error}`；前端 processing 期
-  1200ms 轮询，`done=true` 即停。
+  全量返回（每代 ≤10 条，无需游标）；从未上传（列值 0）→
+  `generation=null, events=[]`；**`done = status != 'resume_queued'`**
+  （离开 queued 即终——ready/error/uploaded 全部停轮询，覆盖"解析中重传"
+  交错：重传后状态为新代 resume_uploaded → done=true，前端停进度轮询并
+  回落确认卡）。前端双保险：记录发起 parse 时的 generation，响应
+  generation 变化即停并刷新上传态。补该交错测试。
 - 前端：事件按小意气泡逐条出现（复用 B1 stagger）；done 展示"用时 X.X 秒"。
 - 测试：回调序列；DELETE 代数谓词交错（迟到旧任务删不掉新代）；终态事件
   仅随 CAS 命中写入；所有权；**前端 1200ms 轮询渲染、done 停轮询、逐行
@@ -269,15 +288,26 @@ CREATE TABLE resume_intake_progress (
     `MAX_IMAGE_PIXELS`（其超限默认仅告警、超两倍才抛错）；JPEG draft
     降采样 → 归一化到 MAX_PIXELS → 同管线。
   - DOCX：仅文本；无文本 → resume_error + "转 PDF 或图片重传"。
+- **图片的上传/解析阶段边界（B4 内定义）**：图片后缀（.png/.jpg/.jpeg/
+  .webp，按后缀判定）加入白名单后，**上传阶段零 VL 调用**——仅做 header
+  解码尺寸检查（>40M 像素 → 422 unreadable_file），入库
+  `extracted_text=''、pages=1、chars=0、ocr_suggested=true`，
+  text_preview 固定为"图片简历，确认解析后将进行视觉识别（约几分钱）"；
+  合法图片**不会**因无文本被 422（422 的"不可解析"仅适用 pdf/docx 提取
+  异常）。VL 只在确认解析后的任务内调用。
 - 终止：归一化后无任何可用 evidence span → resume_error（G17）。
 - pypdfium2、Pillow 入 requirements.txt；前端 accept 放开图片 +
   ocr_suggested 文案（前后端批，四门含 vitest + frontend-dist 包）。
+- **B4 配置与文档同步**：`.env.example` 与 `deploy/env.production.template`
+  增 §7 所列 8 个 VL/OCR 变量；deploy_guide（依赖安装）、
+  product_guide（图片简历说明）、code_guide（OCR 管线）同批更新。
 - 测试（oracle 与正文逐分支闭合）：混合 PDF 仅低文本页 OCR + 按页替换；
-  **q70 合格→调用 VL；q70 超→q50 合格→调用 VL；双超→不调用 VL +
-  保留原生文本 + 跳页事件**；MAX_PAGES 截断后原生文本页保留；
-  **40_000_001 像素边界硬拒**；scale 收敛内存有界；VL Semaphore 上限；
-  docx 无文本引导；`RESUME_OCR_ENABLED=false` 逐字节等价；无 span→error；
-  前端图片上传全流程。
+  **q70 合格→VL 恰调 1 次（payload 为 q70 编码）；q70 超→q50 合格→VL 恰
+  调 1 次（payload 为 q50 编码，编码尝试恰 2 次）；双超→VL 0 次 + 保留
+  原生文本 + 跳页事件**；MAX_PAGES 截断后原生文本页保留；
+  **40_000_000 像素恰好通过、40_000_001 硬拒**（双边界）；scale 收敛内存
+  有界；VL Semaphore 上限；图片上传阶段 VL 0 次；docx 无文本引导；
+  `RESUME_OCR_ENABLED=false` 逐字节等价；无 span→error；前端图片全流程。
 
 ## 5. B5 计量 + 管理员（migration 0011，完整 DDL）
 
@@ -345,13 +375,28 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
 - `GET /api/v1/admin/runs/{run_id}/explain`（require_admin，跨用户，复用
   现有 explain DTO）。
 - `POST /api/v1/admin/sessions/{id}/reset-parse-count`（require_admin，
-  **单事务 FOR UPDATE**）：重置 `resume_parse_count=0`；**仅当
-  status='resume_queued'（restart 遗留）** → 置 resume_error + 清该会话
-  resume_uploads 的 content/extracted_text；**status='resume_uploaded'
-  （合法待解析）→ 保留上传原件不清理**（防止重置销毁可解析内容）。
+  **单事务 FOR UPDATE**）三态语义显式化：① `resume_parse_count=0` 恒定
+  执行；② 仅当 status='resume_queued'（restart 遗留）→ 置 resume_error +
+  清该会话 resume_uploads 的 content/extracted_text；③
+  status='resume_uploaded'（合法待解析）及其余状态 → 仅清零计数、不动
+  上传与状态。响应 `{session_id, resume_parse_count: 0, status}`。
+- **admin 响应 DTO（OpenAPI 可生成级）**：
+  `AdminOverviewResponse{users_total, logins_today/7d/30d,
+  sessions_total, consult_turns_total, runs_total,
+  tokens_by_day: [{date, total_tokens}], tokens_by_model:
+  [{model, prompt_tokens, completion_tokens, total_tokens}]}`；
+  `AdminUsersPageResponse{items: [AdminUserRow{user_id, email,
+  created_at, last_login_at, session_count, resume_name, resume_phone,
+  resume_school, resume_degree}], page, page_size(=20), has_more}`；
+  `AdminUserResumeResponse{user_id, session_id|null, resume_state:
+  object|null}`（无简历 → session_id/resume_state 为 null，200 不 404）；
+  admin explain 复用现有 explain DTO；不存在的 user/session/run → 404。
 - 前端 `/admin` 轻 shell（入口仅 `me.is_admin` 可见）：Dashboard + 用户表
   + 简历详情抽屉 + 重置按钮；「评估（答辩）」「监控（答辩）」入口移入
   /admin（旧路径 Navigate 重定向）；用户侧 sidebar 移除两入口（R9）。
+- **B5 配置与文档同步**：`.env.example` 与 `deploy/env.production.template`
+  增 ADMIN_EMAILS；product_guide.md 评估/监控用户入口章节（现 :170 附近）
+  改为 admin 入口说明；code_guide/deploy_guide 增管理端路由与部署段。
 
 ### 5.4 简历联系人结构化
 
@@ -399,15 +444,17 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
      LLM）——前端必须后于后端；
   ② 前端版本目录 + 符号链接切换：解包到
      `/opt/career-rag/releases/frontend-<版本>` →
-     `ln -sn <目录> current.tmp && mv -Tf current.tmp
-     /opt/career-rag/frontend-current`（rename(2) 真原子；Caddy v2
-     file_server 默认跟随 symlink 并按请求解析，翻链即时生效）；
-     Caddyfile root 改指 `frontend-current`（B2 批一并改，含 index.html
-     `Cache-Control: no-store`）；
+     `ln -sfn <目录> /opt/career-rag/current.tmp && mv -Tf
+     /opt/career-rag/current.tmp /opt/career-rag/frontend-current`
+     （绝对路径、同文件系统保 rename(2) 原子；`-f` 使中断残留的
+     current.tmp 可幂等覆盖；Caddy v2 file_server 默认跟随 symlink 并按
+     请求解析，翻链即时生效）；Caddyfile root 改指 `frontend-current`
+     （B2 批一并改，含 index.html `Cache-Control: no-store`）；
   ③ `caddy validate --config /etc/caddy/Caddyfile` →
      `systemctl reload caddy`（仅因 Caddyfile 本身变更）；
   ④ 已打开的旧标签页刷新即恢复（已接受残留）。
   首次切换 bootstrap 与全新安装布局写入 deploy_guide.md（§1.3 文档同步）。
+  B2 服务器 env 增 `RESUME_PARSE_LIMIT=3`（写入两份 env 模板）。
 - B4：`pip install -r requirements.txt` + env（QWEN_VL_MODEL、
   VL_MAX_CONCURRENCY、RESUME_OCR_ENABLED、RESUME_OCR_PAGE_MIN_CHARS、
   RESUME_OCR_MAX_PAGES、RESUME_OCR_MAX_PIXELS、RESUME_OCR_RENDER_SCALE、
@@ -416,7 +463,13 @@ CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
 
 ## 8. 风险与回滚
 
-- 每批独立 commit/包，回滚＝上一包；0009-0011 均 additive。
+- B1/B3/B4/B5：回滚＝部署上一包（0010/0011 additive，留表无害）。
+- **B2 回滚诚实条款**：B2 改变了待解析数据的存放（BYTEA）与状态机
+  （resume_uploaded），**前滚修复优先**；若必须回滚到旧包，须先执行
+  状态迁移脚本：`UPDATE session_state SET status='awaiting_resume'
+  WHERE status IN ('resume_uploaded'); DELETE FROM resume_uploads;`
+  （处于新状态的会话回到"请重新上传"，旧后端可正常消费；0009 表保留
+  无害）。脚本随 B2 批入库 `deploy/rollback_b2.sql`。
 - OCR 成本闸：确认制 + 解析限额 + VL Semaphore + 页数/像素/解码防炸/
   base64 上限。
 - 返还偏置只向用户（GREATEST + CHECK 双下限；reset 交错上界 1/任务）。
@@ -450,3 +503,23 @@ diff 查 bug（正确性/契约/并发/安全/回归），修复回审至三方�
 | 子 agent m2 | ln -sfn 非原子 | §7 ln -sn + mv -Tf（rename 真原子） |
 | 子 agent m3 | deploy_guide 全新安装矛盾/bootstrap | §1.3 文档同步扩围 + §7 bootstrap |
 | 子 agent m4 | B2 返工敞口半句 | 裁决为"允许"，条款已闭（无需保留敞口） |
+
+## 13. 第六轮意见处置（v2.5）
+
+| 来源 | 意见 | 处置 |
+|---|---|---|
+| Codex B1 | 保留型约束未内联 | 头部「规范性引用原则」裁定：权威源＝代码+钉死测试（防双源漂移），锚点已给全；不复制字面值 |
+| Codex M1 | mutator 协议/状态名简写 | §1.2 MutationOutcome{result, status_override: KEEP/None/str} + 全名 |
+| Codex M2 | 解析中重传致进度永久轮询 | §3.1 done=status!='resume_queued' + 前端 generation 变化即停 + 交错测试 |
+| Codex M3 | terminal_event 字段/seq/幂等 | §1.2 TerminalEvent 类型 + seq 1..99/终态=100 保留段 + 冲突不可达论证 |
+| Codex M4 | parse/admin DTO 缺失 | §1.3 复用 ResumeAcceptedResponse；§5.3 四个 Admin DTO 逐字段 + 404/空态 |
+| Codex M5 | 图片上传阶段边界 | §4 上传零 VL、尺寸检查、固定 preview、422 不适用图片 |
+| Codex M6 | 回滚声明不成立 | §8 B2 前滚优先 + rollback_b2.sql 状态迁移脚本 |
+| Codex M7 | B4/B5 env/文档同步缺口 | §4/§5.3 同步条款（含 product_guide :170 冲突处） |
+| Codex m1 | current.tmp 相对路径/残留 | §7 绝对路径 + ln -sfn 幂等（子 agent nit 同源） |
+| Codex m2 | 40M 接受边界/调用次数 | §4 双边界 + VL 调用次数与 payload 断言 |
+| Codex m3 | 未上传 generation 语义 | §3.1 列值 0 → null |
+| 子 agent m6-1 | 自包含声明字面矛盾 | 头部措辞改为"正文自包含 + 唯一非规范性指针" |
+| 子 agent m6-2 | 终态 CAS 漏 session_id | §1.2 WHERE 补全 |
+| 子 agent m6-3 | PUBLic_PATHS 笔误 | §1.5 改正 |
+| 子 agent nit | reset 三态显式/RESUME_PARSE_LIMIT 入 env | §5.3 ③ 显式 + §7 B2 env |
