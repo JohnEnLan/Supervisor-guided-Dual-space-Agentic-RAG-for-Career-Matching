@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import { api } from "../api/queries";
 import { HomePage } from "./HomePage";
-import { INTRO_SEEN_KEY } from "./introSeen";
 
 function renderHome() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -38,16 +37,8 @@ describe("HomePage", () => {
     expect(within(region).getAllByRole("article")).toHaveLength(6);
   });
 
-  it("routes first-time visitors through the welcome intro", async () => {
-    const user = userEvent.setup();
-    const router = renderHome();
-    const [primaryCta] = await screen.findAllByRole("button", { name: "进入应用" });
-    await user.click(primaryCta);
-    expect(router.state.location.pathname).toBe("/welcome");
-  });
-
-  it("sends returning visitors straight to login", async () => {
-    localStorage.setItem(INTRO_SEEN_KEY, "1");
+  it("sends logged-out visitors straight to login (intro handled by HomeGate)", async () => {
+    // B1 R7：首访重定向职责上移到路由层 HomeGate；能渲染首页的都已读过介绍
     const user = userEvent.setup();
     const router = renderHome();
     const [primaryCta] = await screen.findAllByRole("button", { name: "进入应用" });

@@ -90,6 +90,32 @@ export function statusInterval(
   return data.retry_after_ms;
 }
 
+// B1 R5：到场编排——只对"本次轮询新增"的消息按批内顺序附加动画延迟，
+// 历史消息（首帧基线）不重播。reduced-motion 由 theme.css 全局禁动画兜底
+// （animation 被禁后 animation-delay 无效，内容即时可见）。
+export function useStaggeredReveal(
+  keys: string[],
+  resetKey: string,
+): (key: string) => React.CSSProperties | undefined {
+  const primedFor = useRef<string | null>(null);
+  const seen = useRef<Set<string>>(new Set());
+  const delays = useRef<Map<string, number>>(new Map());
+  if (primedFor.current !== resetKey) {
+    primedFor.current = resetKey;
+    seen.current = new Set(keys);
+    delays.current = new Map();
+  }
+  const fresh = keys.filter((key) => !seen.current.has(key));
+  fresh.forEach((key, index) => {
+    seen.current.add(key);
+    delays.current.set(key, index * 450);
+  });
+  return (key) => {
+    const delay = delays.current.get(key);
+    return delay ? { animationDelay: `${delay}ms` } : undefined;
+  };
+}
+
 function Bubble({
   persona,
   children,
@@ -97,6 +123,7 @@ function Bubble({
   sticky = false,
   grouped = false,
   metadata,
+  style,
 }: {
   persona: keyof typeof PERSONAS;
   children: React.ReactNode;
@@ -104,6 +131,7 @@ function Bubble({
   sticky?: boolean;
   grouped?: boolean;
   metadata?: { kind: "stage" | "round"; text: string };
+  style?: React.CSSProperties;
 }) {
   const meta = PERSONAS[persona] ?? PERSONAS.pm;
   const mine = persona === "user";
@@ -114,6 +142,7 @@ function Bubble({
       data-sticky={sticky ? "true" : undefined}
       data-grouped={grouped ? "true" : undefined}
       tabIndex={metadata ? 0 : undefined}
+      style={style}
     >
       {!mine && !grouped ? (
         <span className="v2-avatar" aria-hidden="true">
@@ -793,6 +822,12 @@ export function WorkbenchPage() {
 
   const transcript = consult.data?.transcript ?? [];
   const runMessages = (conversation.data?.messages ?? []).filter((item) => item.kind !== "intro");
+  // B1 R5：仅对本次轮询新增的运行消息做到场编排（i*450ms），历史不重播；
+  // 切会话/换 run 时以首帧为基线重置。
+  const staggerStyle = useStaggeredReveal(
+    runMessages.map((item) => `run-${item.seq}`),
+    `${sessionId}:${runId ?? ""}`,
+  );
   const running = Boolean(runId) && !TERMINAL.has(status.data?.status ?? "");
   const completed =
     status.data?.status === "completed" || status.data?.status === "completed_with_warnings";
@@ -909,7 +944,8 @@ export function WorkbenchPage() {
 
         {!resumeReady && !resumeProcessing && !resumeError && !previewLoadError &&
         !uploadPending && !pendingFile && !pendingUploadLoadError ? (
-          <Bubble persona="intent_consultant" tone="card">
+          // B1 R5：PM 先到场，小意 600ms 后跟进（reduced-motion 下即时）
+          <Bubble persona="intent_consultant" tone="card" style={{ animationDelay: "600ms" }}>
             <p>
               把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——
               用下方输入框左侧的 📎 就能发。上传是免费预览，确认解析后才开始整理。
@@ -1164,6 +1200,7 @@ export function WorkbenchPage() {
                 persona={item.persona}
                 grouped={grouped}
                 metadata={{ kind: "stage", text: `阶段 · ${stageLabel}` }}
+                style={staggerStyle(`run-${item.seq}`)}
               >
                 <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
               </Bubble>

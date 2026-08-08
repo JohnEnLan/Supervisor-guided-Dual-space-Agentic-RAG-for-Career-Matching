@@ -4,11 +4,21 @@ import { EvaluationRunPage } from "../features/evaluation/EvaluationRunPage";
 import { MonitoringPage } from "../features/monitoring/MonitoringPage";
 import { AppShell, type AppShellOutletContext } from "../v2/AppShell";
 import { HomePage } from "../v2/HomePage";
+import { hasSeenIntro } from "../v2/introSeen";
 import { LandingPage } from "../v2/LandingPage";
 import { ProfilePage } from "../v2/ProfilePage";
 import { WelcomePage } from "../v2/WelcomePage";
 import { WorkbenchPage } from "../v2/WorkbenchPage";
 import { RouteError } from "./App";
+
+
+// B1 R7：首访先看 /welcome（滚动介绍），看过/跳过后才落到首页 P1。
+// localStorage 同步判断（CSR），零闪烁；写失败场景由 introSeen 内存旗标
+// 与 WelcomePage 的写后回读兜底，不会形成重定向循环。
+function HomeGate() {
+  if (!hasSeenIntro()) return <Navigate replace to="/welcome" />;
+  return <HomePage />;
+}
 
 function EmptyWorkbench() {
   const { startNewConsultation, isCreatingConsultation } = useOutletContext<AppShellOutletContext>();
@@ -36,7 +46,7 @@ function EmptyWorkbench() {
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <HomePage />,
+    element: <HomeGate />,
     errorElement: <RouteError />,
   },
   {

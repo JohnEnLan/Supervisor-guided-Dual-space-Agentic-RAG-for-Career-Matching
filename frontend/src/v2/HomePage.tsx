@@ -3,7 +3,6 @@ import { Database, FileSearch, Layers, MessageSquare, Route, ShieldCheck } from 
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/queries";
-import { hasSeenIntro } from "./introSeen";
 import "./theme.css";
 import "./marketing.css";
 
@@ -45,11 +44,10 @@ export function HomePage() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const loggedIn = Boolean(me.data);
 
-  // 已登录直达工作台；未登录首次访问先看介绍，看过则直接去登录
+  // B1 R7：首访已由 `/` 的 HomeGate 引去 /welcome，能看到首页的都已读过
+  // 介绍——「进入应用」直达登录/工作台；「了解它如何工作」入口常驻。
   const enterApp = () => {
-    if (loggedIn) navigate("/app");
-    else if (hasSeenIntro()) navigate("/login");
-    else navigate("/welcome");
+    navigate(loggedIn ? "/app" : "/login");
   };
 
   return (

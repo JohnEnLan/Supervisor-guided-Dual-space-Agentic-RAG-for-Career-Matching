@@ -13,6 +13,7 @@ function renderWelcome() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter(
     [
+      { path: "/", element: <p>home-page</p> },
       { path: "/welcome", element: <WelcomePage /> },
       { path: "/login", element: <p>login-page</p> },
       { path: "/app", element: <p>app-page</p> },
@@ -27,26 +28,42 @@ function renderWelcome() {
   return router;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
+  const { resetIntroSeenForTests } = await import("./introSeen");
+  resetIntroSeenForTests();
   vi.restoreAllMocks();
   vi.spyOn(api, "me").mockRejectedValue(new ApiError(401, "unauthorized"));
 });
 
 describe("WelcomePage", () => {
-  it("marks the intro as seen and continues to login from the final CTA", async () => {
+  it("marks the intro as seen and continues to the homepage from the final CTA", async () => {
+    // B1 R7：介绍页出口 → 首页（P1），不再直达登录
     const user = userEvent.setup();
     const router = renderWelcome();
-    await user.click(screen.getByRole("button", { name: "开始使用" }));
-    expect(router.state.location.pathname).toBe("/login");
+    await user.click(screen.getByRole("button", { name: "进入 Career RAG" }));
+    expect(router.state.location.pathname).toBe("/");
     expect(localStorage.getItem(INTRO_SEEN_KEY)).toBe("1");
   });
 
-  it("offers a skip control that also exits to login", async () => {
+  it("offers a skip control that also exits to the homepage", async () => {
     const user = userEvent.setup();
     const router = renderWelcome();
     await user.click(screen.getByRole("button", { name: "跳过介绍 →" }));
-    expect(router.state.location.pathname).toBe("/login");
+    expect(router.state.location.pathname).toBe("/");
     expect(localStorage.getItem(INTRO_SEEN_KEY)).toBe("1");
+  });
+
+  it("keeps the exit working when localStorage writes fail (memory fallback)", async () => {
+    // B1 R7：写失败浏览器由内存旗标兜底，绝不陷入 `/`↔`/welcome` 循环
+    const user = userEvent.setup();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+    const router = renderWelcome();
+    await user.click(screen.getByRole("button", { name: "进入 Career RAG" }));
+    const { hasSeenIntro } = await import("./introSeen");
+    expect(hasSeenIntro()).toBe(true);
+    expect(router.state.location.pathname).toBe("/");
   });
 });

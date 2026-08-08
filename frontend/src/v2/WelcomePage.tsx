@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/queries";
-import { markIntroSeen } from "./introSeen";
+import { hasSeenIntro, markIntroSeen } from "./introSeen";
 import "./theme.css";
 import "./marketing.css";
 
@@ -63,16 +63,18 @@ export function WelcomePage() {
     return () => observer.disconnect();
   }, []);
 
-  const toLogin = () => {
+  // B1 R7：介绍页看完/跳过 → 首页（P1）。写后回读：localStorage 写失败的
+  // 浏览器直达 /login，绝不把用户困在 `/`↔`/welcome` 循环里。
+  const exitIntro = () => {
     markIntroSeen();
-    navigate("/login");
+    navigate(hasSeenIntro() ? "/" : "/login");
   };
 
   return (
     <div className="wl-page" ref={containerRef}>
       <nav className="wl-topbar">
         <span className="v2-wordmark">Career RAG</span>
-        <button type="button" className="wl-skip" onClick={toLogin}>
+        <button type="button" className="wl-skip" onClick={exitIntro}>
           跳过介绍 →
         </button>
       </nav>
@@ -166,8 +168,8 @@ export function WelcomePage() {
           <h2>准备好了吗？</h2>
           <p className="wl-lede">验证码登录，首次登录自动创建账号。</p>
           <div className="mk-cta-row">
-            <button type="button" className="v2-btn primary mk-cta" onClick={toLogin}>
-              开始使用
+            <button type="button" className="v2-btn primary mk-cta" onClick={exitIntro}>
+              进入 Career RAG
             </button>
           </div>
           <p className="v2-footnote">此介绍只在首次进入时展示</p>

@@ -99,15 +99,22 @@ export function ResumeProfileAccordion({ preview }: ResumeProfileAccordionProps)
             ) : <p className="v2-resume-empty">未识别到技能。</p>}
           </section>
 
-          <section>
-            <h3>档案质量提示</h3>
+          {/* B1 R3：质量提示与原文证据默认折叠在档案末尾，点击展开 */}
+          <details className="v2-collapse">
+            <summary>
+              <h3>档案质量提示</h3>
+              <span className="v2-collapse-count">{qualityIssues.length}</span>
+            </summary>
             {qualityIssues.length ? (
               <ul>{qualityIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
             ) : <p className="v2-resume-empty">未发现需要提示的档案质量问题。</p>}
-          </section>
+          </details>
 
-          <section>
-            <h3>原文证据</h3>
+          <details className="v2-collapse">
+            <summary>
+              <h3>原文证据</h3>
+              <span className="v2-collapse-count">{evidence.length}</span>
+            </summary>
             {evidence.length ? (
               <ul className="v2-resume-evidence">
                 {evidence.map((item) => (
@@ -118,7 +125,7 @@ export function ResumeProfileAccordion({ preview }: ResumeProfileAccordionProps)
                 ))}
               </ul>
             ) : <p className="v2-resume-empty">没有可展示的原文证据。</p>}
-          </section>
+          </details>
         </section>
       ) : null}
     </div>

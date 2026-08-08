@@ -30,6 +30,41 @@ beforeEach(async () => {
   await router.navigate("/app");
 });
 
+describe("home gate (B1 R7)", () => {
+  it("redirects first-time visitors from / to /welcome", async () => {
+    const { resetIntroSeenForTests } = await import("../v2/introSeen");
+    resetIntroSeenForTests();
+    localStorage.clear();
+    await router.navigate("/");
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/welcome"));
+  });
+
+  it("keeps returning visitors on the homepage", async () => {
+    const { INTRO_SEEN_KEY, resetIntroSeenForTests } = await import("../v2/introSeen");
+    resetIntroSeenForTests();
+    localStorage.setItem(INTRO_SEEN_KEY, "1");
+    await router.navigate("/");
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(await screen.findByRole("region", { name: "功能陈列" })).toBeVisible();
+  });
+});
+
 describe("empty workbench", () => {
   it("offers three onboarding steps and a primary create-session action", async () => {
     const user = userEvent.setup();

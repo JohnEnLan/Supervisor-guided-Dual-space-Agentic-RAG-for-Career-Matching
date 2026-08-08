@@ -54,6 +54,22 @@
 .v2-back-home { color: var(--v2-muted); text-decoration: none; font-size: 0.9rem; }
 .v2-back-home:hover { color: var(--v2-ink); }
 
+/* B1 R3：档案末尾折叠段（质量提示/原文证据） */
+.v2-collapse { border-top: 1px solid var(--v2-line); padding: 10px 0 4px; }
+.v2-collapse summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.v2-collapse summary::-webkit-details-marker { display: none; }
+.v2-collapse summary::after { content: "▾"; color: var(--v2-muted); font-size: 0.8rem; transition: transform 150ms ease; }
+.v2-collapse[open] summary::after { transform: rotate(180deg); }
+.v2-collapse summary h3 { margin: 0; display: inline; }
+.v2-collapse-count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--v2-surface-warm); color: var(--v2-muted); font-size: 0.78rem; text-align: center; }
+
+/* B1 R8 对齐审计：grouped 缩进既有规则已覆盖（=头像 30px+间距 10px）；
+   此处补齐：卡片 padding 统一 16px、stage divider 上下等距、
+   确认卡操作按钮右对齐 */
+.v2-bubble.card { padding: 16px; }
+.v2-stage-divider { margin: 14px 0; }
+.v2-pending-actions { justify-content: flex-end; }
+
 /* B2 上传确认流 */
 .v2-attach { width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; cursor: pointer; flex: none; align-self: center; }
 .v2-pending-actions { display: flex; gap: 10px; margin-top: 10px; }

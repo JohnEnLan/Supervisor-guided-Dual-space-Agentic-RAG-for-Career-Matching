@@ -425,6 +425,10 @@ describe("resume confirmation profile", () => {
     for (const heading of ["教育经历", "工作经历", "项目经历", "技能", "档案质量提示", "原文证据"]) {
       expect(within(profile).getByRole("heading", { name: heading })).toBeVisible();
     }
+    // B1 R3：质量提示与原文证据默认折叠，点击展开后内容可见
+    expect(within(profile).getByText("缺少部分经历的量化结果")).not.toBeVisible();
+    await user.click(within(profile).getByRole("heading", { name: "档案质量提示" }));
+    await user.click(within(profile).getByRole("heading", { name: "原文证据" }));
     for (const content of [
       "Birmingham University",
       "Distinction track",
