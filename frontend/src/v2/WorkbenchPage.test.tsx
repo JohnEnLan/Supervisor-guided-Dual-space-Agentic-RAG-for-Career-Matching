@@ -1,3 +1,4 @@
+import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1630,5 +1631,44 @@ describe("useStaggeredReveal (B1 R5)", () => {
     // 切 run：首个非空批次成为新基线，不编排
     rerender(<HookProbe keys={["x", "y"]} resetKey="s1:r2" />);
     for (const key of ["x", "y"]) expect(delayOf(key)).toBe("");
+  });
+});
+
+describe("useStaggeredReveal concurrent safety (B1 review r3)", () => {
+  it("stays correct when a render is discarded by Suspense (Codex counterexample)", async () => {
+    // 反例时序：committed 基线 {a} → 渲染 [a,b,c] 后同组件 suspend（整帧
+    // 丢弃、effect 未跑）→ 提交帧 [a,b,c,d]：fresh=[b,c,d]，d 必须是
+    // 900ms。旧实现（渲染期写 ref）在此路径下 d 会退化为 0ms。
+    const gate = new Promise<void>(() => {});
+    function Inner({ keys, suspend }: { keys: string[]; suspend: boolean }) {
+      const style = useStaggeredReveal(keys, "suspense-run");
+      if (suspend) throw gate;
+      return (
+        <ul>
+          {keys.map((key) => (
+            <li key={key} data-testid={`sus-${key}`} style={style(key)} />
+          ))}
+        </ul>
+      );
+    }
+    const view = render(
+      <React.Suspense fallback={<p>loading</p>}>
+        <Inner keys={["a"]} suspend={false} />
+      </React.Suspense>,
+    );
+    view.rerender(
+      <React.Suspense fallback={<p>loading</p>}>
+        <Inner keys={["a", "b", "c"]} suspend={true} />
+      </React.Suspense>,
+    );
+    view.rerender(
+      <React.Suspense fallback={<p>loading</p>}>
+        <Inner keys={["a", "b", "c", "d"]} suspend={false} />
+      </React.Suspense>,
+    );
+    expect(screen.getByTestId("sus-a").style.animationDelay).toBe("");
+    expect(screen.getByTestId("sus-b").style.animationDelay).toBe("");
+    expect(screen.getByTestId("sus-c").style.animationDelay).toBe("450ms");
+    expect(screen.getByTestId("sus-d").style.animationDelay).toBe("900ms");
   });
 });
