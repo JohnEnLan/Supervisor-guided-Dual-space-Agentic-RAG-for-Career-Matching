@@ -1514,6 +1514,33 @@ describe("resume lifecycle regressions (audit round 3)", () => {
     expect(screen.queryByText(/正在归一化你的简历/)).not.toBeInTheDocument();
   });
 
+  it("exits stale confirm card into processing when parse hits resume_processing", async () => {
+    // 双标签页并发确认解析：慢的一方收到 409 resume_processing，必须刷新
+    // 双查询——确认卡经 GET 404 退场、preview 409 进入处理中（对侧抽查 r2-M4）
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    let raced = false;
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
+      throw new ApiError(409, raced ? "resume_processing" : "resume_unparsed");
+    });
+    vi.mocked(api.pendingResumeUpload).mockImplementation(async () => {
+      if (!raced) return apiFixtures.resumeUploaded();
+      throw new ApiError(404, "no pending resume upload");
+    });
+    vi.spyOn(api, "parseResume").mockImplementation(async () => {
+      raced = true;
+      throw new ApiError(409, "resume_processing");
+    });
+    renderWithRouter("/app/sessions/sess-1");
+
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "确认解析" })).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText(/正在归一化你的简历/)).toBeVisible();
+  });
+
   it("recovers from resume_error through re-upload and confirm-parse to a ready profile", async () => {
     const user = userEvent.setup();
     mockWorkbenchApi();

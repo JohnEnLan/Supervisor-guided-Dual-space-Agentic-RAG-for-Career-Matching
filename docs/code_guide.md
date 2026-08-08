@@ -81,7 +81,7 @@ frontend/e2e/        浏览器端流程回归
 | 接受上传 | 上传路由 `POST /resume`（200）；`accept_resume_upload` | 单事务：状态置 `resume_uploaded`、generation+1、旧确认作废、文件与本地提取结果写入 `resume_uploads`（BYTEA，不落磁盘）；只留最新一代。非白名单后缀 415，损坏文件 422（不入库不占代）。 |
 | 恢复待解析 | `GET /resume-upload`；`get_pending_resume_upload` | 仅 `resume_uploaded` 态返回元数据，刷新/换设备恢复确认卡。 |
 | 确认解析 | `POST /resume/parse`（body `{generation}`，202）；`begin_resume_parse` | 单事务 FOR UPDATE 单快照分类（优先级：额度满→`resume_parse_limit` ＞ 换代→`resume_changed` ＞ 解析中→`resume_processing` ＞ 未上传态→`resume_unparsed`），扣一次额度、置 queued，并在同事务内把字节读进内存交给后台任务——并发重传的 DELETE 伤不到在途任务。 |
-| 后台归一化 | `_normalize_resume` | 输入为上传时的提取文本；`external_started` 阶段标记在首个 LLM 外呼前置位，之前失败走 `refund_parse_count`（无 generation 谓词 + GREATEST 下限，单 finally=每任务至多一次）。 |
+| 后台归一化 | `_normalize_resume` | 输入为上传时的提取文本；`external_started` 阶段标记在首个 LLM 外呼前置位，之前失败走 `refund_parse_count`（无 generation 谓词 + GREATEST 下限；每任务至多一次由唯一 except 调用点保证）。 |
 | 保存成功 | `save_normalized_resume` | 行锁 + generation **和** `status='resume_queued'` 双前置；命中才 resume_version+1 并置 ready。 |
 | 保存失败 | `mark_resume_error` | 同双前置；旧任务晚到一律 no-op。 |
 | 收尾清理 | `clear_resume_upload_content` | 定向 `session_id+generation` 把 BYTEA 与提取副本置 NULL（隐私：原件不留存）。 |

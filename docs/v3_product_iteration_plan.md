@@ -125,8 +125,8 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
   （进度阶段 normalizing/ocr 置位）；失败且未置位 →
   `UPDATE session_state SET resume_parse_count =
   GREATEST(resume_parse_count - 1, 0) WHERE session_id=$1`（无 generation
-  谓词；扣费先于任务启动已提交，归纳保证正常运行不触下限；单 finally =
-  每任务≤1 次返还的结构保证）。admin 重置与在途任务交错可多还 1 次
+  谓词；扣费先于任务启动已提交，归纳保证正常运行不触下限；每任务≤1 次
+  返还由唯一任务体的唯一 except 调用点保证）。admin 重置与在途任务交错可多还 1 次
   （上界 1/任务，偏向用户，已接受）。restart 丢任务烧 1 次，救济 §5.3。
 - 清理：任务 finally `UPDATE resume_uploads SET content=NULL,
   extracted_text=NULL WHERE session_id=$1 AND generation=$2`（清理范围＝

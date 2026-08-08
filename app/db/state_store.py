@@ -326,8 +326,9 @@ async def begin_resume_parse(
 
 
 async def refund_parse_count(*, session_id: str) -> None:
-    """预外呼失败返还：无 generation 谓词（扣费先于任务启动已提交，
-    每任务至多一次返还由调用方单 finally 结构保证）；GREATEST 兜底。"""
+    """预外呼失败返还：无 generation 谓词（扣费先于任务启动已提交）；
+    每任务至多一次返还由唯一调用点（_normalize_resume 的唯一 except
+    分支）保证；GREATEST 兜底。"""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
