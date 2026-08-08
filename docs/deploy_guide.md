@@ -114,7 +114,9 @@ sudo -u postgres psql -d career_rag -c "REASSIGN OWNED BY postgres TO career;" 2
 cd /opt/career-rag/app && sudo -u career ../venv/bin/python -m app.db.migrate
 ```
 
-migrate **静默退出即成功**（快照自带全部迁移记录，无迁移可补时不打印任何东西）。
+migrate **静默退出即成功**——注意它**无论是否应用了新迁移都不打印**
+（B3 部署时实证），所以"有无生效"以查询为准：
+`sudo -u postgres psql -d career_rag -c "SELECT name FROM schema_migrations ORDER BY applied_at DESC LIMIT 3;"`。
 若需重来（如断线留下半截库）：`DROP DATABASE career_rag;` 后按 setup 脚本第 4 步
 重建空库（CREATE DATABASE / EXTENSION vector / ALTER SCHEMA），再重新 restore。
 
