@@ -1,3 +1,6 @@
+# PDF 一律二进制（B4 三轮审查 minor-1）：手工构造的纯 ASCII PDF 会被 git
+# 内容启发式判为文本，autocrlf checkout 时 LF→CRLF 即毁 xref 偏移。
+*.pdf binary
 # B4 golden 冻结 fixtures：字节精确（PDF xref 偏移 / 编码测试的原始字节），
 # 禁止任何行尾转换——否则 checkout 即损坏、等价线假红。
 tests/fixtures/extraction_golden/** binary

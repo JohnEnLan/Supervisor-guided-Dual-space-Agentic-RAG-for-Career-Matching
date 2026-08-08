@@ -39,6 +39,16 @@ def test_ocr_config_defaults_match_plan_section_4() -> None:
     assert config.resume_ocr_max_image_pixels_decode == 40_000_000
 
 
+def test_vl_client_pins_timeout_and_zero_retries() -> None:
+    """O15（Codex 三轮 Major）：J1 熔断承诺"成本放大上界=1 次调用"依赖
+    SDK 不自作主张重试——timeout=60s 且 max_retries=0 双断言钉死。"""
+    from app.llm import qwen_vl
+
+    assert qwen_vl._VL_TIMEOUT_SECONDS == 60.0
+    assert qwen_vl._client.timeout == 60.0
+    assert qwen_vl._client.max_retries == 0
+
+
 def test_ocr_config_rejects_out_of_range_values() -> None:
     for invalid in ({"vl_max_concurrency": 0}, {"resume_ocr_max_pages": 0},
                     {"resume_ocr_render_scale": 0}):

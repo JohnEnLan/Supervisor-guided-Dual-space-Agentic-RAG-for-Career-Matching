@@ -14,10 +14,16 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 
-# 与 qwen_embed 同一 DashScope OpenAI 兼容 endpoint
+# 与 qwen_embed 同一 DashScope OpenAI 兼容 endpoint。
+# timeout/max_retries 写死（B4 方案三轮 Codex 裁定）：J1 熔断语义承诺
+# "成本放大上界=1 次调用"——SDK 默认 max_retries=2 会让一次逻辑调用变
+# 3 次传输尝试、且 60s 超时罩不住整个逻辑调用，必须归零重试。
+_VL_TIMEOUT_SECONDS = 60.0
 _client = AsyncOpenAI(
     api_key=settings.qwen_api_key,
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    timeout=_VL_TIMEOUT_SECONDS,
+    max_retries=0,
 )
 
 _sem = asyncio.Semaphore(settings.vl_max_concurrency)
@@ -29,9 +35,12 @@ _OCR_INSTRUCTION = "Read all the text in the image."
 async def ocr_image_jpeg(jpeg_bytes: bytes) -> str:
     """对单张 JPEG 图片做 OCR，返回识别出的全部文本（失败向上抛，由任务
 
-    的统一 except 兜底走 resume_error；这里不吞异常）。"""
-    encoded = base64.b64encode(jpeg_bytes).decode("ascii")
+    的统一 except 兜底走 resume_error——图片路径如此；PDF 路径由调用点
+    捕获熔断（方案偏差备案 #2）。"""
     async with _sem:
+        # base64 编码在 Semaphore 内（Codex 一轮 m3）：并发内存峰值随
+        # 并发闸受限，而非只限网络段
+        encoded = base64.b64encode(jpeg_bytes).decode("ascii")
         response = await _client.chat.completions.create(
             model=settings.qwen_vl_model,
             messages=[
