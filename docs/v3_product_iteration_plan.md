@@ -1,53 +1,30 @@
-# v3 产品迭代方案（v2.6 · 2026-08-08 · 唯一权威全文）
+﻿# v3 浜у搧杩唬鏂规锛坴2.6 路 2026-08-08 路 鍞竴鏉冨▉鍏ㄦ枃锛?
+> 淇鍙诧細v1鈫抳2.5 缁忎竷杞笁鏂硅瘎瀹℃敹鏁涳紙瀛?agent 鍥?浜?鍏?涓冭疆 PASS锛汣odex
+> 绗竷杞畫鐣?1B/1M/2m 浜庢湰鐗堝缃紝瑙?搂14锛夈€倂1鈥搗2.2 涓烘湭鍏ュ簱鑽夌锛沢it 鍐?> 鍓嶇増 v2.3/v2.4/v2.5銆?*姝ｆ枃鑷寘鍚?*锛涘敮涓€璺ㄦ枃妗ｆ寚閽堬細鍘嗗彶鎰忚澶勭疆琛ㄥ瓨浜?> git v2.3 搂12锛堥潪瑙勮寖鎬э級銆?> **瑙勮寖鎬у紩鐢ㄥ師鍒欙紙璇勫瑁佸畾锛寁2.6 閿氱偣淇鐗堬級**锛氫繚鐣欏瀷绾︽潫鐨勬潈濞佹簮锛?> 鐜拌浠ｇ爜涓庨拤姝诲畠浠殑娴嬭瘯锛涙湰鏂规涓嶅鍒跺瓧闈㈠€间互闃插弻婧愭紓绉伙紙渚嬪锛氬紩鑷?> 閽夋娴嬭瘯鐨勭煭瀛愪覆鍙唴鑱旓紝濡?搂3.3 瀛樻椿瀛愪覆锛夈€傚畬鎴愬垽鎹紳閿氱偣娴嬭瘯鍏ㄧ豢銆?> **閿氱偣琛紙缁忕涓冭疆閫愪竴鏍告锛?*锛?> - role_clusters **鍜ㄨ璇嶈〃**锛氭潈濞佹簮 consult_engine.py:50锛坧rompt 璇嶈〃锛?>   **涓嶅惈 other**锛夈€傚矖浣嶄晶鑱氱被璇嶈〃锛堝惈 other鈥斺€攃onsult_engine.py:818-831銆?>   scripts/load_jobs.py:145-160锛夋槸**鍙︿竴涓泦鍚?*銆佺敤閫斾笉鍚岋紝涓嶅睘鏈害鏉燂紱
+>   涓よ〃骞跺瓨闈炲啿绐侊紝绯绘湁鎰忓垎灞傦紙瑁佸畾璁板綍浜庢锛夈€傜幇鏈夋祴璇曞彧鎶芥煡涓夊€硷紝
+>   **B3 鏂板鍏ㄩ泦閽夋蹇収娴嬭瘯**锛堣 搂3.1锛夈€?> - clarify 鍚庣紑閿悕锛歵est_resume_clarification_engine.py:**100-101**
+>   锛坅nswer_summary/clarification_action 鏂█澶勶紱鍘熷紩 94-99 鏈夊亸锛屽凡姝ｏ級銆?> - phase 鏋氫妇涓?120/80 涓婇檺锛氬畾涔夋簮 consult_engine.py:24銆?4-95 +
+>   schemas.py:204-206銆?25-227銆?*241锛圕onsultStateResponse 渚х涓夊
+>   鍏紑 DTO锛?*锛涚幇鏃犲叏鍊兼祴璇曪紝**B3 閽夋蹇収涓€骞惰鐩?*锛堝洓鍊兼灇涓?+
+>   120/80 甯搁噺 + 涓夊 DTO 澹版槑涓€鑷存€э細ConsultTranscriptEntry/
+>   ConsultResponse/ConsultStateResponse 涓庡唴閮?ConsultPhase锛夈€?> - 鍥涘紑鍏崇煩闃碉細test_consult_coach.py:944-1116锛堢涓冭疆楠岃瘉鏈夋晥锛夈€?> - G17/G18 璇箟锛歞ocs/validation/2026-08-07-global-audit-findings.md:70銆?> 瀹硶瑁佸喅锛堢敤鎴?2026-08-08锛屽凡鍏ュ簱 de88946锛夛細`asyncio.to_thread` 鍗歌浇闃诲
+> 搴撹皟鐢ㄤ负"绂?threading"纭害鏉熺殑鏄庣‘鍏佽渚嬪锛圓GENTS.md 搂2.2 /
+> CLAUDE_LANGGRAPH.md 搂2.2锛夛紱浠嶇鑷缓绾跨▼/绾跨▼姹?鍏变韩鍙彉鐘舵€併€?> 鍘熷垯锛氭棤鐘舵€佹湇鍔★紙Postgres 鍗曚竴鐘舵€佹簮锛夈€乥ounded loop銆佺‖杩囨护璧?SQL銆?> evidence 涓嶇紪閫犮€佸閮ㄨ皟鐢ㄨ繃 Semaphore銆佷竴娆′竴鎵硅窇閫氬啀涓嬩竴鎵广€?
+## 0. 闇€姹傛槧灏勪笌鎵ц椤哄簭
 
-> 修订史：v1→v2.5 经七轮三方评审收敛（子 agent 四/五/六/七轮 PASS；Codex
-> 第七轮残留 1B/1M/2m 于本版处置，见 §14）。v1–v2.2 为未入库草稿；git 内
-> 前版 v2.3/v2.4/v2.5。**正文自包含**；唯一跨文档指针：历史意见处置表存于
-> git v2.3 §12（非规范性）。
-> **规范性引用原则（评审裁定，v2.6 锚点修正版）**：保留型约束的权威源＝
-> 现行代码与钉死它们的测试；本方案不复制字面值以防双源漂移（例外：引自
-> 钉死测试的短子串可内联，如 §3.3 存活子串）。完成判据＝锚点测试全绿。
-> **锚点表（经第七轮逐一核正）**：
-> - role_clusters **咨询词表**：权威源 consult_engine.py:50（prompt 词表，
->   **不含 other**）。岗位侧聚类词表（含 other——consult_engine.py:818-831、
->   scripts/load_jobs.py:145-160）是**另一个集合**、用途不同，不属本约束；
->   两表并存非冲突，系有意分层（裁定记录于此）。现有测试只抽查三值，
->   **B3 新增全集钉死快照测试**（见 §3.1）。
-> - clarify 后缀键名：test_resume_clarification_engine.py:**100-101**
->   （answer_summary/clarification_action 断言处；原引 94-99 有偏，已正）。
-> - phase 枚举与 120/80 上限：定义源 consult_engine.py:24、94-95 +
->   schemas.py:204-206、225-227；现无全值测试，**B3 钉死快照一并覆盖**
->   （四值枚举 + 120/80 常量）。
-> - 四开关矩阵：test_consult_coach.py:944-1116（第七轮验证有效）。
-> - G17/G18 语义：docs/validation/2026-08-07-global-audit-findings.md:70。
-> 宪法裁决（用户 2026-08-08，已入库 de88946）：`asyncio.to_thread` 卸载阻塞
-> 库调用为"禁 threading"硬约束的明确允许例外（AGENTS.md §2.2 /
-> CLAUDE_LANGGRAPH.md §2.2）；仍禁自建线程/线程池/共享可变状态。
-> 原则：无状态服务（Postgres 单一状态源）、bounded loop、硬过滤走 SQL、
-> evidence 不编造、外部调用过 Semaphore、一次一批跑通再下一批。
-
-## 0. 需求映射与执行顺序
-
-| # | 需求 | 批次 | | # | 需求 | 批次 |
+| # | 闇€姹?| 鎵规 | | # | 闇€姹?| 鎵规 |
 |---|---|---|---|---|---|---|
-| R1 | 图片/扫描识别 | B4 | | R6 | 小意热情人设 | B3 |
-| R2 | 解析叙事+逐行+耗时 | B3 | | R7 | 首访先 /welcome | B1 |
-| R3 | 质量提示/证据折叠 | B1 | | R8 | 对话框对齐 | B1 |
-| R4 | 确认上传/解析+限3次 | B2 | | R9 | 移除评估/监控入口 | B5 |
-| R5 | 逐条出现+用户气泡 | B1+B2 | | R10 | 管理员页 | B5 |
+| R1 | 鍥剧墖/鎵弿璇嗗埆 | B4 | | R6 | 灏忔剰鐑儏浜鸿 | B3 |
+| R2 | 瑙ｆ瀽鍙欎簨+閫愯+鑰楁椂 | B3 | | R7 | 棣栬鍏?/welcome | B1 |
+| R3 | 璐ㄩ噺鎻愮ず/璇佹嵁鎶樺彔 | B1 | | R8 | 瀵硅瘽妗嗗榻?| B1 |
+| R4 | 纭涓婁紶/瑙ｆ瀽+闄?娆?| B2 | | R9 | 绉婚櫎璇勪及/鐩戞帶鍏ュ彛 | B5 |
+| R5 | 閫愭潯鍑虹幇+鐢ㄦ埛姘旀场 | B1+B2 | | R10 | 绠＄悊鍛橀〉 | B5 |
 
-顺序 **B2 → B1 → B3 → B4 → B5**（裁决落地后五批均无前置阻塞）。
-迁移：B2=0009、B3=0010、B5=0011。
+椤哄簭 **B2 鈫?B1 鈫?B3 鈫?B4 鈫?B5**锛堣鍐宠惤鍦板悗浜旀壒鍧囨棤鍓嶇疆闃诲锛夈€?杩佺Щ锛欱2=0009銆丅3=0010銆丅5=0011銆?
+**R4 鍙ｅ緞锛堢敤鎴风煡鎮夛級**锛氶檺棰濇寜瑙ｆ瀽娆℃暟锛坄RESUME_PARSE_LIMIT=3`锛夛紱閲嶄紶涓嶈€?棰濆害锛涘閮ㄨ皟鐢ㄥ彂璧峰墠澶辫触涓嶈€楅搴︼紙搂1.2 杩旇繕锛夈€?**R1 瑁佸噺锛堢敤鎴风煡鎮夛級**锛氱函鎵弿 DOCX 涓嶅仛鍐呭祵鍥?OCR锛屽紩瀵艰浆 PDF/鍥剧墖閲嶄紶锛?瑕嗙洊 PDF锛堝師鐢?鎵弿/娣峰悎锛? 鍥剧墖 + 鏂囨湰 DOCX銆?
+## 1. B2 涓婁紶纭娴?+ 瑙ｆ瀽闄愰锛堝悗绔?+ 鍓嶇锛屽悓鎵归儴缃诧級
 
-**R4 口径（用户知悉）**：限额按解析次数（`RESUME_PARSE_LIMIT=3`）；重传不耗
-额度；外部调用发起前失败不耗额度（§1.2 返还）。
-**R1 裁减（用户知悉）**：纯扫描 DOCX 不做内嵌图 OCR，引导转 PDF/图片重传；
-覆盖 PDF（原生/扫描/混合）+ 图片 + 文本 DOCX。
-
-## 1. B2 上传确认流 + 解析限额（后端 + 前端，同批部署）
-
-### 1.1 持久化（migration 0009，完整 DDL）
-
+### 1.1 鎸佷箙鍖栵紙migration 0009锛屽畬鏁?DDL锛?
 ```sql
 CREATE TABLE resume_uploads (
   session_id  TEXT NOT NULL REFERENCES session_state(session_id) ON DELETE CASCADE,
@@ -66,162 +43,79 @@ ALTER TABLE session_state ADD COLUMN resume_parse_count INT NOT NULL DEFAULT 0
   CHECK (resume_parse_count >= 0);
 ```
 
-同步 schema.sql。上传不落磁盘（`persist_upload`/unlink 移除，
-test_uploads.py 整文件重写）；10MB 上限在新持久化函数内**流式读入内存缓冲、
-超限 413**。**上传时本地提取**：POST 处理器内经 `asyncio.to_thread(
-extract_resume_text_bytes, ...)` 执行（裁决允许；与现行 intake 同边界）；
-损坏/不可解析文件 → **422 `unreadable_file`**（不入库、不占 generation——
-提取在 accept 事务之前执行，失败即返回）。**intake 输入契约**：
-`extract_resume_text`/`intake_resume` 增 `bytes + suffix` 重载；CLI 保留
-Path 适配。
-
-### 1.2 状态机与原子操作（SQL 语义写死；不假设请求串行）
-
+鍚屾 schema.sql銆備笂浼犱笉钀界鐩橈紙`persist_upload`/unlink 绉婚櫎锛?test_uploads.py 鏁存枃浠堕噸鍐欙級锛?0MB 涓婇檺鍦ㄦ柊鎸佷箙鍖栧嚱鏁板唴**娴佸紡璇诲叆鍐呭瓨缂撳啿銆?瓒呴檺 413**銆?*涓婁紶鏃舵湰鍦版彁鍙?*锛歅OST 澶勭悊鍣ㄥ唴缁?`asyncio.to_thread(
+extract_resume_text_bytes, ...)` 鎵ц锛堣鍐冲厑璁革紱涓庣幇琛?intake 鍚岃竟鐣岋級锛?鎹熷潖/涓嶅彲瑙ｆ瀽鏂囦欢 鈫?**422 `unreadable_file`**锛堜笉鍏ュ簱銆佷笉鍗?generation鈥斺€?鎻愬彇鍦?accept 浜嬪姟涔嬪墠鎵ц锛屽け璐ュ嵆杩斿洖锛夈€?*intake 杈撳叆濂戠害**锛?`extract_resume_text`/`intake_resume` 澧?`bytes + suffix` 閲嶈浇锛汣LI 淇濈暀
+Path 閫傞厤銆?
+### 1.2 鐘舵€佹満涓庡師瀛愭搷浣滐紙SQL 璇箟鍐欐锛涗笉鍋囪璇锋眰涓茶锛?
 ```
-awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_error
+awaiting_resume 鈫?resume_uploaded 鈫?resume_queued 鈫?resume_ready / resume_error
 ```
 
-- `accept_resume_upload`（单事务，行锁先行）：
-  ① `UPDATE session_state SET resume_upload_generation =
+- `accept_resume_upload`锛堝崟浜嬪姟锛岃閿佸厛琛岋級锛?  鈶?`UPDATE session_state SET resume_upload_generation =
      resume_upload_generation + 1, status='resume_uploaded',
      confirmed_resume_version=NULL, resume_confirmed_at=NULL
-     WHERE session_id=$1 RETURNING resume_upload_generation`；
-  ② `DELETE FROM resume_uploads WHERE session_id=$1`；③ INSERT 新行。
-- `begin_resume_parse(session_id, generation, max)`（单事务，单快照分类）：
-  ① `SELECT status, resume_upload_generation, resume_parse_count,
+     WHERE session_id=$1 RETURNING resume_upload_generation`锛?  鈶?`DELETE FROM resume_uploads WHERE session_id=$1`锛涒憿 INSERT 鏂拌銆?- `begin_resume_parse(session_id, generation, max)`锛堝崟浜嬪姟锛屽崟蹇収鍒嗙被锛夛細
+  鈶?`SELECT status, resume_upload_generation, resume_parse_count,
      owner_user_id FROM session_state WHERE session_id=$1 FOR UPDATE`
-     （无行→404；owner_user_id 供 §5.1 归因）；
-  ② 锁内分类，优先级 `parse_limit ＞ resume_changed ＞ resume_processing
-     ＞ resume_unparsed`；
-  ③ `UPDATE session_state SET status='resume_queued',
-     resume_parse_count = resume_parse_count + 1 WHERE session_id=$1`；
-  ④ 同事务 `SELECT filename, suffix, content, extracted_text, pages, chars
-     FROM resume_uploads WHERE session_id=$1 AND generation=$2`——字节入
-     内存传 BackgroundTask（行缺失→回滚，按 resume_changed）。
-  已证：与 accept 的全部交错在行锁串行化下安全；双击单扣。
-- `save_normalized_resume` / `mark_resume_error`（**改造为单事务 CAS +
-  终态事件**）：两函数各增可选 `terminal_event` 参数，类型
-  `TerminalEvent{step: Literal["done","error"], text: str,
-  elapsed_ms: int}`；实现为**同一事务内**
+     锛堟棤琛屸啋404锛沷wner_user_id 渚?搂5.1 褰掑洜锛夛紱
+  鈶?閿佸唴鍒嗙被锛屼紭鍏堢骇 `parse_limit 锛?resume_changed 锛?resume_processing
+     锛?resume_unparsed`锛?  鈶?`UPDATE session_state SET status='resume_queued',
+     resume_parse_count = resume_parse_count + 1 WHERE session_id=$1`锛?  鈶?鍚屼簨鍔?`SELECT filename, suffix, content, extracted_text, pages, chars
+     FROM resume_uploads WHERE session_id=$1 AND generation=$2`鈥斺€斿瓧鑺傚叆
+     鍐呭瓨浼?BackgroundTask锛堣缂哄け鈫掑洖婊氾紝鎸?resume_changed锛夈€?  宸茶瘉锛氫笌 accept 鐨勫叏閮ㄤ氦閿欏湪琛岄攣涓茶鍖栦笅瀹夊叏锛涘弻鍑诲崟鎵ｃ€?- `save_normalized_resume` / `mark_resume_error`锛?*鏀归€犱负鍗曚簨鍔?CAS +
+  缁堟€佷簨浠?*锛夛細涓ゅ嚱鏁板悇澧炲彲閫?`terminal_event` 鍙傛暟锛岀被鍨?  `TerminalEvent{step: Literal["done","error"], text: str,
+  elapsed_ms: int}`锛涘疄鐜颁负**鍚屼竴浜嬪姟鍐?*
   `UPDATE session_state ... WHERE session_id=$1 AND
   resume_upload_generation=$n AND status='resume_queued'
-  RETURNING session_id` —— **RETURNING 命中才** INSERT 终态进度事件
-  （不带 §3.1 的 EXISTS 守卫，正当性由 CAS 保证）；未命中整体 no-op、
-  不写任何事件（补 CAS miss 全回滚测试）。**seq 分配协议**：非终态事件
-  由任务内计数器分配 1..99；终态固定 `seq=100`（保留段）——每代仅一个
-  任务（begin CAS 保证）且终态至多一次（本 CAS 保证），PK 冲突按构造
-  不可达；万一发生则事务回滚整体 no-op。
-- **返还**：`_normalize_resume` 单 try/finally 内维护 `external_started`
-  （进度阶段 normalizing/ocr 置位）；失败且未置位 →
-  `UPDATE session_state SET resume_parse_count =
-  GREATEST(resume_parse_count - 1, 0) WHERE session_id=$1`（无 generation
-  谓词；扣费先于任务启动已提交，归纳保证正常运行不触下限；单 finally =
-  每任务≤1 次返还的结构保证）。admin 重置与在途任务交错可多还 1 次
-  （上界 1/任务，偏向用户，已接受）。restart 丢任务烧 1 次，救济 §5.3。
-- 清理：任务 finally `UPDATE resume_uploads SET content=NULL,
-  extracted_text=NULL WHERE session_id=$1 AND generation=$2`（清理范围＝
-  上传原件与临时提取副本；resume_state 的证据/摘要属产品数据，保留）。
-- `_RESUME_LIFECYCLE_DETAILS` 增 `resume_unparsed`、`resume_parse_limit`。
-- **生命周期无条件保护（与 clarify flag 解耦）**：
-  - consult/finalize 端点前置（无条件）：`resume_uploaded`→409 unparsed、
-    `resume_queued`→409 processing；`resume_error` 留 flag 门控（基线）。
-  - **consult 落库保护（generation 为主判据）+ 所需契约扩展（三件，
-    实现前置写死）**：(i) `mutate_state_atomically` 向 mutator 增传
-    locked.status（`_load_locked_state` 已 SELECT 该列，仅穿参）；
-    (ii) **mutator 返回协议**：由"返回业务结果"改为返回
+  RETURNING session_id` 鈥斺€?**RETURNING 鍛戒腑鎵?* INSERT 缁堟€佽繘搴︿簨浠?  锛堜笉甯?搂3.1 鐨?EXISTS 瀹堝崼锛屾褰撴€х敱 CAS 淇濊瘉锛夛紱鏈懡涓暣浣?no-op銆?  涓嶅啓浠讳綍浜嬩欢锛堣ˉ CAS miss 鍏ㄥ洖婊氭祴璇曪級銆?*seq 鍒嗛厤鍗忚**锛氶潪缁堟€佷簨浠?  鐢变换鍔″唴璁℃暟鍣ㄥ垎閰?1..99锛涚粓鎬佸浐瀹?`seq=100`锛堜繚鐣欐锛夆€斺€旀瘡浠ｄ粎涓€涓?  浠诲姟锛坆egin CAS 淇濊瘉锛変笖缁堟€佽嚦澶氫竴娆★紙鏈?CAS 淇濊瘉锛夛紝PK 鍐茬獊鎸夋瀯閫?  涓嶅彲杈撅紱涓囦竴鍙戠敓鍒欎簨鍔″洖婊氭暣浣?no-op銆?- **杩旇繕**锛歚_normalize_resume` 鍗?try/finally 鍐呯淮鎶?`external_started`
+  锛堣繘搴﹂樁娈?normalizing/ocr 缃綅锛夛紱澶辫触涓旀湭缃綅 鈫?  `UPDATE session_state SET resume_parse_count =
+  GREATEST(resume_parse_count - 1, 0) WHERE session_id=$1`锛堟棤 generation
+  璋撹瘝锛涙墸璐瑰厛浜庝换鍔″惎鍔ㄥ凡鎻愪氦锛屽綊绾充繚璇佹甯歌繍琛屼笉瑙︿笅闄愶紱鍗?finally =
+  姣忎换鍔♀墹1 娆¤繑杩樼殑缁撴瀯淇濊瘉锛夈€俛dmin 閲嶇疆涓庡湪閫斾换鍔′氦閿欏彲澶氳繕 1 娆?  锛堜笂鐣?1/浠诲姟锛屽亸鍚戠敤鎴凤紝宸叉帴鍙楋級銆俽estart 涓换鍔＄儳 1 娆★紝鏁戞祹 搂5.3銆?- 娓呯悊锛氫换鍔?finally `UPDATE resume_uploads SET content=NULL,
+  extracted_text=NULL WHERE session_id=$1 AND generation=$2`锛堟竻鐞嗚寖鍥达紳
+  涓婁紶鍘熶欢涓庝复鏃舵彁鍙栧壇鏈紱resume_state 鐨勮瘉鎹?鎽樿灞炰骇鍝佹暟鎹紝淇濈暀锛夈€?- `_RESUME_LIFECYCLE_DETAILS` 澧?`resume_unparsed`銆乣resume_parse_limit`銆?- **鐢熷懡鍛ㄦ湡鏃犳潯浠朵繚鎶わ紙涓?clarify flag 瑙ｈ€︼級**锛?  - consult/finalize 绔偣鍓嶇疆锛堟棤鏉′欢锛夛細`resume_uploaded`鈫?09 unparsed銆?    `resume_queued`鈫?09 processing锛沗resume_error` 鐣?flag 闂ㄦ帶锛堝熀绾匡級銆?  - **consult 钀藉簱淇濇姢锛坓eneration 涓轰富鍒ゆ嵁锛? 鎵€闇€濂戠害鎵╁睍锛堜笁浠讹紝
+    瀹炵幇鍓嶇疆鍐欐锛?*锛?i) `mutate_state_atomically` 鍚?mutator 澧炰紶
+    locked.status锛坄_load_locked_state` 宸?SELECT 璇ュ垪锛屼粎绌垮弬锛夛紱
+    (ii) **mutator 杩斿洖鍗忚**锛氱敱"杩斿洖涓氬姟缁撴灉"鏀逛负杩斿洖
     `MutationOutcome{result: Any, status_override: str | None |
-    KEEP_SENTINEL}`——`KEEP`（默认）＝沿用调用方传入的 persisted_status；
-    `None`＝本次不写 status 列只落 state（该写路径已存在）；`str`＝覆写。
-    既有调用点以 KEEP 语义零行为变化地迁移；(iii) flag-off consult 读路径
-    由 `load_state` 换为带 generation 的 context loader。
-    判定：行锁内 `locked.generation != loaded_generation ∨ locked.status ∈
-    {'resume_uploaded', 'resume_queued'}`（全名，与状态机字面一致）→
-    status_override=None 只追加 transcript（降级路径跳过
-    `_merge_feature_a_resume_state`）。双 flag 配置各测。
-  - **match-brief**：generation 比对提出 flag 门控（无条件生效，失配→409
-    resume_changed）；**version 比对维持 flag 门控不变**（防打破
-    test_api_v1.py:198 既有 fixture 基线；如该批顺手补 fake 实参亦可，
-    二选一在实现时定，测试口径以此为准）。
+    KEEP_SENTINEL}`鈥斺€擿KEEP`锛堥粯璁わ級锛濇部鐢ㄨ皟鐢ㄦ柟浼犲叆鐨?persisted_status锛?    `None`锛濇湰娆′笉鍐?status 鍒楀彧钀?state锛堣鍐欒矾寰勫凡瀛樺湪锛夛紱`str`锛濊鍐欍€?    鏃㈡湁璋冪敤鐐逛互 KEEP 璇箟闆惰涓哄彉鍖栧湴杩佺Щ锛?iii) flag-off consult 璇昏矾寰?    鐢?`load_state` 鎹负甯?generation 鐨?context loader銆?    鍒ゅ畾锛氳閿佸唴 `locked.generation != loaded_generation 鈭?locked.status 鈭?    {'resume_uploaded', 'resume_queued'}`锛堝叏鍚嶏紝涓庣姸鎬佹満瀛楅潰涓€鑷达級鈫?    status_override=None 鍙拷鍔?transcript锛堥檷绾ц矾寰勮烦杩?    `_merge_feature_a_resume_state`锛夈€傚弻 flag 閰嶇疆鍚勬祴銆?  - **match-brief**锛歡eneration 姣斿鎻愬嚭 flag 闂ㄦ帶锛堟棤鏉′欢鐢熸晥锛屽け閰嶁啋409
+    resume_changed锛夛紱**version 姣斿缁存寔 flag 闂ㄦ帶涓嶅彉**锛堥槻鎵撶牬
+    test_api_v1.py:198 鏃㈡湁 fixture 鍩虹嚎锛涘璇ユ壒椤烘墜琛?fake 瀹炲弬浜﹀彲锛?    浜岄€変竴鍦ㄥ疄鐜版椂瀹氾紝娴嬭瘯鍙ｅ緞浠ユ涓哄噯锛夈€?
+### 1.3 API 濂戠害
 
-### 1.3 API 契约
-
-- `POST /sessions/{id}/resume`（202→200，require_owned_session）→
+- `POST /sessions/{id}/resume`锛?02鈫?00锛宺equire_owned_session锛夆啋
   `ResumeUploadedResponse{generation, filename, pages, chars,
-  text_preview(≤600字·经 _redact_contact_text 脱敏), parses_used,
-  parses_limit, ocr_suggested}`；415 `unsupported_file_type`；
-  422 `unreadable_file`。
-- `GET /sessions/{id}/resume-upload`（require_owned_session）：仅
-  `status='resume_uploaded'` 返回上述同构元数据（不含 content），否则 404。
-- `POST /sessions/{id}/resume/parse`（require_owned_session，202）：
-  请求 DTO `ResumeParseRequest{generation: int}`——必须回传预览所得
-  generation；旧标签页解析未预览新代 → 409 resume_changed。**响应复用
-  现有 `ResumeAcceptedResponse{session_id, status:"resume_queued"}`**。
-- `resume-preview` / `resume-confirm` 在 uploaded 态 → 409 `resume_unparsed`。
-- OpenAPI 快照 + generated.ts + apiFixtures.ts 同批再生。
-- **文档同步（B2 批内完成）**：project_functionality_and_code_guide.md、
-  code_guide.md、product_guide.md 的上传/解析章节；**deploy_guide.md 的
-  前端与 Caddy 章节**（全新安装路径改 releases/symlink 布局 + 首次
-  bootstrap：创建初始 `frontend-current` 符号链接、旧 `frontend-dist`
-  目录废弃说明），与 §7 部署布局保持一致。
+  text_preview(鈮?00瀛椔风粡 _redact_contact_text 鑴辨晱), parses_used,
+  parses_limit, ocr_suggested}`锛?15 `unsupported_file_type`锛?  422 `unreadable_file`銆?- `GET /sessions/{id}/resume-upload`锛坮equire_owned_session锛夛細浠?  `status='resume_uploaded'` 杩斿洖涓婅堪鍚屾瀯鍏冩暟鎹紙涓嶅惈 content锛夛紝鍚﹀垯 404銆?- `POST /sessions/{id}/resume/parse`锛坮equire_owned_session锛?02锛夛細
+  璇锋眰 DTO `ResumeParseRequest{generation: int}`鈥斺€斿繀椤诲洖浼犻瑙堟墍寰?  generation锛涙棫鏍囩椤佃В鏋愭湭棰勮鏂颁唬 鈫?409 resume_changed銆?*鍝嶅簲澶嶇敤
+  鐜版湁 `ResumeAcceptedResponse{session_id, status:"resume_queued"}`**銆?- `resume-preview` / `resume-confirm` 鍦?uploaded 鎬?鈫?409 `resume_unparsed`銆?- OpenAPI 蹇収 + generated.ts + apiFixtures.ts 鍚屾壒鍐嶇敓銆?- **鏂囨。鍚屾锛圔2 鎵瑰唴瀹屾垚锛?*锛歱roject_functionality_and_code_guide.md銆?  code_guide.md銆乸roduct_guide.md 鐨勪笂浼?瑙ｆ瀽绔犺妭锛?*deploy_guide.md 鐨?  鍓嶇涓?Caddy 绔犺妭**锛堝叏鏂板畨瑁呰矾寰勬敼 releases/symlink 甯冨眬 + 棣栨
+  bootstrap锛氬垱寤哄垵濮?`frontend-current` 绗﹀彿閾炬帴銆佹棫 `frontend-dist`
+  鐩綍搴熷純璇存槑锛夛紝涓?搂7 閮ㄧ讲甯冨眬淇濇寔涓€鑷淬€?
+### 1.4 鍓嶇锛圵orkbenchPage 涓婁紶 UX 鏁翠綋杩佺Щ锛?
+- Composer 宸︿晶鍥炲舰閽堟寜閽紙`accept=".pdf,.docx,.txt"`锛涘浘鐗囧悗缂€ B4 鏀惧紑锛?  涔嬪墠缃伆鎻愮ず"鍥剧墖璇嗗埆鍗冲皢寮€鏀?锛夈€傞€夋枃浠?鈫?**鐢ㄦ埛渚ф皵娉?*锛堟枃浠跺悕+澶у皬+
+  銆岀‘璁や笂浼犮€嶃€屽彇娑堛€嶏級鈫?POST upload 鈫?灏忔剰姘旀场棰勮锛堥〉鏁?瀛楁暟/鍓?600 瀛?  + `parses_used/parses_limit` + ocr_suggested 鎻愮ず锛?銆岀‘璁よВ鏋愩€嶁啋
+  POST parse 鈫?鐜版湁 processing 杞銆?- 鎸傝浇鏃?GET resume-upload 鎭㈠纭鍗★紱娌跨敤浼氳瘽鍒囨崲 reset effect
+  锛圵orkbenchPage.tsx L666-676锛夊苟瑕嗙洊 upload/parse 涓や釜 mutation銆?- 涓夊鏃?`<input type="file">`锛圠851/L886/Accordion锛夋敹鏁涘埌 composer锛?  `resume_error` 鏂囨鎸囧悜 composer锛?*PM 娆㈣繋璇紙L841锛変笌杈撳叆妗嗗崰浣嶇
+  锛圠1112锛夊悓鎵规敼鍐欐寚鍚?composer**銆?- `resume_parse_limit` 鈫?瑙ｆ瀽鎸夐挳绂佺敤 + "鏈細璇濊В鏋愭鏁板凡鐢ㄥ畬锛?/3锛? +
+  銆屾柊寤轰細璇濈户缁€岰TA + 闄勬敞"浼氳瘽棰濆害涔熺敤瀹屾椂璇疯仈绯荤鐞嗗憳閲嶇疆"銆?
+### 1.5 娴嬭瘯
 
-### 1.4 前端（WorkbenchPage 上传 UX 整体迁移）
+- 蹇呮敼鍚庣锛歵est_resume_generation_lifecycle.py锛圠233/263/425/819 鍖猴級銆?  test_api_v1.py锛坄PUBLIC_PATHS` 甯搁噺鍔?2 鏂扮鐐?+ 蹇収閲嶇敓鎴愶級銆?  test_uploads.py锛堟暣鏂囦欢锛夈€乼est_memory_phase_e.py:583銆?  test_auth_ownership.py锛圙ET resume-upload銆丳OST parse锛夈€?  test_config_env_boundary.py锛圧ESUME_PARSE_LIMIT锛夈€?- 蹇呮敼鍓嶇锛歐orkbenchPage.test.tsx锛垀L409/700/706/716/1481/1510锛?鈥?0 涓?  鐢ㄤ緥閲嶅啓锛夈€乤piFixtures.ts銆乪2e/full-flow.spec.ts銆?- 鏂板锛氬弻鍑?parse 鍗曟墸璐癸紱upload 闆?LLM锛涚 4 娆?parse 409锛涘垎绫讳紭鍏堢骇锛?  accept/begin 涓夋椂搴忎氦閿欙紱瑙ｆ瀽涓噸浼犫啋鍦ㄩ€斾骇鐗╀綔搴熶笖鏂拌瀹屽ソ锛涢噸浼犵珵鎬佷笅
+  棰勫鍛煎け璐ヤ粛杩旇繕锛涘鍛煎悗澶辫触涓嶈繑杩橈紱415/422锛涘埛鏂版仮澶嶏紱鍙屾竻瀹氬悜锛?  flag=false 涓?uploaded/queued 鎬?consult/finalize 409锛沜onsult LLM 绛夊緟
+  鏈?upload 鈫?钀藉簱鍙拷鍔?transcript 涓嶈鐩?status锛堝弻 flag锛夛紱match-brief
+  flag-off 骞跺彂涓婁紶 鈫?409锛沺arse 鍥炰紶鏃?generation 鈫?409锛沜onfirm
+  uploaded鈫抮esume_unparsed锛汫ET resume-upload 闈?uploaded鈫?04锛?  save/mark CAS miss 鏃剁粓鎬佷簨浠跺叏鍥炴粴锛涢檺棰濆悗鏂板缓浼氳瘽鍙敤銆?- 鍘熸牱鍥炲綊锛氬洓寮€鍏崇煩闃碉紙test_consult_coach.py:944 璧凤級銆?  test_resume_clarification_api/engine銆乼est_intent_consultation銆?  test_api_concurrency銆乪2e/mobile.spec.ts銆?
+## 2. B1 鍓嶇浣撻獙鍖咃紙绾墠绔級
 
-- Composer 左侧回形针按钮（`accept=".pdf,.docx,.txt"`；图片后缀 B4 放开，
-  之前置灰提示"图片识别即将开放"）。选文件 → **用户侧气泡**（文件名+大小+
-  「确认上传」「取消」）→ POST upload → 小意气泡预览（页数/字数/前 600 字
-  + `parses_used/parses_limit` + ocr_suggested 提示）+「确认解析」→
-  POST parse → 现有 processing 轮询。
-- 挂载时 GET resume-upload 恢复确认卡；沿用会话切换 reset effect
-  （WorkbenchPage.tsx L666-676）并覆盖 upload/parse 两个 mutation。
-- 三处旧 `<input type="file">`（L851/L886/Accordion）收敛到 composer；
-  `resume_error` 文案指向 composer；**PM 欢迎语（L841）与输入框占位符
-  （L1112）同批改写指向 composer**。
-- `resume_parse_limit` → 解析按钮禁用 + "本会话解析次数已用完（3/3）" +
-  「新建会话继续」CTA + 附注"会话额度也用完时请联系管理员重置"。
+1. **R7 棣栬娴?*锛歚/` 鍦?`!hasSeenIntro()` 鏃?`<Navigate to="/welcome">`
+   锛圕SR 鍚屾鍒ゆ柇锛夈€?welcome 椤堕儴銆岃烦杩囦粙缁嶃€嶄笌搴曢儴 CTA 鍧囨墽琛?   `markIntroSeen()` 鍚?*鍥炶 `hasSeenIntro()`**鈥斺€攖rue 鈫?`navigate("/")`锛?   false锛坙ocalStorage 涓嶅彲鍐欙級鈫?`navigate("/login")` 鐩磋揪锛沬ntroSeen.ts
+   澧炴ā鍧楃骇鍐呭瓨鏃楁爣鍏滃簳銆傞椤点€岃繘鍏ュ簲鐢ㄣ€嶁啋 宸茬櫥褰?`/app` 鍚﹀垯 `/login`锛?   銆屼簡瑙ｅ畠濡備綍宸ヤ綔銆嶅叆鍙ｄ繚鐣欍€傛洿鏂?HomePage/WelcomePage/router 娴嬭瘯銆?2. **R5 閫愭潯鍑虹幇**锛歚useStaggeredReveal` hook鈥斺€斾粎瀵?*鏈杞鏂板**娑堟伅
+   鎸夊簭 `animation-delay = i*450ms`锛堝巻鍙叉秷鎭笉閲嶆挱锛夛紱PM 涓庡皬鎰忎袱鏉℃杩庤
+   鍏?PM銆?00ms 鍚庡皬鎰忥紱`prefers-reduced-motion` 鍏ㄩ儴鍗虫椂銆?3. **R3 鎶樺彔**锛歊esumeProfileAccordion 鍐呫€屾。妗堣川閲忔彁绀恒€嶃€屽師鏂囪瘉鎹€嶇Щ鑷?   鏈熬鍚勫寘 `<details>`锛坰ummary 甯︽潯鏁板窘鏍囷級锛泇itest 鏂█榛樿鏀惰捣銆?   鐐瑰嚮灞曞紑銆?4. **R8 瀵归綈锛堝彲閲忓寲锛?*锛?75/768/1280px 涓夋。妫€鏌ラ」鈥斺€攇rouped 娑堟伅宸︾缉杩?   = 澶村儚鍒楀+闂磋窛锛涙皵娉″唴鍗＄墖 padding 缁熶竴 16px锛沜omposer 琛屽唴鍏冪礌鍨傜洿
+   灞呬腑锛泂tage divider 涓婁笅闂磋窛鐩哥瓑锛涚‘璁ゅ崱鎸夐挳鍙冲榻愩€傞獙鏀剁墿锛濅笁妗ｆ埅鍥俱€?
+## 3. B3 灏忔剰瑙ｆ瀽鍙欎簨 + 妗ｆ閫愯 + 璁℃椂 + 浜鸿
 
-### 1.5 测试
-
-- 必改后端：test_resume_generation_lifecycle.py（L233/263/425/819 区）、
-  test_api_v1.py（`PUBLIC_PATHS` 常量加 2 新端点 + 快照重生成）、
-  test_uploads.py（整文件）、test_memory_phase_e.py:583、
-  test_auth_ownership.py（GET resume-upload、POST parse）、
-  test_config_env_boundary.py（RESUME_PARSE_LIMIT）。
-- 必改前端：WorkbenchPage.test.tsx（~L409/700/706/716/1481/1510，6–10 个
-  用例重写）、apiFixtures.ts、e2e/full-flow.spec.ts。
-- 新增：双击 parse 单扣费；upload 零 LLM；第 4 次 parse 409；分类优先级；
-  accept/begin 三时序交错；解析中重传→在途产物作废且新行完好；重传竞态下
-  预外呼失败仍返还；外呼后失败不返还；415/422；刷新恢复；双清定向；
-  flag=false 下 uploaded/queued 态 consult/finalize 409；consult LLM 等待
-  期 upload → 落库只追加 transcript 不覆盖 status（双 flag）；match-brief
-  flag-off 并发上传 → 409；parse 回传旧 generation → 409；confirm
-  uploaded→resume_unparsed；GET resume-upload 非 uploaded→404；
-  save/mark CAS miss 时终态事件全回滚；限额后新建会话可用。
-- 原样回归：四开关矩阵（test_consult_coach.py:944 起）、
-  test_resume_clarification_api/engine、test_intent_consultation、
-  test_api_concurrency、e2e/mobile.spec.ts。
-
-## 2. B1 前端体验包（纯前端）
-
-1. **R7 首访流**：`/` 在 `!hasSeenIntro()` 时 `<Navigate to="/welcome">`
-   （CSR 同步判断）。/welcome 顶部「跳过介绍」与底部 CTA 均执行
-   `markIntroSeen()` 后**回读 `hasSeenIntro()`**——true → `navigate("/")`；
-   false（localStorage 不可写）→ `navigate("/login")` 直达；introSeen.ts
-   增模块级内存旗标兜底。首页「进入应用」→ 已登录 `/app` 否则 `/login`；
-   「了解它如何工作」入口保留。更新 HomePage/WelcomePage/router 测试。
-2. **R5 逐条出现**：`useStaggeredReveal` hook——仅对**本次轮询新增**消息
-   按序 `animation-delay = i*450ms`（历史消息不重播）；PM 与小意两条欢迎语
-   先 PM、600ms 后小意；`prefers-reduced-motion` 全部即时。
-3. **R3 折叠**：ResumeProfileAccordion 内「档案质量提示」「原文证据」移至
-   末尾各包 `<details>`（summary 带条数徽标）；vitest 断言默认收起、
-   点击展开。
-4. **R8 对齐（可量化）**：375/768/1280px 三档检查项——grouped 消息左缩进
-   = 头像列宽+间距；气泡内卡片 padding 统一 16px；composer 行内元素垂直
-   居中；stage divider 上下间距相等；确认卡按钮右对齐。验收物＝三档截图。
-
-## 3. B3 小意解析叙事 + 档案逐行 + 计时 + 人设
-
-### 3.1 进度事件（migration 0010，完整 DDL）
-
+### 3.1 杩涘害浜嬩欢锛坢igration 0010锛屽畬鏁?DDL锛?
 ```sql
 CREATE TABLE resume_intake_progress (
   session_id  TEXT NOT NULL REFERENCES session_state(session_id) ON DELETE CASCADE,
@@ -235,96 +129,48 @@ CREATE TABLE resume_intake_progress (
 );
 ```
 
-- 非终态事件（intake 回调发出：received/extracted/normalizing/ocr/
-  validated）：首事件事务 = `DELETE ... WHERE session_id=$1 AND
-  generation < $2` + 守卫 INSERT；每条 INSERT 带 `WHERE EXISTS(SELECT 1
+- 闈炵粓鎬佷簨浠讹紙intake 鍥炶皟鍙戝嚭锛歳eceived/extracted/normalizing/ocr/
+  validated锛夛細棣栦簨浠朵簨鍔?= `DELETE ... WHERE session_id=$1 AND
+  generation < $2` + 瀹堝崼 INSERT锛涙瘡鏉?INSERT 甯?`WHERE EXISTS(SELECT 1
   FROM session_state WHERE session_id=$1 AND resume_upload_generation=$2
-  AND status='resume_queued')`；EXISTS 为快照读，极端交错可残留一条无害
-  孤儿行（PK 含 generation、读端按当前代过滤）。
-- **终态事件（done/error）**：由 save_normalized_resume/mark_resume_error
-  经 `terminal_event` 参数在 §1.2 的单事务 CAS 内写入（RETURNING 命中才
-  写）；intake 回调**不落**终态事件，仅承载信息（含 §1.2 阶段标记信息源）。
-- `intake_resume` 增可选异步回调 `progress`（默认 None 行为与现状一致）。
-- **`GET /sessions/{id}/resume-progress`（require_owned_session）契约**：
-  200 `ResumeProgressResponse{generation: int|null, status: str,
-  events: [{seq, step, text, elapsed_ms, created_at}], done: bool}`——
-  events 取 `session_state.resume_upload_generation` 当前代、`ORDER BY seq`
-  全量返回（每代 ≤10 条，无需游标）；从未上传（列值 0）→
-  `generation=null, events=[]`；**`done = status != 'resume_queued'`**
-  （离开 queued 即终——ready/error/uploaded 全部停轮询，覆盖"解析中重传"
-  交错：重传后状态为新代 resume_uploaded → done=true，前端停进度轮询并
-  回落确认卡）。前端双保险：记录发起 parse 时的 generation，响应
-  generation 变化即停并刷新上传态。补该交错测试。
-- 前端：事件按小意气泡逐条出现（复用 B1 stagger）；done 展示"用时 X.X 秒"。
-- 测试：回调序列；DELETE 代数谓词交错（迟到旧任务删不掉新代）；终态事件
-  仅随 CAS 命中写入；所有权；前端 1200ms 轮询渲染、done 停轮询、逐行
-  动画 + reduced-motion；**契约钉死快照测试（B3 新增，补齐头部锚点表
-  声明的缺失权威）**：CONSULT_PROMPT 内 role_clusters 咨询词表**全集**、
-  phase 四值枚举、120/80 上限常量、五条存活子串——全部逐字断言。
+  AND status='resume_queued')`锛汦XISTS 涓哄揩鐓ц锛屾瀬绔氦閿欎笅鏃т唬鍙畫鐣?  鏃犲瀛ゅ効琛岋紙涓婄晫锛濊浠ｉ潪缁堟€佷簨浠舵暟锛屼笌 搂8 鍙ｅ緞涓€鑷达紱PK 鍚?generation銆?  璇荤鎸夊綋鍓嶄唬杩囨护锛夈€?- **缁堟€佷簨浠讹紙done/error锛?*锛氱敱 save_normalized_resume/mark_resume_error
+  缁?`terminal_event` 鍙傛暟鍦?搂1.2 鐨勫崟浜嬪姟 CAS 鍐呭啓鍏ワ紙RETURNING 鍛戒腑鎵?  鍐欙級锛沬ntake 鍥炶皟**涓嶈惤**缁堟€佷簨浠讹紝浠呮壙杞戒俊鎭紙鍚?搂1.2 闃舵鏍囪淇℃伅婧愶級銆?- `intake_resume` 澧炲彲閫夊紓姝ュ洖璋?`progress`锛堥粯璁?None 琛屼负涓庣幇鐘朵竴鑷达級銆?- **`GET /sessions/{id}/resume-progress`锛坮equire_owned_session锛夊绾?*锛?  200 `ResumeProgressResponse{generation: int|null, status: str,
+  events: [{seq, step, text, elapsed_ms, created_at}], done: bool}`鈥斺€?  events 鍙?`session_state.resume_upload_generation` 褰撳墠浠ｃ€乣ORDER BY seq`
+  鍏ㄩ噺杩斿洖锛堝崗璁‖涓婄晫 鈮?00 琛岋紙闈炵粓鎬?seq 1..99 + 缁堟€?seq=100锛夛紝甯告€?  鈮?0锛屾棤闇€娓告爣锛夛紱浠庢湭涓婁紶锛堝垪鍊?0锛夆啋
+  `generation=null, events=[]`锛?*`done = status != 'resume_queued'`**
+  锛堢寮€ queued 鍗崇粓鈥斺€攔eady/error/uploaded 鍏ㄩ儴鍋滆疆璇紝瑕嗙洊"瑙ｆ瀽涓噸浼?
+  浜ら敊锛氶噸浼犲悗鐘舵€佷负鏂颁唬 resume_uploaded 鈫?done=true锛屽墠绔仠杩涘害杞骞?  鍥炶惤纭鍗★級銆傚墠绔弻淇濋櫓锛氳褰曞彂璧?parse 鏃剁殑 generation锛屽搷搴?  generation 鍙樺寲鍗冲仠骞跺埛鏂颁笂浼犳€併€傝ˉ璇ヤ氦閿欐祴璇曘€?- 鍓嶇锛氫簨浠舵寜灏忔剰姘旀场閫愭潯鍑虹幇锛堝鐢?B1 stagger锛夛紱done 灞曠ず"鐢ㄦ椂 X.X 绉?銆?- 娴嬭瘯锛氬洖璋冨簭鍒楋紱DELETE 浠ｆ暟璋撹瘝浜ら敊锛堣繜鍒版棫浠诲姟鍒犱笉鎺夋柊浠ｏ級锛涚粓鎬佷簨浠?  浠呴殢 CAS 鍛戒腑鍐欏叆锛涙墍鏈夋潈锛涘墠绔?1200ms 杞娓叉煋銆乨one 鍋滆疆璇€侀€愯
+  鍔ㄧ敾 + reduced-motion锛?*濂戠害閽夋蹇収娴嬭瘯锛圔3 鏂板锛岃ˉ榻愬ご閮ㄩ敋鐐硅〃
+  澹版槑鐨勭己澶辨潈濞侊級**锛欳ONSULT_PROMPT 鍐?role_clusters 鍜ㄨ璇嶈〃**鍏ㄩ泦**銆?  phase 鍥涘€兼灇涓俱€?20/80 涓婇檺甯搁噺銆佷簲鏉″瓨娲诲瓙涓测€斺€斿叏閮ㄩ€愬瓧鏂█銆?
+### 3.2 妗ｆ閫愯 print锛堝墠绔姩鐢伙級
 
-### 3.2 档案逐行 print（前端动画）
-
-- 解析完成后小意发"档案摘要"气泡：前端由 preview 数据合成行数组（教育/
-  每段经历/每个项目/技能各一行），逐行显现（~350ms/行，reduced-motion
-  即时）；末行指向「查看完整档案」。不引入 SSE。
-
-### 3.3 小意人设（R6）
-
-- CONSULT_PROMPT 语气段扩写（热情、称呼、先共情再提问、emoji ≤1/条）。
-- **存活子串逐字保留**：开头 `PHASE_C2_CONSULT_ADVISOR\n`、
-  `Current consultation phase: {phase}`、`Ask exactly ONE heuristic
-  question per turn`、`question max 80 Chinese characters`、`Never invent
-  facts about the user`、JSON 键 `assistant_reply/next_question/
-  profile_updates/phase_suggestion`、role_clusters 词表、clarify 后缀键名
-  （test_consult_engine.py:112-121、test_resume_clarification_engine.py:
-  94-99/479 钉死）。120/80 上限、phase 枚举、bounded retry 2 不动。
-- 前端欢迎语/错误文案热情化（不回退 B2 的 composer 指向）；进度事件模板
-  即小意口吻（"收到！我先把简历读一遍～"）。
-
-## 4. B4 视觉 OCR 兜底（后端 + 前端 accept；无迁移）
-
-- `app/llm/qwen_vl.py`：DashScope OpenAI 兼容，`QWEN_VL_MODEL=qwen-vl-ocr`
-  （首日真实冒烟确认模型名/参数），`Semaphore(VL_MAX_CONCURRENCY=2)`。
-- 阻塞卸载：光栅化/编码走 `asyncio.to_thread`（宪法裁决允许例外）。
-- 提取契约页级重构：`extract_resume_text` → `[(page_no, text)]`（对外拼接
-  兼容；evidence page 语义不变；test_resume_intake 回归）。
-- 策略：
-  - PDF：页文本 `< RESUME_OCR_PAGE_MIN_CHARS(50)` → 读 mediabox，
-    `scale = min(RESUME_OCR_RENDER_SCALE(2.0),
-    sqrt(RESUME_OCR_MAX_PIXELS(4_000_000)/(w*h)))` 光栅化 → JPEG q70 →
-    base64 ≤10MB？否则 q50 重试 → 仍超则**跳过该页**（保留原生文本，
-    不硬失败）→ OCR。**合并＝按页替换**，页序不变；
-    `RESUME_OCR_MAX_PAGES(6)` 只限 OCR 页数，其后页保留原生文本；
-    **全部跳页/截断说明合并为单条汇总进度事件**（控制每代事件行数）。
-  - 图片：**解码防炸=显式尺寸检查**——`Image.open` 后读 header 尺寸，
-    `width*height > RESUME_OCR_MAX_IMAGE_PIXELS_DECODE(40_000_000)` →
-    硬拒绝（上传态 422 / 解析态 resume_error）；不依赖 Pillow
-    `MAX_IMAGE_PIXELS`（其超限默认仅告警、超两倍才抛错）；JPEG draft
-    降采样 → 归一化到 MAX_PIXELS → 同管线。
-  - DOCX：仅文本；无文本 → resume_error + "转 PDF 或图片重传"。
-- **图片的上传/解析阶段边界（B4 内定义）**：图片后缀（.png/.jpg/.jpeg/
-  .webp，按后缀判定）加入白名单后，**上传阶段零 VL 调用**——仅做 header
-  解码尺寸检查（>40M 像素 → 422 unreadable_file），入库
-  `extracted_text=''、pages=1、chars=0、ocr_suggested=true`，
-  text_preview 固定为"图片简历，确认解析后将进行视觉识别（约几分钱）"；
-  合法图片**不会**因无文本被 422（422 的"不可解析"仅适用 pdf/docx 提取
-  异常）。VL 只在确认解析后的任务内调用。
-- 终止：归一化后无任何可用 evidence span → resume_error（G17）。
-- pypdfium2、Pillow 入 requirements.txt；前端 accept 放开图片 +
-  ocr_suggested 文案（前后端批，四门含 vitest + frontend-dist 包）。
-- **B4 配置与文档同步**：`.env.example` 与 `deploy/env.production.template`
-  增 §7 所列 8 个 VL/OCR 变量；deploy_guide（依赖安装）、
-  product_guide（图片简历说明）、code_guide（OCR 管线）同批更新。
-- 测试（oracle 与正文逐分支闭合）：混合 PDF 仅低文本页 OCR + 按页替换；
-  **q70 合格→VL 恰调 1 次（payload 为 q70 编码）；q70 超→q50 合格→VL 恰
-  调 1 次（payload 为 q50 编码，编码尝试恰 2 次）；双超→VL 0 次 + 保留
-  原生文本 + 跳页事件**；MAX_PAGES 截断后原生文本页保留；
-  **40_000_000 像素恰好通过、40_000_001 硬拒**（双边界）；scale 收敛内存
-  有界；VL Semaphore 上限；图片上传阶段 VL 0 次；docx 无文本引导；
-  `RESUME_OCR_ENABLED=false` 逐字节等价；无 span→error；前端图片全流程。
-
-## 5. B5 计量 + 管理员（migration 0011，完整 DDL）
-
+- 瑙ｆ瀽瀹屾垚鍚庡皬鎰忓彂"妗ｆ鎽樿"姘旀场锛氬墠绔敱 preview 鏁版嵁鍚堟垚琛屾暟缁勶紙鏁欒偛/
+  姣忔缁忓巻/姣忎釜椤圭洰/鎶€鑳藉悇涓€琛岋級锛岄€愯鏄剧幇锛垀350ms/琛岋紝reduced-motion
+  鍗虫椂锛夛紱鏈鎸囧悜銆屾煡鐪嬪畬鏁存。妗堛€嶃€備笉寮曞叆 SSE銆?
+### 3.3 灏忔剰浜鸿锛圧6锛?
+- CONSULT_PROMPT 璇皵娈垫墿鍐欙紙鐑儏銆佺О鍛笺€佸厛鍏辨儏鍐嶆彁闂€乪moji 鈮?/鏉★級銆?- **瀛樻椿瀛愪覆閫愬瓧淇濈暀**锛氬紑澶?`PHASE_C2_CONSULT_ADVISOR\n`銆?  `Current consultation phase: {phase}`銆乣Ask exactly ONE heuristic
+  question per turn`銆乣question max 80 Chinese characters`銆乣Never invent
+  facts about the user`銆丣SON 閿?`assistant_reply/next_question/
+  profile_updates/phase_suggestion`锛坱est_consult_engine.py:112-121 閽夋锛夈€?  clarify 鍚庣紑閿悕锛坱est_resume_clarification_engine.py:**100-101** 閽夋锛夈€?  role_clusters 鍜ㄨ璇嶈〃鍏ㄩ泦锛堢敱鏈壒鏂板鐨勫绾﹂拤姝诲揩鐓ф祴璇曢拤姝伙紝瑙?搂3.1锛夈€?  120/80 涓婇檺銆乸hase 鏋氫妇銆乥ounded retry 2 涓嶅姩銆?- 鍓嶇娆㈣繋璇?閿欒鏂囨鐑儏鍖栵紙涓嶅洖閫€ B2 鐨?composer 鎸囧悜锛夛紱杩涘害浜嬩欢妯℃澘
+  鍗冲皬鎰忓彛鍚伙紙"鏀跺埌锛佹垜鍏堟妸绠€鍘嗚涓€閬嶏綖"锛夈€?
+## 4. B4 瑙嗚 OCR 鍏滃簳锛堝悗绔?+ 鍓嶇 accept锛涙棤杩佺Щ锛?
+- `app/llm/qwen_vl.py`锛欴ashScope OpenAI 鍏煎锛宍QWEN_VL_MODEL=qwen-vl-ocr`
+  锛堥鏃ョ湡瀹炲啋鐑熺‘璁ゆā鍨嬪悕/鍙傛暟锛夛紝`Semaphore(VL_MAX_CONCURRENCY=2)`銆?- 闃诲鍗歌浇锛氬厜鏍呭寲/缂栫爜璧?`asyncio.to_thread`锛堝娉曡鍐冲厑璁镐緥澶栵級銆?- 鎻愬彇濂戠害椤电骇閲嶆瀯锛歚extract_resume_text` 鈫?`[(page_no, text)]`锛堝澶栨嫾鎺?  鍏煎锛沞vidence page 璇箟涓嶅彉锛泃est_resume_intake 鍥炲綊锛夈€?- 绛栫暐锛?  - PDF锛氶〉鏂囨湰 `< RESUME_OCR_PAGE_MIN_CHARS(50)` 鈫?璇?mediabox锛?    `scale = min(RESUME_OCR_RENDER_SCALE(2.0),
+    sqrt(RESUME_OCR_MAX_PIXELS(4_000_000)/(w*h)))` 鍏夋爡鍖?鈫?JPEG q70 鈫?    base64 鈮?0MB锛熷惁鍒?q50 閲嶈瘯 鈫?浠嶈秴鍒?*璺宠繃璇ラ〉**锛堜繚鐣欏師鐢熸枃鏈紝
+    涓嶇‖澶辫触锛夆啋 OCR銆?*鍚堝苟锛濇寜椤垫浛鎹?*锛岄〉搴忎笉鍙橈紱
+    `RESUME_OCR_MAX_PAGES(6)` 鍙檺 OCR 椤垫暟锛屽叾鍚庨〉淇濈暀鍘熺敓鏂囨湰锛?    **鍏ㄩ儴璺抽〉/鎴柇璇存槑鍚堝苟涓哄崟鏉℃眹鎬昏繘搴︿簨浠?*锛堟帶鍒舵瘡浠ｄ簨浠惰鏁帮級銆?  - 鍥剧墖锛?*瑙ｇ爜闃茬偢=鏄惧紡灏哄妫€鏌?*鈥斺€擿Image.open` 鍚庤 header 灏哄锛?    `width*height > RESUME_OCR_MAX_IMAGE_PIXELS_DECODE(40_000_000)` 鈫?    纭嫆缁濓紙涓婁紶鎬?422 / 瑙ｆ瀽鎬?resume_error锛夛紱涓嶄緷璧?Pillow
+    `MAX_IMAGE_PIXELS`锛堝叾瓒呴檺榛樿浠呭憡璀︺€佽秴涓ゅ€嶆墠鎶涢敊锛夛紱JPEG draft
+    闄嶉噰鏍?鈫?褰掍竴鍖栧埌 MAX_PIXELS 鈫?鍚岀绾裤€?  - DOCX锛氫粎鏂囨湰锛涙棤鏂囨湰 鈫?resume_error + "杞?PDF 鎴栧浘鐗囬噸浼?銆?- **鍥剧墖鐨勪笂浼?瑙ｆ瀽闃舵杈圭晫锛圔4 鍐呭畾涔夛級**锛氬浘鐗囧悗缂€锛?png/.jpg/.jpeg/
+  .webp锛屾寜鍚庣紑鍒ゅ畾锛夊姞鍏ョ櫧鍚嶅崟鍚庯紝**涓婁紶闃舵闆?VL 璋冪敤**鈥斺€斾粎鍋?header
+  瑙ｇ爜灏哄妫€鏌ワ紙>40M 鍍忕礌 鈫?422 unreadable_file锛夛紝鍏ュ簱
+  `extracted_text=''銆乸ages=1銆乧hars=0銆乷cr_suggested=true`锛?  text_preview 鍥哄畾涓?鍥剧墖绠€鍘嗭紝纭瑙ｆ瀽鍚庡皢杩涜瑙嗚璇嗗埆锛堢害鍑犲垎閽憋級"锛?  鍚堟硶鍥剧墖**涓嶄細**鍥犳棤鏂囨湰琚?422锛?22 鐨?涓嶅彲瑙ｆ瀽"浠呴€傜敤 pdf/docx 鎻愬彇
+  寮傚父锛夈€俈L 鍙湪纭瑙ｆ瀽鍚庣殑浠诲姟鍐呰皟鐢ㄣ€?- 缁堟锛氬綊涓€鍖栧悗鏃犱换浣曞彲鐢?evidence span 鈫?resume_error锛圙17锛夈€?- pypdfium2銆丳illow 鍏?requirements.txt锛涘墠绔?accept 鏀惧紑鍥剧墖 +
+  ocr_suggested 鏂囨锛堝墠鍚庣鎵癸紝鍥涢棬鍚?vitest + frontend-dist 鍖咃級銆?- **B4 閰嶇疆涓庢枃妗ｅ悓姝?*锛歚.env.example` 涓?`deploy/env.production.template`
+  澧?搂7 鎵€鍒?8 涓?VL/OCR 鍙橀噺锛沝eploy_guide锛堜緷璧栧畨瑁咃級銆?  product_guide锛堝浘鐗囩畝鍘嗚鏄庯級銆乧ode_guide锛圤CR 绠＄嚎锛夊悓鎵规洿鏂般€?- 娴嬭瘯锛坥racle 涓庢鏂囬€愬垎鏀棴鍚堬級锛氭贩鍚?PDF 浠呬綆鏂囨湰椤?OCR + 鎸夐〉鏇挎崲锛?  **q70 鍚堟牸鈫扸L 鎭拌皟 1 娆★紙payload 涓?q70 缂栫爜锛夛紱q70 瓒呪啋q50 鍚堟牸鈫扸L 鎭?  璋?1 娆★紙payload 涓?q50 缂栫爜锛岀紪鐮佸皾璇曟伆 2 娆★級锛涘弻瓒呪啋VL 0 娆?+ 淇濈暀
+  鍘熺敓鏂囨湰 + 璺抽〉浜嬩欢**锛汳AX_PAGES 鎴柇鍚庡師鐢熸枃鏈〉淇濈暀锛?  **40_000_000 鍍忕礌鎭板ソ閫氳繃銆?0_000_001 纭嫆**锛堝弻杈圭晫锛夛紱scale 鏀舵暃鍐呭瓨
+  鏈夌晫锛沄L Semaphore 涓婇檺锛涘浘鐗囦笂浼犻樁娈?VL 0 娆★紱docx 鏃犳枃鏈紩瀵硷紱
+  `RESUME_OCR_ENABLED=false` 閫愬瓧鑺傜瓑浠凤紱鏃?span鈫抏rror锛涘墠绔浘鐗囧叏娴佺▼銆?
+## 5. B5 璁￠噺 + 绠＄悊鍛橈紙migration 0011锛屽畬鏁?DDL锛?
 ```sql
 CREATE TABLE llm_usage (
   id BIGSERIAL PRIMARY KEY,
@@ -344,220 +190,136 @@ CREATE TABLE product_events (
 CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
 ```
 
-### 5.1 计量（任务入口 usage_scope，零签名改动）
-
-- 两表均 **await 写入 + fail-open**（遥测异常不得影响 P0；单测覆盖）。
-- `app/llm/usage_context.py::usage_scope(user_id, session_id, purpose)`
-  （contextvars），**全部在任务体内设置**：`_normalize_resume`
-  （owner_user_id 来自 §1.2 **begin_resume_parse 步骤①** 的 SELECT；
-  normalize，OCR 段嵌套 ocr）、consult
-  端点（consult）、coach（coach）、**run 统一包装器
-  `_run_with_usage_scope(...)`——透传 executor 既有全部参数与注入（含
-  LangGraph checkpointer，runs.py:68-74 注入原样保留），仅额外包 scope，
-  覆盖经典 orchestrator 与 `run_graph_match` 两支**（内层 supervisor/
-  strategy/explain 嵌套细分）、memory/case_base（case_embed）。
-- 记录在客户端内部：deepseek.chat、qwen_embed（embed_one 复用 embed_texts
-  时**只在最内层 provider 请求处写一行**；LRU 命中零行）、reranker
-  （仅 total）、qwen_vl。所有函数签名不变，既有测试假件零冲击。
-- product_events 写入点：login / session_created / consult_turn /
-  run_started / resume_parse。
-- 测试：双 executor 归因带 session_id/user_id 且 **checkpoint 写入断言仍
-  生效**；嵌套 scope；fail-open；缓存零行；单 provider 请求单行。
-
-### 5.2 管理员鉴权（fail-closed + 即时撤权）
-
-- `require_admin`：任何配置下要求已登录 + `users.is_admin` + **每请求实时
-  校验 email 身份 ∈ ADMIN_EMAILS**（一次 user_identities 索引查询；白名单
-  移除即时生效）。登录时同步列 `is_admin = (email ∈ 白名单)`（升降权自动；
-  phone 身份恒非 admin）。解析规范：逗号分隔、trim、casefold、去重。
-  break-glass：SQL 直改列 + 临时加回白名单。
-- monitoring：**先 flag（关闭→404 语义保留）再 require_admin**（开启后
-  匿名 → 401/403）；test_monitoring_api.py 匿名 200/404 用例按新序重写。
-- 评估页：/admin/evaluation 走新 admin 端点（跨用户）；用户自查
-  `/runs/{id}/explain`（require_owned_run）保留不动。
-
-### 5.3 管理端 API 与页面
-
-- `GET /api/v1/admin/overview`：用户/登录/会话/consult/run 计数（今日/7日/
-  30日）、按日 token 曲线、按模型 token 与估算成本（前端单价常量，标注
-  "估算·价格版本 2026-08"）。
-- `GET /api/v1/admin/users?page`：email、注册/最近登录（last_login_at 回填
-  最近一次）、会话数、最近简历摘要列。**最新简历定序**：
-  `resume_confirmed_at DESC NULLS LAST, resume_version DESC, session_id`
-  取首；全空 → "未上传"。
-- `GET /api/v1/admin/users/{id}/resume`：最新 resume_state 全量（不脱敏，
-  仅 admin）。
-- `GET /api/v1/admin/runs/{run_id}/explain`（require_admin，跨用户，复用
-  现有 explain DTO）。
-- `POST /api/v1/admin/sessions/{id}/reset-parse-count`（require_admin，
-  **单事务 FOR UPDATE**）三态语义显式化：① `resume_parse_count=0` 恒定
-  执行；② 仅当 status='resume_queued'（restart 遗留）→ 置 resume_error +
-  清该会话 resume_uploads 的 content/extracted_text；③
-  status='resume_uploaded'（合法待解析）及其余状态 → 仅清零计数、不动
-  上传与状态。响应 `{session_id, resume_parse_count: 0, status}`。
-- **admin 响应 DTO（OpenAPI 可生成级，字段名与空值类型写死）**：
-  `AdminOverviewResponse{users_total: int, logins_today: int,
+### 5.1 璁￠噺锛堜换鍔″叆鍙?usage_scope锛岄浂绛惧悕鏀瑰姩锛?
+- 涓よ〃鍧?**await 鍐欏叆 + fail-open**锛堥仴娴嬪紓甯镐笉寰楀奖鍝?P0锛涘崟娴嬭鐩栵級銆?- `app/llm/usage_context.py::usage_scope(user_id, session_id, purpose)`
+  锛坈ontextvars锛夛紝**鍏ㄩ儴鍦ㄤ换鍔′綋鍐呰缃?*锛歚_normalize_resume`
+  锛坥wner_user_id 鏉ヨ嚜 搂1.2 **begin_resume_parse 姝ラ鈶?* 鐨?SELECT锛?  normalize锛孫CR 娈靛祵濂?ocr锛夈€乧onsult
+  绔偣锛坈onsult锛夈€乧oach锛坈oach锛夈€?*run 缁熶竴鍖呰鍣?  `_run_with_usage_scope(...)`鈥斺€旈€忎紶 executor 鏃㈡湁鍏ㄩ儴鍙傛暟涓庢敞鍏ワ紙鍚?  LangGraph checkpointer锛宺uns.py:68-74 娉ㄥ叆鍘熸牱淇濈暀锛夛紝浠呴澶栧寘 scope锛?  瑕嗙洊缁忓吀 orchestrator 涓?`run_graph_match` 涓ゆ敮**锛堝唴灞?supervisor/
+  strategy/explain 宓屽缁嗗垎锛夈€乵emory/case_base锛坈ase_embed锛夈€?- 璁板綍鍦ㄥ鎴风鍐呴儴锛歞eepseek.chat銆乹wen_embed锛坋mbed_one 澶嶇敤 embed_texts
+  鏃?*鍙湪鏈€鍐呭眰 provider 璇锋眰澶勫啓涓€琛?*锛汱RU 鍛戒腑闆惰锛夈€乺eranker
+  锛堜粎 total锛夈€乹wen_vl銆傛墍鏈夊嚱鏁扮鍚嶄笉鍙橈紝鏃㈡湁娴嬭瘯鍋囦欢闆跺啿鍑汇€?- product_events 鍐欏叆鐐癸細login / session_created / consult_turn /
+  run_started / resume_parse銆?- 娴嬭瘯锛氬弻 executor 褰掑洜甯?session_id/user_id 涓?**checkpoint 鍐欏叆鏂█浠?  鐢熸晥**锛涘祵濂?scope锛沠ail-open锛涚紦瀛橀浂琛岋紱鍗?provider 璇锋眰鍗曡銆?
+### 5.2 绠＄悊鍛橀壌鏉冿紙fail-closed + 鍗虫椂鎾ゆ潈锛?
+- `require_admin`锛氫换浣曢厤缃笅瑕佹眰宸茬櫥褰?+ `users.is_admin` + **姣忚姹傚疄鏃?  鏍￠獙 email 韬唤 鈭?ADMIN_EMAILS**锛堜竴娆?user_identities 绱㈠紩鏌ヨ锛涚櫧鍚嶅崟
+  绉婚櫎鍗虫椂鐢熸晥锛夈€傜櫥褰曟椂鍚屾鍒?`is_admin = (email 鈭?鐧藉悕鍗?`锛堝崌闄嶆潈鑷姩锛?  phone 韬唤鎭掗潪 admin锛夈€傝В鏋愯鑼冿細閫楀彿鍒嗛殧銆乼rim銆乧asefold銆佸幓閲嶃€?  break-glass锛歋QL 鐩存敼鍒?+ 涓存椂鍔犲洖鐧藉悕鍗曘€?- monitoring锛?*鍏?flag锛堝叧闂啋404 璇箟淇濈暀锛夊啀 require_admin**锛堝紑鍚悗
+  鍖垮悕 鈫?401/403锛夛紱test_monitoring_api.py 鍖垮悕 200/404 鐢ㄤ緥鎸夋柊搴忛噸鍐欍€?- 璇勪及椤碉細/admin/evaluation 璧版柊 admin 绔偣锛堣法鐢ㄦ埛锛夛紱鐢ㄦ埛鑷煡
+  `/runs/{id}/explain`锛坮equire_owned_run锛変繚鐣欎笉鍔ㄣ€?
+### 5.3 绠＄悊绔?API 涓庨〉闈?
+- `GET /api/v1/admin/overview`锛氱敤鎴?鐧诲綍/浼氳瘽/consult/run 璁℃暟锛堜粖鏃?7鏃?
+  30鏃ワ級銆佹寜鏃?token 鏇茬嚎銆佹寜妯″瀷 token 涓庝及绠楁垚鏈紙鍓嶇鍗曚环甯搁噺锛屾爣娉?  "浼扮畻路浠锋牸鐗堟湰 2026-08"锛夈€?- `GET /api/v1/admin/users?page`锛歟mail銆佹敞鍐?鏈€杩戠櫥褰曪紙last_login_at 鍥炲～
+  鏈€杩戜竴娆★級銆佷細璇濇暟銆佹渶杩戠畝鍘嗘憳瑕佸垪銆?*鏈€鏂扮畝鍘嗗畾搴?*锛?  `resume_confirmed_at DESC NULLS LAST, resume_version DESC, session_id`
+  鍙栭锛涘叏绌?鈫?"鏈笂浼?銆?- `GET /api/v1/admin/users/{id}/resume`锛氭渶鏂?resume_state 鍏ㄩ噺锛堜笉鑴辨晱锛?  浠?admin锛夈€?- `GET /api/v1/admin/runs/{run_id}/explain`锛坮equire_admin锛岃法鐢ㄦ埛锛屽鐢?  鐜版湁 explain DTO锛夈€?- `POST /api/v1/admin/sessions/{id}/reset-parse-count`锛坮equire_admin锛?  **鍗曚簨鍔?FOR UPDATE**锛変笁鎬佽涔夋樉寮忓寲锛氣憼 `resume_parse_count=0` 鎭掑畾
+  鎵ц锛涒憽 浠呭綋 status='resume_queued'锛坮estart 閬楃暀锛夆啋 缃?resume_error +
+  娓呰浼氳瘽 resume_uploads 鐨?content/extracted_text锛涒憿
+  status='resume_uploaded'锛堝悎娉曞緟瑙ｆ瀽锛夊強鍏朵綑鐘舵€?鈫?浠呮竻闆惰鏁般€佷笉鍔?  涓婁紶涓庣姸鎬併€傚搷搴?`{session_id, resume_parse_count: 0, status}`銆?- **admin 鍝嶅簲 DTO锛圤penAPI 鍙敓鎴愮骇锛屽瓧娈靛悕涓庣┖鍊肩被鍨嬪啓姝伙級**锛?  `AdminOverviewResponse{users_total: int, logins_today: int,
   logins_7d: int, logins_30d: int, sessions_total: int,
   consult_turns_total: int, runs_total: int,
   tokens_by_day: [{date: str, total_tokens: int}],
   tokens_by_model: [{model: str, prompt_tokens: int|null,
-  completion_tokens: int|null, total_tokens: int}]}`；
-  `AdminUsersPageResponse{items: [AdminUserRow{user_id: str,
+  completion_tokens: int|null, total_tokens: int}]}`锛?  `AdminUsersPageResponse{items: [AdminUserRow{user_id: str,
   email: str|null, created_at: datetime, last_login_at: datetime|null,
   session_count: int, resume_name: str|null, resume_phone: str|null,
   resume_school: str|null, resume_degree: str|null}], page: int,
-  page_size: int(=20), has_more: bool}`；
-  `AdminUserResumeResponse{user_id: str, session_id: str|null,
-  resume_state: object|null}`（无简历 → null 字段，200 不 404）；
-  admin explain 复用现有 explain DTO；不存在的 user/session/run → 404。
-- 前端 `/admin` 轻 shell（入口仅 `me.is_admin` 可见）：Dashboard + 用户表
-  + 简历详情抽屉 + 重置按钮；「评估（答辩）」「监控（答辩）」入口移入
-  /admin（旧路径 Navigate 重定向）；用户侧 sidebar 移除两入口（R9）。
-- **B5 配置与文档同步**：`.env.example` 与 `deploy/env.production.template`
-  增 ADMIN_EMAILS；product_guide.md 评估/监控用户入口章节（现 :170 附近）
-  改为 admin 入口说明；code_guide/deploy_guide 增管理端路由与部署段。
-
-### 5.4 简历联系人结构化
-
+  page_size: int(=20), has_more: bool}`锛?  `AdminUserResumeResponse{user_id: str, session_id: str|null,
+  resume_state: object|null}`锛堟棤绠€鍘?鈫?null 瀛楁锛?00 涓?404锛夛紱
+  admin explain 澶嶇敤鐜版湁 explain DTO锛涗笉瀛樺湪鐨?user/session/run 鈫?404銆?- 鍓嶇 `/admin` 杞?shell锛堝叆鍙ｄ粎 `me.is_admin` 鍙锛夛細Dashboard + 鐢ㄦ埛琛?  + 绠€鍘嗚鎯呮娊灞?+ 閲嶇疆鎸夐挳锛涖€岃瘎浼帮紙绛旇京锛夈€嶃€岀洃鎺э紙绛旇京锛夈€嶅叆鍙ｇЩ鍏?  /admin锛堟棫璺緞 Navigate 閲嶅畾鍚戯級锛涚敤鎴蜂晶 sidebar 绉婚櫎涓ゅ叆鍙ｏ紙R9锛夈€?- **B5 閰嶇疆涓庢枃妗ｅ悓姝?*锛歚.env.example` 涓?`deploy/env.production.template`
+  澧?ADMIN_EMAILS锛沺roduct_guide.md 璇勪及/鐩戞帶鐢ㄦ埛鍏ュ彛绔犺妭锛堢幇 :170 闄勮繎锛?  鏀逛负 admin 鍏ュ彛璇存槑锛沜ode_guide/deploy_guide 澧炵鐞嗙璺敱涓庨儴缃叉銆?
+### 5.4 绠€鍘嗚仈绯讳汉缁撴瀯鍖?
 - `resume_state.contact = {name, phone, email, evidence_span_ids}`
-  （additive）。落点全列：app/state/schema.py ResumeState 增字段、
-  resume_intake.py SYSTEM_PROMPT JSON shape 增 contact 段、LLMResumePayload
-  增字段、**逐字段 extractive 验证（name/phone/email 各自逐字命中所引
-  span，否则该字段置空；不用身份锚点回退）**、tests/test_resume_intake.py
-  新增用例。用户侧 preview 维持脱敏；admin 端点原样返回。
+  锛坅dditive锛夈€傝惤鐐瑰叏鍒楋細app/state/schema.py ResumeState 澧炲瓧娈点€?  resume_intake.py SYSTEM_PROMPT JSON shape 澧?contact 娈点€丩LMResumePayload
+  澧炲瓧娈点€?*閫愬瓧娈?extractive 楠岃瘉锛坣ame/phone/email 鍚勮嚜閫愬瓧鍛戒腑鎵€寮?  span锛屽惁鍒欒瀛楁缃┖锛涗笉鐢ㄨ韩浠介敋鐐瑰洖閫€锛?*銆乼ests/test_resume_intake.py
+  鏂板鐢ㄤ緥銆傜敤鎴蜂晶 preview 缁存寔鑴辨晱锛沘dmin 绔偣鍘熸牱杩斿洖銆?
+### 5.5 B3/B4/B5 娴嬭瘯娓呭崟
 
-### 5.5 B3/B4/B5 测试清单
+- B5锛歵est_monitoring_api锛堝尶鍚嶇敤渚嬫寜鏂板簭閲嶅啓锛夈€乼est_auth_sessions
+  锛堢櫥褰?SQL 鏀瑰啓 鈫?fake DB 鍖归厤鏇存柊锛孡101-140/198-223锛夈€乼est_auth_api銆?  test_auth_ownership锛坅dmin 绔偣鐭╅樀 + 鍗虫椂鎾ゆ潈锛氱櫧鍚嶅崟绉婚櫎鍚庝笅涓€璇锋眰
+  403锛夈€乤dmin API 鏂版祴璇曪紙reset 涓夋€佽涔夈€乤dmin explain 璺ㄧ敤鎴枫€丷9 鍙岀
+  鏂█锛氱敤鎴?sidebar 鏃犱袱鍏ュ彛 / admin 鍙锛夈€乧ontact 楠岃瘉銆乽sage 鍙?  executor + checkpoint 鏂█銆?- B3/B4锛氳 搂3.1/搂4 鍚勮嚜娓呭崟銆?
+## 6. 閿佸畾濂戠害鍏煎娓呭崟
 
-- B5：test_monitoring_api（匿名用例按新序重写）、test_auth_sessions
-  （登录 SQL 改写 → fake DB 匹配更新，L101-140/198-223）、test_auth_api、
-  test_auth_ownership（admin 端点矩阵 + 即时撤权：白名单移除后下一请求
-  403）、admin API 新测试（reset 三态语义、admin explain 跨用户、R9 双端
-  断言：用户 sidebar 无两入口 / admin 可见）、contact 验证、usage 双
-  executor + checkpoint 断言。
-- B3/B4：见 §3.1/§4 各自清单。
-
-## 6. 锁定契约兼容清单
-
-1. Feature A 自 resume_ready 起不变；四开关矩阵预期不改（新增状态由 B2
-   无条件前置拦截，基线状态行为逐字节一致）。
-2. 409 Literal 只加值（resume_unparsed/resume_parse_limit）+ 415/422 新
-   detail；`_RESUME_LIFECYCLE_DETAILS` 同步增补；`resume_missing` 仍仅
-   API 层抛。
-3. consult 契约与 §3.3 存活子串不动。
-4. G17/G18 语义不变。G17＝"解析失败 → 明确要求重传，不复活旧档案"
-   （权威源见头部锚点表）：B2 的限额与返还**不触碰** resume_error →
-   重传这条路径本身；"resume_error 留 flag 门控"条款关乎 consult 可达性、
-   与 G17（重传要求）无涉。
-5. `-m app.serve`、Semaphore、无状态沿用；in-flight 字节与任务同实例，
-   不跨实例寻址。
-6. 每批 OpenAPI 快照 + generated.ts + apiFixtures 再生。
-7. to_thread 按宪法裁决条款执行（AGENTS.md §2.2）。
-8. consult/match-brief 落库保护是新增防御；基线状态转移不变。
-
-## 7. 部署与迁移
-
-- 常规批：四门 → commit → 打包 → scp → 解包 → 迁移（0009/0010/0011 批）→
-  restart → curl 健康检查。
-- **B2 部署顺序（写死）**：
-  ① 后端先行：解包 app → migrate → `systemctl restart career-rag` →
-     curl capabilities；此窗口＝旧前端×新后端，已验证无害（upload 200 被
-     旧端忽略，preview 收到未知 409 `resume_unparsed` 后回落上传入口，
-     零 LLM 零崩溃）；**杜绝反向窗口**（新前端×旧后端会绕过确认自动烧
-     LLM）——前端必须后于后端；
-  ② 前端版本目录 + 符号链接切换：解包到
-     `/opt/career-rag/releases/frontend-<版本>` →
-     `ln -sfn <目录> /opt/career-rag/current.tmp && mv -Tf
+1. Feature A 鑷?resume_ready 璧蜂笉鍙橈紱鍥涘紑鍏崇煩闃甸鏈熶笉鏀癸紙鏂板鐘舵€佺敱 B2
+   鏃犳潯浠跺墠缃嫤鎴紝鍩虹嚎鐘舵€佽涓洪€愬瓧鑺備竴鑷达級銆?2. 409 Literal 鍙姞鍊硷紙resume_unparsed/resume_parse_limit锛? 415/422 鏂?   detail锛沗_RESUME_LIFECYCLE_DETAILS` 鍚屾澧炶ˉ锛沗resume_missing` 浠嶄粎
+   API 灞傛姏銆?3. consult 濂戠害涓?搂3.3 瀛樻椿瀛愪覆涓嶅姩銆?4. G17/G18 璇箟涓嶅彉銆侴17锛?瑙ｆ瀽澶辫触 鈫?鏄庣‘瑕佹眰閲嶄紶锛屼笉澶嶆椿鏃ф。妗?
+   锛堟潈濞佹簮瑙佸ご閮ㄩ敋鐐硅〃锛夛細B2 鐨勯檺棰濅笌杩旇繕**涓嶈Е纰?* resume_error 鈫?   閲嶄紶杩欐潯璺緞鏈韩锛?resume_error 鐣?flag 闂ㄦ帶"鏉℃鍏充箮 consult 鍙揪鎬с€?   涓?G17锛堥噸浼犺姹傦級鏃犳秹銆?5. `-m app.serve`銆丼emaphore銆佹棤鐘舵€佹部鐢紱in-flight 瀛楄妭涓庝换鍔″悓瀹炰緥锛?   涓嶈法瀹炰緥瀵诲潃銆?6. 姣忔壒 OpenAPI 蹇収 + generated.ts + apiFixtures 鍐嶇敓銆?7. to_thread 鎸夊娉曡鍐虫潯娆炬墽琛岋紙AGENTS.md 搂2.2锛夈€?8. consult/match-brief 钀藉簱淇濇姢鏄柊澧為槻寰★紱鍩虹嚎鐘舵€佽浆绉讳笉鍙樸€?
+## 7. 閮ㄧ讲涓庤縼绉?
+- 甯歌鎵癸細鍥涢棬 鈫?commit 鈫?鎵撳寘 鈫?scp 鈫?瑙ｅ寘 鈫?杩佺Щ锛?009/0010/0011 鎵癸級鈫?  restart 鈫?curl 鍋ュ悍妫€鏌ャ€?- **B2 閮ㄧ讲椤哄簭锛堝啓姝伙級**锛?  鈶?鍚庣鍏堣锛氳В鍖?app 鈫?migrate 鈫?`systemctl restart career-rag` 鈫?     curl capabilities锛涙绐楀彛锛濇棫鍓嶇脳鏂板悗绔紝宸查獙璇佹棤瀹筹紙upload 200 琚?     鏃х蹇界暐锛宲review 鏀跺埌鏈煡 409 `resume_unparsed` 鍚庡洖钀戒笂浼犲叆鍙ｏ紝
+     闆?LLM 闆跺穿婧冿級锛?*鏉滅粷鍙嶅悜绐楀彛**锛堟柊鍓嶇脳鏃у悗绔細缁曡繃纭鑷姩鐑?     LLM锛夆€斺€斿墠绔繀椤诲悗浜庡悗绔紱
+  鈶?鍓嶇鐗堟湰鐩綍 + 绗﹀彿閾炬帴鍒囨崲锛氳В鍖呭埌
+     `/opt/career-rag/releases/frontend-<鐗堟湰>` 鈫?     `ln -sfn <鐩綍> /opt/career-rag/current.tmp && mv -Tf
      /opt/career-rag/current.tmp /opt/career-rag/frontend-current`
-     （绝对路径、同文件系统保 rename(2) 原子；`-f` 使中断残留的
-     current.tmp 可幂等覆盖；Caddy v2 file_server 默认跟随 symlink 并按
-     请求解析，翻链即时生效）；Caddyfile root 改指 `frontend-current`
-     （B2 批一并改，含 index.html `Cache-Control: no-store`）；
-  ③ `caddy validate --config /etc/caddy/Caddyfile` →
-     `systemctl reload caddy`（仅因 Caddyfile 本身变更）；
-  ④ 已打开的旧标签页刷新即恢复（已接受残留）。
-  首次切换 bootstrap 与全新安装布局写入 deploy_guide.md（§1.3 文档同步）。
-  B2 服务器 env 增 `RESUME_PARSE_LIMIT=3`（写入两份 env 模板）。
-- B4：`pip install -r requirements.txt` + env（QWEN_VL_MODEL、
-  VL_MAX_CONCURRENCY、RESUME_OCR_ENABLED、RESUME_OCR_PAGE_MIN_CHARS、
-  RESUME_OCR_MAX_PAGES、RESUME_OCR_MAX_PIXELS、RESUME_OCR_RENDER_SCALE、
-  RESUME_OCR_MAX_IMAGE_PIXELS_DECODE）。
-- B5：env 增 ADMIN_EMAILS；用户邮箱重登获权。
+     锛堢粷瀵硅矾寰勩€佸悓鏂囦欢绯荤粺淇?rename(2) 鍘熷瓙锛沗-f` 浣夸腑鏂畫鐣欑殑
+     current.tmp 鍙箓绛夎鐩栵紱Caddy v2 file_server 榛樿璺熼殢 symlink 骞舵寜
+     璇锋眰瑙ｆ瀽锛岀炕閾惧嵆鏃剁敓鏁堬級锛汣addyfile root 鏀规寚 `frontend-current`
+     锛圔2 鎵逛竴骞舵敼锛屽惈 index.html `Cache-Control: no-store`锛夛紱
+  鈶?`caddy validate --config /etc/caddy/Caddyfile` 鈫?     `systemctl reload caddy`锛堜粎鍥?Caddyfile 鏈韩鍙樻洿锛夛紱
+  鈶?宸叉墦寮€鐨勬棫鏍囩椤靛埛鏂板嵆鎭㈠锛堝凡鎺ュ彈娈嬬暀锛夈€?  棣栨鍒囨崲 bootstrap 涓庡叏鏂板畨瑁呭竷灞€鍐欏叆 deploy_guide.md锛埪?.3 鏂囨。鍚屾锛夈€?  B2 鏈嶅姟鍣?env 澧?`RESUME_PARSE_LIMIT=3`锛堝啓鍏ヤ袱浠?env 妯℃澘锛夈€?- B4锛歚pip install -r requirements.txt` + env锛圦WEN_VL_MODEL銆?  VL_MAX_CONCURRENCY銆丷ESUME_OCR_ENABLED銆丷ESUME_OCR_PAGE_MIN_CHARS銆?  RESUME_OCR_MAX_PAGES銆丷ESUME_OCR_MAX_PIXELS銆丷ESUME_OCR_RENDER_SCALE銆?  RESUME_OCR_MAX_IMAGE_PIXELS_DECODE锛夈€?- B5锛歟nv 澧?ADMIN_EMAILS锛涚敤鎴烽偖绠遍噸鐧昏幏鏉冦€?
+## 8. 椋庨櫓涓庡洖婊?
+- B1/B3/B4/B5锛氬洖婊氾紳閮ㄧ讲涓婁竴鍖咃紙0010/0011 additive锛岀暀琛ㄦ棤瀹筹級銆?- **B2 鍥炴粴璇氬疄鏉℃**锛欱2 鏀瑰彉浜嗗緟瑙ｆ瀽鏁版嵁鐨勫瓨鏀撅紙BYTEA锛変笌鐘舵€佹満锛?  **鍓嶆粴淇浼樺厛**锛涜嫢蹇呴』鍥炴粴鍒版棫鍖咃紝娴佺▼椤哄簭鍐欐锛堟秷闄?鑴氭湰鎻愪氦鍚?  鍦ㄩ€旇姹傚啀鍐欏嚭鏂扮姸鎬?鐨勫苟鍙戠獥鍙ｏ級锛?  鈶?**鍏堝仠鏈?*锛歚systemctl stop career-rag`锛堢敤 stop 鑰岄潪 kill锛岃閬?     unit 鐨?Restart=always锛涘仠鏈嶅悗鏃犱换浣曞啓鍏ユ柟锛孋addy 瀵?API 鐭殏 502
+     灞炲洖婊氬満鏅彲鎺ュ彈锛夛紱
+  鈶?鎵ц鐘舵€佽縼绉昏剼鏈細`sudo -u postgres psql -d career_rag
+     -v ON_ERROR_STOP=1 -f /opt/career-rag/deploy/rollback_b2.sql`鈥斺€?     鑴氭湰鍐呭锛堝崟浜嬪姟锛夛細`BEGIN; UPDATE session_state SET
+     status='awaiting_resume' WHERE status IN
+     ('resume_uploaded','resume_queued'); DELETE FROM resume_uploads;
+     COMMIT;`锛?*鍚?resume_queued**鈥斺€攔estart 鏉€姝诲湪閫斾换鍔″悗璇ョ姸鎬?     鏃犱汉璁ら锛涗袱鏂硅瘎瀹＄嫭绔嬬‘璁わ級锛?  鈶?鎹㈠洖鏃?app 鍖?+ 鏃у墠绔紙symlink 缈诲洖鏃?release锛夛紱
+  鈶?`systemctl start career-rag` 鎭㈠娴侀噺銆?  0009 琛ㄤ繚鐣欐棤瀹炽€傝剼鏈殢 B2 鎵瑰叆搴?`deploy/rollback_b2.sql`銆?- OCR 鎴愭湰闂革細纭鍒?+ 瑙ｆ瀽闄愰 + VL Semaphore + 椤垫暟/鍍忕礌/瑙ｇ爜闃茬偢/
+  base64 涓婇檺銆?- 杩旇繕鍋忕疆鍙悜鐢ㄦ埛锛圙REATEST + CHECK 鍙屼笅闄愶紱reset 浜ら敊涓婄晫 1/浠诲姟锛夈€?- 閬ユ祴 fail-open锛汚DMIN_EMAILS 绌?鈫?/admin 鍏?403锛屼富绾挎棤褰卞搷銆?- 杩涘害瀛ゅ効琛屾棤瀹充笖鏈夌晫锛?*姣忎釜宸插惎鍔ㄦ棫浠?鈮?鍏堕潪缁堟€佷簨浠舵暟锛堚墹99锛屽父鎬?  涓綅鏁帮級**锛屾柊浠诲姟棣栦簨浠朵簨鍔℃寜 `generation < $2` 娓呯悊鏃т唬锛涜烦椤佃鏄?  鍚堝苟涓?*鍗曟潯姹囨€讳簨浠?*锛埪?锛夛紝甯告€佹瘡浠ｆ€昏鏁?鈮?0銆?
+## 9. 娴佺▼
 
-## 8. 风险与回滚
+鏂规涓夋柟鍏?PASS 鎵嶅姩浠ｇ爜锛涙瘡鎵瑰洓闂?+ 瀵逛晶鎶芥煡锛涘叏閮ㄦ壒娆″畬鎴愬悗涓夋柟瀵瑰叏閲?diff 鏌?bug锛堟纭€?濂戠害/骞跺彂/瀹夊叏/鍥炲綊锛夛紝淇鍥炲鑷充笁鏂瑰共鍑€銆?
+## 10-11. 鍘嗗彶鎰忚澶勭疆
 
-- B1/B3/B4/B5：回滚＝部署上一包（0010/0011 additive，留表无害）。
-- **B2 回滚诚实条款**：B2 改变了待解析数据的存放（BYTEA）与状态机，
-  **前滚修复优先**；若必须回滚到旧包，先执行状态迁移脚本
-  `deploy/rollback_b2.sql`（单事务）：
-  `BEGIN; UPDATE session_state SET status='awaiting_resume'
-  WHERE status IN ('resume_uploaded','resume_queued');
-  DELETE FROM resume_uploads; COMMIT;`
-  （**含 resume_queued**——回滚 restart 杀死在途任务后该状态无人认领，
-  不迁移会让旧前端永久轮询；两方评审独立确认）。执行方式
-  `psql -v ON_ERROR_STOP=1 -f`。0009 表保留无害。
-- OCR 成本闸：确认制 + 解析限额 + VL Semaphore + 页数/像素/解码防炸/
-  base64 上限。
-- 返还偏置只向用户（GREATEST + CHECK 双下限；reset 交错上界 1/任务）。
-- 遥测 fail-open；ADMIN_EMAILS 空 → /admin 全 403，主线无影响。
-- 进度孤儿行无害且有界：**每个已启动旧代 ≤ 其非终态事件数（≤99，常态
-  个位数）**，新任务首事件事务按 `generation < $2` 清理旧代；跳页说明
-  合并为**单条汇总事件**（§4），常态每代总行数 ≤10。
-
-## 9. 流程
-
-方案三方全 PASS 才动代码；每批四门 + 对侧抽查；全部批次完成后三方对全量
-diff 查 bug（正确性/契约/并发/安全/回归），修复回审至三方干净。
-
-## 10-11. 历史意见处置
-
-五轮评审历史意见（v1 23 条、二轮 22 组、三轮 20 组、四轮 20 组）的处置
-对照表见 v2.3（git 3368613）§12 及本文件修订史；全部已并入本版正文。
-
-## 12. 第五轮意见处置（v2.4）
-
-| 来源 | 意见 | 处置 |
+浜旇疆璇勫鍘嗗彶鎰忚锛坴1 23 鏉°€佷簩杞?22 缁勩€佷笁杞?20 缁勩€佸洓杞?20 缁勶級鐨勫缃?瀵圭収琛ㄨ v2.3锛坓it 3368613锛壜?2 鍙婃湰鏂囦欢淇鍙诧紱鍏ㄩ儴宸插苟鍏ユ湰鐗堟鏂囥€?
+## 12. 绗簲杞剰瑙佸缃紙v2.4锛?
+| 鏉ユ簮 | 鎰忚 | 澶勭疆 |
 |---|---|---|
-| Codex B1 | "同 v2.2"引用不可恢复、git 历史缺失 | 本版全文自包含，无任何外部引用；修订史声明如实（v1-v2.2 为草稿未入库） |
-| Codex M1 | §0 治理条款自相矛盾 | 裁决已落地（de88946），§0 改为裁决记录；顺序与门控矛盾随之消除 |
-| Codex M2 | consult 保护接口不可实现 | §1.2 三件契约扩展写死（穿参 locked.status、mutator 覆写 status、flag-off 换 loader）（子 agent 五审 M 级同源） |
-| Codex M3 | mark_resume_error 无既有事务；孤儿终态事件 | §1.2 改为单事务 UPDATE…RETURNING 命中后 INSERT；miss 全 no-op + 回滚测试 |
-| Codex M4 | reset 会销毁合法待解析上传 | §5.3 三态语义：仅 queued 遗留才清理，uploaded 保留 |
-| Codex M5 | progress API 无 DTO | §3.1 ResumeProgressResponse 完整契约（当前代/排序/空态/done/停轮询） |
-| Codex M6 | Pillow MAX_IMAGE_PIXELS 40-80M 不拦 | §4 显式尺寸乘积检查 + 40_000_001 边界测试 |
-| Codex M7 | B4 oracle 分支缺口 | §4 三分支断言（q70 过/ q50 过/双超跳页不调 VL） |
-| 子 agent M | mutate 契约三件 | §1.2（与 Codex M2 合并） |
-| 子 agent m1 | version 比对门控归属 | §1.2 match-brief 条款写死 |
-| 子 agent m2 | ln -sfn 非原子 | §7 ln -sn + mv -Tf（rename 真原子） |
-| 子 agent m3 | deploy_guide 全新安装矛盾/bootstrap | §1.3 文档同步扩围 + §7 bootstrap |
-| 子 agent m4 | B2 返工敞口半句 | 裁决为"允许"，条款已闭（无需保留敞口） |
+| Codex B1 | "鍚?v2.2"寮曠敤涓嶅彲鎭㈠銆乬it 鍘嗗彶缂哄け | 鏈増鍏ㄦ枃鑷寘鍚紝鏃犱换浣曞閮ㄥ紩鐢紱淇鍙插０鏄庡瀹烇紙v1-v2.2 涓鸿崏绋挎湭鍏ュ簱锛?|
+| Codex M1 | 搂0 娌荤悊鏉℃鑷浉鐭涚浘 | 瑁佸喅宸茶惤鍦帮紙de88946锛夛紝搂0 鏀逛负瑁佸喅璁板綍锛涢『搴忎笌闂ㄦ帶鐭涚浘闅忎箣娑堥櫎 |
+| Codex M2 | consult 淇濇姢鎺ュ彛涓嶅彲瀹炵幇 | 搂1.2 涓変欢濂戠害鎵╁睍鍐欐锛堢┛鍙?locked.status銆乵utator 瑕嗗啓 status銆乫lag-off 鎹?loader锛夛紙瀛?agent 浜斿 M 绾у悓婧愶級 |
+| Codex M3 | mark_resume_error 鏃犳棦鏈変簨鍔★紱瀛ゅ効缁堟€佷簨浠?| 搂1.2 鏀逛负鍗曚簨鍔?UPDATE鈥ETURNING 鍛戒腑鍚?INSERT锛沵iss 鍏?no-op + 鍥炴粴娴嬭瘯 |
+| Codex M4 | reset 浼氶攢姣佸悎娉曞緟瑙ｆ瀽涓婁紶 | 搂5.3 涓夋€佽涔夛細浠?queued 閬楃暀鎵嶆竻鐞嗭紝uploaded 淇濈暀 |
+| Codex M5 | progress API 鏃?DTO | 搂3.1 ResumeProgressResponse 瀹屾暣濂戠害锛堝綋鍓嶄唬/鎺掑簭/绌烘€?done/鍋滆疆璇級 |
+| Codex M6 | Pillow MAX_IMAGE_PIXELS 40-80M 涓嶆嫤 | 搂4 鏄惧紡灏哄涔樼Н妫€鏌?+ 40_000_001 杈圭晫娴嬭瘯 |
+| Codex M7 | B4 oracle 鍒嗘敮缂哄彛 | 搂4 涓夊垎鏀柇瑷€锛坬70 杩? q50 杩?鍙岃秴璺抽〉涓嶈皟 VL锛?|
+| 瀛?agent M | mutate 濂戠害涓変欢 | 搂1.2锛堜笌 Codex M2 鍚堝苟锛?|
+| 瀛?agent m1 | version 姣斿闂ㄦ帶褰掑睘 | 搂1.2 match-brief 鏉℃鍐欐 |
+| 瀛?agent m2 | ln -sfn 闈炲師瀛?| 搂7 ln -sn + mv -Tf锛坮ename 鐪熷師瀛愶級 |
+| 瀛?agent m3 | deploy_guide 鍏ㄦ柊瀹夎鐭涚浘/bootstrap | 搂1.3 鏂囨。鍚屾鎵╁洿 + 搂7 bootstrap |
+| 瀛?agent m4 | B2 杩斿伐鏁炲彛鍗婂彞 | 瑁佸喅涓?鍏佽"锛屾潯娆惧凡闂紙鏃犻渶淇濈暀鏁炲彛锛?|
 
-## 13. 第六轮意见处置（v2.5）
-
-| 来源 | 意见 | 处置 |
+## 13. 绗叚杞剰瑙佸缃紙v2.5锛?
+| 鏉ユ簮 | 鎰忚 | 澶勭疆 |
 |---|---|---|
-| Codex B1 | 保留型约束未内联 | 头部「规范性引用原则」裁定：权威源＝代码+钉死测试（防双源漂移），锚点已给全；不复制字面值 |
-| Codex M1 | mutator 协议/状态名简写 | §1.2 MutationOutcome{result, status_override: KEEP/None/str} + 全名 |
-| Codex M2 | 解析中重传致进度永久轮询 | §3.1 done=status!='resume_queued' + 前端 generation 变化即停 + 交错测试 |
-| Codex M3 | terminal_event 字段/seq/幂等 | §1.2 TerminalEvent 类型 + seq 1..99/终态=100 保留段 + 冲突不可达论证 |
-| Codex M4 | parse/admin DTO 缺失 | §1.3 复用 ResumeAcceptedResponse；§5.3 四个 Admin DTO 逐字段 + 404/空态 |
-| Codex M5 | 图片上传阶段边界 | §4 上传零 VL、尺寸检查、固定 preview、422 不适用图片 |
-| Codex M6 | 回滚声明不成立 | §8 B2 前滚优先 + rollback_b2.sql 状态迁移脚本 |
-| Codex M7 | B4/B5 env/文档同步缺口 | §4/§5.3 同步条款（含 product_guide :170 冲突处） |
-| Codex m1 | current.tmp 相对路径/残留 | §7 绝对路径 + ln -sfn 幂等（子 agent nit 同源） |
-| Codex m2 | 40M 接受边界/调用次数 | §4 双边界 + VL 调用次数与 payload 断言 |
-| Codex m3 | 未上传 generation 语义 | §3.1 列值 0 → null |
-| 子 agent m6-1 | 自包含声明字面矛盾 | 头部措辞改为"正文自包含 + 唯一非规范性指针" |
-| 子 agent m6-2 | 终态 CAS 漏 session_id | §1.2 WHERE 补全 |
-| 子 agent m6-3 | PUBLic_PATHS 笔误 | §1.5 改正 |
-| 子 agent nit | reset 三态显式/RESUME_PARSE_LIMIT 入 env | §5.3 ③ 显式 + §7 B2 env |
+| Codex B1 | 淇濈暀鍨嬬害鏉熸湭鍐呰仈 | 澶撮儴銆岃鑼冩€у紩鐢ㄥ師鍒欍€嶈瀹氾細鏉冨▉婧愶紳浠ｇ爜+閽夋娴嬭瘯锛堥槻鍙屾簮婕傜Щ锛夛紝閿氱偣宸茬粰鍏紱涓嶅鍒跺瓧闈㈠€?|
+| Codex M1 | mutator 鍗忚/鐘舵€佸悕绠€鍐?| 搂1.2 MutationOutcome{result, status_override: KEEP/None/str} + 鍏ㄥ悕 |
+| Codex M2 | 瑙ｆ瀽涓噸浼犺嚧杩涘害姘镐箙杞 | 搂3.1 done=status!='resume_queued' + 鍓嶇 generation 鍙樺寲鍗冲仠 + 浜ら敊娴嬭瘯 |
+| Codex M3 | terminal_event 瀛楁/seq/骞傜瓑 | 搂1.2 TerminalEvent 绫诲瀷 + seq 1..99/缁堟€?100 淇濈暀娈?+ 鍐茬獊涓嶅彲杈捐璇?|
+| Codex M4 | parse/admin DTO 缂哄け | 搂1.3 澶嶇敤 ResumeAcceptedResponse锛浡?.3 鍥涗釜 Admin DTO 閫愬瓧娈?+ 404/绌烘€?|
+| Codex M5 | 鍥剧墖涓婁紶闃舵杈圭晫 | 搂4 涓婁紶闆?VL銆佸昂瀵告鏌ャ€佸浐瀹?preview銆?22 涓嶉€傜敤鍥剧墖 |
+| Codex M6 | 鍥炴粴澹版槑涓嶆垚绔?| 搂8 B2 鍓嶆粴浼樺厛 + rollback_b2.sql 鐘舵€佽縼绉昏剼鏈?|
+| Codex M7 | B4/B5 env/鏂囨。鍚屾缂哄彛 | 搂4/搂5.3 鍚屾鏉℃锛堝惈 product_guide :170 鍐茬獊澶勶級 |
+| Codex m1 | current.tmp 鐩稿璺緞/娈嬬暀 | 搂7 缁濆璺緞 + ln -sfn 骞傜瓑锛堝瓙 agent nit 鍚屾簮锛?|
+| Codex m2 | 40M 鎺ュ彈杈圭晫/璋冪敤娆℃暟 | 搂4 鍙岃竟鐣?+ VL 璋冪敤娆℃暟涓?payload 鏂█ |
+| Codex m3 | 鏈笂浼?generation 璇箟 | 搂3.1 鍒楀€?0 鈫?null |
+| 瀛?agent m6-1 | 鑷寘鍚０鏄庡瓧闈㈢煕鐩?| 澶撮儴鎺緸鏀逛负"姝ｆ枃鑷寘鍚?+ 鍞竴闈炶鑼冩€ф寚閽? |
+| 瀛?agent m6-2 | 缁堟€?CAS 婕?session_id | 搂1.2 WHERE 琛ュ叏 |
+| 瀛?agent m6-3 | PUBLic_PATHS 绗旇 | 搂1.5 鏀规 |
+| 瀛?agent nit | reset 涓夋€佹樉寮?RESUME_PARSE_LIMIT 鍏?env | 搂5.3 鈶?鏄惧紡 + 搂7 B2 env |
 
-## 14. 第七轮意见处置（v2.6）
-
-| 来源 | 意见 | 处置 |
+## 14. 绗竷杞剰瑙佸缃紙v2.6锛?
+| 鏉ユ簮 | 鎰忚 | 澶勭疆 |
 |---|---|---|
-| Codex B1 | 四个锚点虚设（词表双源冲突/clarify 键行号偏/phase·120·80 无测试/G17 映射错） | 头部锚点表全面核正：裁定咨询词表与岗位聚类词表为两个集合（consult_engine.py:50 为咨询侧权威）；clarify 键改 :100-101；phase/120/80 给定义源 + B3 契约钉死快照测试补齐缺失权威（§3.1）；§6.4 G17 措辞修正 |
-| Codex M1 / 子 m1 | 回滚漏 resume_queued（两方独立同发现） | §8 脚本 IN 双态 + 单事务 + ON_ERROR_STOP |
-| Codex m1 / 子 nit1 | 孤儿行上界表述失真/跳页事件可击穿 ≤10 | §8 上界改"每旧代 ≤ 非终态数"；§4 跳页合并单条汇总事件 |
-| Codex m2 | Admin DTO 字段名/空值类型 | §5.3 逐字段类型与 nullable 写死 |
-| 子 nit2 | 引用原则 120/80 自张力 | 头部原则加"钉死测试短子串可内联"豁免 |
-| 子 nit3 | owner_user_id 指代歧义 | §5.1 改"begin 步骤①" |
+| Codex B1 | 鍥涗釜閿氱偣铏氳锛堣瘝琛ㄥ弻婧愬啿绐?clarify 閿鍙峰亸/phase路120路80 鏃犳祴璇?G17 鏄犲皠閿欙級 | 澶撮儴閿氱偣琛ㄥ叏闈㈡牳姝ｏ細瑁佸畾鍜ㄨ璇嶈〃涓庡矖浣嶈仛绫昏瘝琛ㄤ负涓や釜闆嗗悎锛坈onsult_engine.py:50 涓哄挩璇晶鏉冨▉锛夛紱clarify 閿敼 :100-101锛沺hase/120/80 缁欏畾涔夋簮 + B3 濂戠害閽夋蹇収娴嬭瘯琛ラ綈缂哄け鏉冨▉锛埪?.1锛夛紱搂6.4 G17 鎺緸淇 |
+| Codex M1 / 瀛?m1 | 鍥炴粴婕?resume_queued锛堜袱鏂圭嫭绔嬪悓鍙戠幇锛?| 搂8 鑴氭湰 IN 鍙屾€?+ 鍗曚簨鍔?+ ON_ERROR_STOP |
+| Codex m1 / 瀛?nit1 | 瀛ゅ効琛屼笂鐣岃〃杩板け鐪?璺抽〉浜嬩欢鍙嚮绌?鈮?0 | 搂8 涓婄晫鏀?姣忔棫浠?鈮?闈炵粓鎬佹暟"锛浡? 璺抽〉鍚堝苟鍗曟潯姹囨€讳簨浠?|
+| Codex m2 | Admin DTO 瀛楁鍚?绌哄€肩被鍨?| 搂5.3 閫愬瓧娈电被鍨嬩笌 nullable 鍐欐 |
+| 瀛?nit2 | 寮曠敤鍘熷垯 120/80 鑷紶鍔?| 澶撮儴鍘熷垯鍔?閽夋娴嬭瘯鐭瓙涓插彲鍐呰仈"璞佸厤 |
+| 瀛?nit3 | owner_user_id 鎸囦唬姝т箟 | 搂5.1 鏀?begin 姝ラ鈶? |
+
+## 15. 绗叓杞剰瑙佸缃紙v2.7锛?
+| 鏉ユ簮 | 鎰忚 | 澶勭疆 |
+|---|---|---|
+| Codex M1 | 鍥炴粴瀛樺湪骞跺彂鍐欏洖绐楀彛锛堣剼鏈彁浜ゅ悗鍦ㄩ€旇姹傚啀閫犳柊鐘舵€侊級 | 搂8 娴佺▼鍐欐锛歴top 鏈嶅姟 鈫?鑴氭湰 鈫?鎹㈠寘 鈫?start锛堝惈 Restart=always 瑙勯伩璇存槑锛?|
+| Codex m1 | 搂3.1 鏃т笂鐣屾畫鐣?| 搂3.1 涓ゅ瀵归綈锛氬鍎夸笂鐣?璇ヤ唬闈炵粓鎬佹暟锛涘崗璁‖涓婄晫 鈮?00锛堝惈缁堟€?seq=100锛?|
+| Codex m2 / 瀛?nit | 搂3.3 鏃ц鍙?94-99/479 娈嬬暀 | 搂3.3 閿氱偣鍚屾锛欽SON 閿?112-121銆乧larify 閿?100-101銆佽瘝琛ㄥ叏闆?B3 蹇収 |
+| Codex m3 | phase 绗笁澶?DTO锛坰chemas.py:241锛夋湭鍒?| 澶撮儴閿氱偣琛ㄨˉ :241 + B3 蹇収瑕嗙洊涓夊 DTO 涓€鑷存€?|
+| Codex nit | psql 鍛戒护缂?-f 鍙傛暟 | 搂8 鈶?瀹屾暣鍛戒护鍐欐 |
