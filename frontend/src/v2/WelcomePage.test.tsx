@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,5 +65,33 @@ describe("WelcomePage", () => {
     const { hasSeenIntro } = await import("./introSeen");
     expect(hasSeenIntro()).toBe(true);
     expect(router.state.location.pathname).toBe("/");
+  });
+});
+
+describe("WelcomePage logged-in branches (B1 review r2)", () => {
+  const ME = {
+    user_id: "user-1",
+    status: "active",
+    is_admin: false,
+    display_name: "测试用户",
+    created_at: "2026-08-06T10:00:00Z",
+  };
+
+  it("backfills the intro flag and redirects legacy logged-in users to /app", async () => {
+    vi.mocked(api.me).mockResolvedValue(ME as never);
+    const router = renderWelcome();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/app"));
+    expect(localStorage.getItem(INTRO_SEEN_KEY)).toBe("1");
+  });
+
+  it("lets logged-in users with the flag watch the intro explicitly", async () => {
+    localStorage.setItem(INTRO_SEEN_KEY, "1");
+    vi.mocked(api.me).mockResolvedValue(ME as never);
+    const router = renderWelcome();
+    expect(
+      await screen.findByRole("heading", { name: "求职不该是一个人的事" }),
+    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "返回首页" })).toBeVisible();
+    expect(router.state.location.pathname).toBe("/welcome");
   });
 });

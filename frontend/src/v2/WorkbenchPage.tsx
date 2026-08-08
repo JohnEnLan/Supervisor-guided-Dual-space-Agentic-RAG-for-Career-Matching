@@ -98,34 +98,55 @@ export function statusInterval(
 const STAGGER_STEP_MS = 450;
 const STAGGER_MAX_STEPS = 3;
 
+type StaggerSnapshot = {
+  resetKey: string | null;
+  baseline: Set<string> | null; // null=尚未见到首批数据
+  delays: Map<string, number>;
+};
+
 export function useStaggeredReveal(
   keys: string[],
   resetKey: string,
 ): (key: string) => React.CSSProperties | undefined {
-  const primedFor = useRef<string | null>(null);
-  const seen = useRef<Set<string> | null>(null);
-  const delays = useRef<Map<string, number>>(new Map());
-  if (primedFor.current !== resetKey) {
-    primedFor.current = resetKey;
-    seen.current = null; // 尚未见到首批数据
-    delays.current = new Map();
-  }
-  if (seen.current === null) {
-    if (keys.length === 0) {
-      return () => undefined;
-    }
-    // 首批非空 keys＝历史基线：整批即时到场，不编排
-    seen.current = new Set(keys);
-    return () => undefined;
-  }
-  const tracked = seen.current;
-  const fresh = keys.filter((key) => !tracked.has(key));
-  fresh.forEach((key, index) => {
-    tracked.add(key);
-    delays.current.set(key, Math.min(index, STAGGER_MAX_STEPS) * STAGGER_STEP_MS);
+  // 评审二轮 M（并发正确性）：渲染期只做"已提交快照 → 候选快照"的纯计算，
+  // 提交发生在 effect（被丢弃的渲染不运行 effect，不会污染快照——旧实现
+  // 的渲染期 ref 写入会让丢弃渲染预标 seen，改变后续提交帧的可观察样式）。
+  const committed = useRef<StaggerSnapshot>({
+    resetKey: null,
+    baseline: null,
+    delays: new Map(),
   });
+
+  const base: StaggerSnapshot =
+    committed.current.resetKey === resetKey
+      ? committed.current
+      : { resetKey, baseline: null, delays: new Map() };
+
+  let nextBaseline = base.baseline;
+  const nextDelays = new Map(base.delays);
+  if (nextBaseline === null) {
+    if (keys.length > 0) {
+      // 首批非空 keys＝历史基线：整批即时到场，不编排
+      nextBaseline = new Set(keys);
+    }
+  } else {
+    const tracked = nextBaseline;
+    const fresh = keys.filter((key) => !tracked.has(key) && !nextDelays.has(key));
+    if (fresh.length > 0) {
+      nextBaseline = new Set(tracked);
+      fresh.forEach((key, index) => {
+        nextBaseline!.add(key);
+        nextDelays.set(key, Math.min(index, STAGGER_MAX_STEPS) * STAGGER_STEP_MS);
+      });
+    }
+  }
+
+  useEffect(() => {
+    committed.current = { resetKey, baseline: nextBaseline, delays: nextDelays };
+  });
+
   return (key) => {
-    const delay = delays.current.get(key);
+    const delay = nextDelays.get(key);
     return delay ? { animationDelay: `${delay}ms` } : undefined;
   };
 }

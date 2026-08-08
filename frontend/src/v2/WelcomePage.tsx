@@ -173,10 +173,14 @@ export function WelcomePage() {
       <section className="wl-scene wl-ivory wl-final">
         <div className="wl-inner" data-reveal>
           <h2>准备好了吗？</h2>
-          <p className="wl-lede">验证码登录，首次登录自动创建账号。</p>
+          <p className="wl-lede">
+            {me.data
+              ? "随时可以从首页顶栏进入工作台继续。"
+              : "验证码登录，首次登录自动创建账号。"}
+          </p>
           <div className="mk-cta-row">
             <button type="button" className="v2-btn primary mk-cta" onClick={exitIntro}>
-              进入 Career RAG
+              {me.data ? "返回首页" : "进入 Career RAG"}
             </button>
           </div>
           <p className="v2-footnote">此介绍只在首次进入时展示</p>

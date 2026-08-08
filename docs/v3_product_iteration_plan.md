@@ -236,7 +236,9 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
    点击展开。
 4. **R8 对齐（可量化）**：375/768/1280px 三档检查项——grouped 消息左缩进
    = 头像列宽+间距；气泡内卡片 padding 统一 16px；composer 行内元素垂直
-   居中；stage divider 上下间距相等；确认卡按钮右对齐。验收物＝三档截图。
+   居中；stage divider 上下间距相等；确认卡按钮右对齐。
+   **验收物口径（B1 审查裁定）**：工作台需真实后端渲染，三档截图于
+   **B1 部署后在线上采集**交用户过目（本地仅覆盖 /、/welcome、/login）。
 
 ## 3. B3 小意解析叙事 + 档案逐行 + 计时 + 人设
 
