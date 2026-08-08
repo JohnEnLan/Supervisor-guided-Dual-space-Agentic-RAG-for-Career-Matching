@@ -106,10 +106,12 @@ frontend/e2e/        浏览器端流程回归
 
 ### 6.2 视觉 OCR 兜底（B4）
 
-`app/llm/qwen_vl.py` 是 Qwen VL 的异步边界：`timeout=60`、`max_retries=0`
-把一次逻辑调用钉死为至多一次传输尝试，`Semaphore(VL_MAX_CONCURRENCY=2)`
-同时限制调用与 base64 内存峰值；JPEG 字节在信号量内编码成 data URL 后送入
-固定 OCR 指令。
+`app/llm/qwen_vl.py` 是 Qwen VL 的异步边界：`timeout=60`（httpx 分段）之上
+再套 `asyncio.wait_for(90s)` 总墙钟、`max_retries=0` 把一次逻辑调用钉死为
+至多一次传输尝试；`Semaphore(VL_MAX_CONCURRENCY=2)` 同时限制调用与 base64
+内存峰值；`on_attempt` 回调在真正发起传输紧前触发——解析任务据此置
+external_started（§1.2 返还语义的置位点）。图像解码/光栅化/编码另有独立
+的 prep 信号量（sessions.py `_OCR_PREP_SEMAPHORE`，与 VL 闸不嵌套持有）。
 
 `app/normalization/image_prep.py` 的八步管线依次是：①校验容器并执行 4000 万
 解码像素闸门；②JPEG 用 `draft()` 预缩；③按 EXIF 纠正方向；④缩到 400 万
@@ -125,11 +127,14 @@ J1 熔断语义是：图片 VL 失败进入统一 `resume_error`；PDF 第一次
 余下视觉调用，保留此前成功 OCR 与失败/未处理页的原生文本，并发“识别中断/
 未识别”汇总。
 
-`RESUME_OCR_ENABLED=false` 会撤回图片上传白名单并完全跳过 VL，回到 B4 前
-文本路径；`tests/test_extraction_golden.py` 用冻结 fixture 逐字节守卫
-PDF/DOCX/TXT 的文本与页数等价线。上传边界跟随 capability 开关：开启时只增加
-PNG/JPG/JPEG/WEBP，上传阶段仅做本地校验和持久化、零 VL，图片的 POST/刷新
-恢复都返回固定预览“图片简历，确认解析后将进行视觉识别（约几分钱）”。
+`RESUME_OCR_ENABLED=false` 会撤回图片上传白名单、固定预览与 0 页 PDF 的
+上传 422，并完全跳过 VL，回到 B4 前文本路径；开启期上传的图片在关闭后
+确认解析会在扣额度前被 `409 resume_ocr_disabled` 拒绝（回滚窗口守卫）。
+`tests/test_extraction_golden.py` 用冻结 fixture 逐字节守卫 PDF/DOCX/TXT
+的文本与页数等价线。上传边界跟随 capability 开关：开启时只增加
+PNG/JPG/JPEG/WEBP（真实容器格式必须匹配后缀，.jpg 族含多帧 MPO），上传
+阶段仅做本地校验和持久化、零 VL，图片的 POST/刷新恢复都返回固定预览
+“图片简历，确认解析后将进行视觉识别（约几分钱）”。
 
 ### 6.3 pending 锚点防止答非所问
 

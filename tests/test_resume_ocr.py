@@ -758,10 +758,12 @@ async def test_o12_image_prepare_failure_refunds_once_before_any_vl_call(
     record = _install_normalization_sinks(monkeypatch, sessions)
     vl_calls: list[bytes] = []
     monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", True)
+    # 双参签名与真实 helper 一致（Codex 终审二轮 m3：单参 fake 抛的其实
+    # 是 TypeError，假绿掩盖了"准备失败"这条真路径）
     monkeypatch.setattr(
         sessions,
         "prepare_image_jpeg",
-        lambda _raw: (_ for _ in ()).throw(ValueError("too large")),
+        lambda _raw, _suffix: (_ for _ in ()).throw(ValueError("too large")),
     )
 
     async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
@@ -1125,7 +1127,8 @@ async def test_o3_decompression_bomb_upload_maps_to_422(monkeypatch) -> None:
     async def forbidden_accept(**_kwargs):
         raise AssertionError("invalid image must not be persisted")
 
-    def bomb(_raw: bytes):
+    def bomb(_raw: bytes, _suffix: str):
+        # 双参签名与真实 helper 一致（Codex 终审二轮 m3）
         raise Image.DecompressionBombError("178M pixels")
 
     monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", True)

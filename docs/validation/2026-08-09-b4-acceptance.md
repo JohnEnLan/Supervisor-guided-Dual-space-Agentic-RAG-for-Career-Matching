@@ -7,6 +7,17 @@ B3 封版 173e018 → B4 终审修复完成（含整批终审两侧意见处置�
 （M2a/M2b+M2c/M3/M4）→ 协调者逐模块验收 → 整批终审（子 agent PASS +
 Codex 5M/4m 全部处置）。
 
+## 被测 SHA 与命令（Codex 终审二轮 m4 补录）
+
+- 被测提交：终审修复 `ab9e06b` + MPO 放宽 `29b5b27` + 终审二轮 minor 修复
+  （本文件随该提交入库，`git log docs/validation/2026-08-09-b4-acceptance.md`
+  即被测 SHA 的权威来源）。
+- 命令：
+  - `.\.venv\Scripts\python.exe -m pytest tests -p no:cacheprovider --basetemp=<短路径新目录> -q`
+  - `cd frontend && npm test && npm run typecheck && npm run build`
+  - `.\.venv\Scripts\python.exe scripts\export_openapi.py`（快照再生后
+    `pytest tests\test_api_v1.py::test_openapi_v1_snapshot_is_current`）
+
 ## 四门实测（终审修复后，本机）
 
 - 后端 pytest：**736 passed, 0 failed**（含 test_resume_ocr.py 41 项、

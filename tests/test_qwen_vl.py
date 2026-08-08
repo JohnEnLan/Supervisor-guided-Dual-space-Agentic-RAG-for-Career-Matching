@@ -94,11 +94,14 @@ async def test_ocr_semaphore_caps_concurrent_calls(monkeypatch) -> None:
     active = 0
     peak = 0
     release = asyncio.Event()
+    reached_cap = asyncio.Event()
 
     async def slow_create(**_kwargs):
         nonlocal active, peak
         active += 1
         peak = max(peak, active)
+        if active >= qwen_vl.settings.vl_max_concurrency:
+            reached_cap.set()
         await release.wait()
         active -= 1
         message = SimpleNamespace(content="text")
@@ -111,13 +114,9 @@ async def test_ocr_semaphore_caps_concurrent_calls(monkeypatch) -> None:
     tasks = [
         asyncio.create_task(qwen_vl.ocr_image_jpeg(b"jpeg")) for _ in range(5)
     ]
-    # 事件驱动而非固定 sleep（整批终审 Codex m2：调度抖动会假绿/假红）：
-    # 轮询等待并发爬到闸值，全程断言不越界
-    for _ in range(400):
-        assert peak <= qwen_vl.settings.vl_max_concurrency
-        if peak == qwen_vl.settings.vl_max_concurrency:
-            break
-        await asyncio.sleep(0.005)
+    # 真事件驱动（Codex 终审二轮 m2）：fake 在爬到闸值时 set Event，
+    # 测试有界等待该 Event——无固定 sleep、无轮询抖动
+    await asyncio.wait_for(reached_cap.wait(), timeout=2.0)
     assert peak == qwen_vl.settings.vl_max_concurrency
     release.set()
     await asyncio.gather(*tasks)
