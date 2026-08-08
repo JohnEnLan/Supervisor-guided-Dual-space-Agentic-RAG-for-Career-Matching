@@ -15,6 +15,7 @@ type OtpAccepted = Schemas["OtpRequestAccepted"];
 type ReactionResponse = Schemas["ReactionResponse"];
 type RecentRuns = Schemas["RecentRunsResponse"];
 type ResumeAccepted = Schemas["ResumeAcceptedResponse"];
+type ResumeProgress = Schemas["ResumeProgressResponse"];
 type ResumeUploaded = Schemas["ResumeUploadedResponse"];
 type ResumeConfirm = Schemas["ResumeConfirmResponse"];
 type ResumePreview = Schemas["ResumePreviewResponse"];
@@ -158,6 +159,31 @@ export const apiFixtures = {
       ocr_suggested: false,
       ...overrides,
     }) satisfies ResumeUploaded,
+
+  // B3：解析进度（mock 跳过归一化耗时，默认给终态完整叙事）
+  resumeProgress: (overrides: Partial<ResumeProgress> = {}) =>
+    ({
+      generation: 1,
+      status: "resume_ready",
+      events: [
+        {
+          seq: 1,
+          step: "received",
+          text: "收到！我现在就把你的简历完整读一遍～",
+          elapsed_ms: 6,
+          created_at: "2026-08-09T10:00:00Z",
+        },
+        {
+          seq: 100,
+          step: "done",
+          text: "档案生成完毕，用时 3.2 秒。来看看整理结果吧！",
+          elapsed_ms: 3200,
+          created_at: "2026-08-09T10:00:03Z",
+        },
+      ],
+      done: true,
+      ...overrides,
+    }) satisfies ResumeProgress,
 
   resumePreview: (confirmed: boolean) =>
     ({

@@ -165,6 +165,60 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
     assert refunds == []
 
 
+@pytest.mark.asyncio
+async def test_save_terminal_failure_falls_back_to_error_marking(monkeypatch):
+    """C1/C2 裁决闭环：终态 INSERT 冲突 → save 全事务回滚并抛出 → 任务唯一
+    except 分支用 mark_resume_error 落 error 终态——状态机不悬空、不返还
+    （LLM 外呼已发生）、上传内容照常清理。"""
+    from app.api.v1 import sessions
+    from app.state.schema import ResumeState
+
+    marks = []
+    cleanup_calls = []
+
+    async def fake_normalize_text(_raw_text, _spans):
+        return ResumeState(skills=["Python"])
+
+    async def failing_save(**_kwargs):
+        raise RuntimeError("duplicate key value violates unique constraint")
+
+    async def mark_error(*, session_id, expected_generation, terminal_event=None):
+        marks.append(
+            (
+                session_id,
+                expected_generation,
+                terminal_event.step if terminal_event else None,
+            )
+        )
+        return True
+
+    async def forbidden_refund(*, session_id):
+        raise AssertionError("post-LLM failure must not refund the parse count")
+
+    async def cleanup(**kwargs):
+        cleanup_calls.append(kwargs)
+
+    async def record_progress(**_kwargs):
+        return None
+
+    monkeypatch.setattr(sessions, "normalize_resume_text", fake_normalize_text)
+    monkeypatch.setattr(sessions, "save_normalized_resume", failing_save)
+    monkeypatch.setattr(sessions, "mark_resume_error", mark_error)
+    monkeypatch.setattr(sessions, "refund_parse_count", forbidden_refund)
+    monkeypatch.setattr(sessions, "clear_resume_upload_content", cleanup)
+    monkeypatch.setattr(sessions, "record_intake_progress", record_progress)
+
+    await sessions._normalize_resume(
+        session_id="session-1",
+        user_id="user-1",
+        raw_text="Python resume with enough text to build spans",
+        expected_generation=9,
+    )
+
+    assert marks == [("session-1", 9, "error")]
+    assert cleanup_calls == [{"session_id": "session-1", "generation": 9}]
+
+
 def _app() -> FastAPI:
     from app.api.v1.router import router
 

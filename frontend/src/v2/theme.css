@@ -309,6 +309,8 @@
   .spin, .v2-msg, .v2-profile-line, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
   .v2-sidebar { transition: none; }
   .v2-message-meta { transition: none; }
+  /* B3 复审（Codex C9）：折叠箭头/档案按钮/证据箭头的 transform 过渡一并归零 */
+  .v2-collapse summary::after, .v2-resume-profile-trigger svg, .v2-evidence-chevron { transition: none; }
   .v2-timeline { scroll-behavior: auto; }
 }
 

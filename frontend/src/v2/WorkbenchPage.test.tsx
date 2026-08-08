@@ -1616,6 +1616,25 @@ describe("useStaggeredReveal (B1 R5)", () => {
     for (const key of ["a", "b", "c"]) expect(delayOf(key)).toBe("");
   });
 
+  it("freshBaseline staggers even the very first batch (self-initiated narration, Codex C8)", () => {
+    function FreshProbe({ keys, resetKey }: { keys: string[]; resetKey: string }) {
+      const style = useStaggeredReveal(keys, resetKey, true);
+      return (
+        <ul>
+          {keys.map((key) => (
+            <li key={key} data-testid={key} style={style(key)} />
+          ))}
+        </ul>
+      );
+    }
+    // 自发解析：首轮轮询同拍返回的 received/extracted/normalizing 也要逐条
+    const { rerender } = render(<FreshProbe keys={[]} resetKey="s1:g1" />);
+    rerender(<FreshProbe keys={["e1", "e2", "e3"]} resetKey="s1:g1" />);
+    expect(delayOf("e1")).toBe("");
+    expect(delayOf("e2")).toBe("450ms");
+    expect(delayOf("e3")).toBe("900ms");
+  });
+
   it("staggers only messages added after the baseline, capped at 3 steps", () => {
     const { rerender } = render(<HookProbe keys={["a"]} resetKey="s1:r1" />);
     rerender(

@@ -88,6 +88,24 @@ function installV2Api(page: Page, state: FlowState) {
       state.parsed = true;
       return json(apiFixtures.resumeAccepted(), 202);
     }
+    if (path.endsWith("/resume-progress") && method === "GET") {
+      // B3：mock 里确认解析即刻 ready，进度按会话状态给自洽终态/空态
+      if (!state.uploaded) {
+        return json(
+          apiFixtures.resumeProgress({
+            generation: null,
+            status: "pending",
+            events: [],
+          }),
+        );
+      }
+      if (!state.parsed) {
+        return json(
+          apiFixtures.resumeProgress({ status: "resume_uploaded", events: [] }),
+        );
+      }
+      return json(apiFixtures.resumeProgress());
+    }
     if (path.endsWith("/resume-preview")) {
       // 生产真实契约：从未上传 = resume_missing；已上传未确认解析 =
       // resume_unparsed（B2）；确认解析后即视为 ready（mock 跳过归一化耗时）

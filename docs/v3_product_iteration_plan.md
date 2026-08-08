@@ -268,6 +268,12 @@ CREATE TABLE resume_intake_progress (
   经 `terminal_event` 参数在 §1.2 的单事务 CAS 内写入（RETURNING 命中才
   写）；intake 回调**不落**终态事件，仅承载信息（含 §1.2 阶段标记信息源）。
 - `intake_resume` 增可选异步回调 `progress`（默认 None 行为与现状一致）。
+  **勘误（B3 执行期三方复审裁定）**：B2 已把生产解析任务体定为
+  `sessions._normalize_resume`（begin CAS 后的唯一任务体，intake_resume
+  仅存 CLI 路径），progress 发射点随任务体锚定在 `_normalize_resume` 内
+  （`_IntakeNarrator`，fail-open）；B4 的 OCR 事件在同一任务体内同点发射
+  （suffix/content 输入契约已预先贯通）。`intake_resume` 不再另加回调
+  ——CLI 路径无进度消费方，加了即死代码。
 - **`GET /sessions/{id}/resume-progress`（require_owned_session）契约**：
   200 `ResumeProgressResponse{generation: int|null, status: str,
   events: [{seq, step, text, elapsed_ms, created_at}], done: bool}`——

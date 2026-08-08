@@ -4,7 +4,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from app.db.pool import get_pool
 from app.memory.case_base import (
@@ -32,7 +32,7 @@ _TERMINAL_PROGRESS_SEQ = 100
 
 @dataclass(frozen=True)
 class TerminalEvent:
-    step: str  # "done" | "error"
+    step: Literal["done", "error"]
     text: str
     elapsed_ms: int = 0
 
@@ -389,33 +389,36 @@ async def record_intake_progress(
 
 async def load_intake_progress(*, session_id: str) -> dict[str, Any] | None:
     """B3 进度读取：当前代全量事件（ORDER BY seq，每代 ≤100 行无需游标）。
-    会话不存在 → None；从未上传（generation=0）→ generation=None。"""
+    会话不存在 → None；从未上传（generation=0）→ generation=None。
+    状态行与事件两读放同一 repeatable-read 事务：单快照，杜绝
+    "status 已翻转但 events 属旧拍"的撕裂响应（Codex B3 审查收编）。"""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT status, resume_upload_generation
-            FROM session_state
-            WHERE session_id = $1
-            """,
-            session_id,
-        )
-        if row is None:
-            return None
-        generation = int(row["resume_upload_generation"] or 0)
-        events: list[dict[str, Any]] = []
-        if generation > 0:
-            records = await conn.fetch(
+        async with conn.transaction(isolation="repeatable_read", readonly=True):
+            row = await conn.fetchrow(
                 """
-                SELECT seq, step, text, elapsed_ms, created_at
-                FROM resume_intake_progress
-                WHERE session_id = $1 AND generation = $2
-                ORDER BY seq
+                SELECT status, resume_upload_generation
+                FROM session_state
+                WHERE session_id = $1
                 """,
                 session_id,
-                generation,
             )
-            events = [dict(record) for record in records]
+            if row is None:
+                return None
+            generation = int(row["resume_upload_generation"] or 0)
+            events: list[dict[str, Any]] = []
+            if generation > 0:
+                records = await conn.fetch(
+                    """
+                    SELECT seq, step, text, elapsed_ms, created_at
+                    FROM resume_intake_progress
+                    WHERE session_id = $1 AND generation = $2
+                    ORDER BY seq
+                    """,
+                    session_id,
+                    generation,
+                )
+                events = [dict(record) for record in records]
     return {
         "status": str(row["status"] or "pending"),
         "generation": generation if generation > 0 else None,
@@ -486,13 +489,15 @@ async def _insert_terminal_progress(
     conn: Any, session_id: str, generation: int, event: TerminalEvent
 ) -> None:
     # 不带 EXISTS 守卫：正当性由外层 CAS（generation+status 命中）保证；
-    # 每代单任务 + CAS 单命中使 PK 冲突按构造不可达，兜底 DO NOTHING。
+    # 每代单任务 + CAS 单命中使 PK 冲突按构造不可达——方案 §1.2：万一
+    # 发生则让唯一键异常冒泡、整个 CAS 事务回滚 no-op（禁止 DO NOTHING
+    # 吞掉冲突后仍提交状态翻转；Codex B3 对侧审查裁定）。回滚后任务的
+    # 唯一 except 分支走 mark_resume_error 兜底，状态机不悬空。
     await conn.execute(
         """
         INSERT INTO resume_intake_progress
             (session_id, generation, seq, step, text, elapsed_ms)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (session_id, generation, seq) DO NOTHING
         """,
         session_id,
         generation,

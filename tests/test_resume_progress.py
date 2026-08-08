@@ -50,6 +50,15 @@ class _Transaction:
         return False
 
 
+class _TxConnMixin:
+    """load_intake_progress 的单快照事务（repeatable_read + readonly）。"""
+
+    def transaction(self, **kwargs):
+        assert kwargs.get("isolation") == "repeatable_read"
+        assert kwargs.get("readonly") is True
+        return _Transaction()
+
+
 def _api_app() -> FastAPI:
     from app.api.v1.router import router
 
@@ -301,6 +310,62 @@ async def test_mark_error_terminal_event_follows_cas_hit_and_miss(
     assert calls == [("update", ("session-1", 4))]
 
 
+@pytest.mark.asyncio
+async def test_terminal_pk_conflict_rolls_back_whole_cas_transaction(
+    monkeypatch,
+) -> None:
+    """方案 §1.2：seq=100 冲突按构造不可达，万一发生必须让唯一键异常冒泡、
+    整个 CAS 事务回滚 no-op——禁止吞冲突后仍提交状态翻转（Codex 复审 C2）。"""
+    from app.db import state_store
+    from app.state.schema import ResumeState
+
+    tx_outcomes = []
+
+    class Transaction:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            tx_outcomes.append("rollback" if exc_type else "commit")
+            return False
+
+    class Connection:
+        def transaction(self):
+            return Transaction()
+
+        async def fetchrow(self, sql, *args):
+            if "FOR UPDATE" in sql:
+                return _locked_row()
+            return {
+                "resume_version": 2,
+                "confirmed_resume_version": None,
+                "resume_content_hash": "x" * 64,
+                "resume_confirmed_at": None,
+                "resume_upload_generation": 4,
+                "status": "resume_ready",
+            }
+
+        async def execute(self, sql, *args):
+            assert "INSERT INTO resume_intake_progress" in sql
+            # 吞冲突（DO NOTHING）会让状态翻转带旧终态提交——违宪
+            assert "ON CONFLICT" not in sql
+            raise RuntimeError("duplicate key value violates unique constraint")
+
+    _install_pool(monkeypatch, Connection())
+
+    with pytest.raises(RuntimeError, match="duplicate key"):
+        await state_store.save_normalized_resume(
+            session_id="session-1",
+            resume_state=ResumeState(skills=["Python"]),
+            content_hash="x" * 64,
+            expected_generation=4,
+            terminal_event=state_store.TerminalEvent(step="done", text="done"),
+        )
+    # 异常穿过事务上下文 = 回滚（asyncpg 语义）；调用方唯一 except 分支
+    # 随后走 mark_resume_error 兜底，状态机不悬空（见 test_api_v1 级联测试）
+    assert tx_outcomes == ["rollback"]
+
+
 def test_progress_endpoint_returns_current_generation_events(monkeypatch) -> None:
     from app.api.v1 import sessions
 
@@ -395,7 +460,7 @@ def test_progress_endpoint_404_for_unknown_session(monkeypatch) -> None:
 async def test_load_intake_progress_shapes(monkeypatch) -> None:
     from app.db import state_store
 
-    class Connection:
+    class Connection(_TxConnMixin):
         def __init__(self, session_row, event_rows):
             self.session_row = session_row
             self.event_rows = event_rows

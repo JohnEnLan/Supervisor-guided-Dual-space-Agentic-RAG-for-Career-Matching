@@ -150,6 +150,10 @@ type StaggerSnapshot = {
 export function useStaggeredReveal(
   keys: string[],
   resetKey: string,
+  // Codex B3 审查 C8：本页自己发起的流（如确认解析的叙事）没有"历史"，
+  // freshBaseline=true 时以空基线起步——首批同拍到达的事件也逐条编排；
+  // false（默认）保持 B1 语义：首批非空 keys 视为历史，不重播。
+  freshBaseline = false,
 ): (key: string) => React.CSSProperties | undefined {
   // 评审二轮 M（并发正确性）：渲染期只做"已提交快照 → 候选快照"的纯计算，
   // 提交发生在 effect（被丢弃的渲染不运行 effect，不会污染快照——旧实现
@@ -163,7 +167,11 @@ export function useStaggeredReveal(
   const base: StaggerSnapshot =
     committed.current.resetKey === resetKey
       ? committed.current
-      : { resetKey, baseline: null, delays: new Map() };
+      : {
+          resetKey,
+          baseline: freshBaseline ? new Set<string>() : null,
+          delays: new Map(),
+        };
 
   let nextBaseline = base.baseline;
   const nextDelays = new Map(base.delays);
@@ -706,6 +714,12 @@ export function WorkbenchPage() {
     onSuccess: (_data, variables) => {
       if (variables.forSession !== sessionId) return;
       parseGeneration.current = variables.generation;
+      // 上一轮解析的 done=true 缓存必须清场，否则新一轮轮询被闷死
+      // （enabled 翻转时无数据才必然重取；Codex B3 审查 C4）
+      queryClient.removeQueries({
+        queryKey: ["resume-progress", variables.forSession],
+        exact: true,
+      });
       void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
       void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
     },
@@ -881,8 +895,12 @@ export function WorkbenchPage() {
   const pendingUploadLoadError =
     pendingUpload.isError &&
     !(pendingUpload.error instanceof ApiError && pendingUpload.error.status === 404);
+  // Codex B3 审查 C7：isPending 必须绑定发起会话——A 会话 parse 在途时切到
+  // B，不得把 B 标成"处理中/亲历解析"（variables 在 mutate 同步可得）
+  const parsePendingForSession =
+    parseResume.isPending && parseResume.variables?.forSession === sessionId;
   const resumeProcessing =
-    parseResume.isPending || previewDetail === "resume_processing";
+    parsePendingForSession || previewDetail === "resume_processing";
   const resumeError =
     !resumeProcessing && (previewDetail === "resume_error" || resumeRecovery === "error");
   const previewLoadError = preview.isError && !preview409;
@@ -894,6 +912,10 @@ export function WorkbenchPage() {
     queryFn: () => api.resumeProgress(sessionId),
     enabled: Boolean(sessionId) && resumeProcessing,
     retry: false,
+    // 全局 staleTime 10s 会让上一代 done=true 的缓存在新解析启用时被当作
+    // 新鲜数据——interval 直接 false、轮询永不启动（Codex B3 审查 C4）。
+    // 轮询查询必须永远视缓存为过期。
+    staleTime: 0,
     refetchInterval: (query) => resumeProgressInterval(query.state.data),
   });
   const progressEvents = resumeProcessing
@@ -902,6 +924,10 @@ export function WorkbenchPage() {
   const progressStagger = useStaggeredReveal(
     progressEvents.map((event) => `ev-${event.seq}`),
     `${sessionId}:intake-${resumeProgress.data?.generation ?? ""}`,
+    // 本页点击确认解析（variables 随 mutate 同步落地且跨 success 保留）＝
+    // 自发流：首批事件也逐条出现；刷新恢复（未在本挂载点击过）＝历史，
+    // 整批即时到场不重播（Codex B3 审查 C8）
+    parseResume.variables?.forSession === sessionId,
   );
   // 终态 done 事件（seq=100，含"用时 X.X 秒"）：解析完成后并入档案摘要气泡
   const doneEvent = (resumeProgress.data?.events ?? []).find(
@@ -938,6 +964,27 @@ export function WorkbenchPage() {
       void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
     }
   }, [queryClient, resumeProgress.data, sessionId]);
+
+  // Codex B3 审查 C4 反向竞态：preview 自己的轮询先读到 ready → processing
+  // 翻 false → 进度查询停用，seq=100 终态（"用时 X.X 秒"）可能还没拉到。
+  // 亲历解析且缺 done 事件时一次性补拉（refetch 对 disabled 查询照常执行；
+  // ref 按会话+代数防重复，不构成循环）。
+  const doneBackfilledFor = useRef<string | null>(null);
+  const refetchResumeProgress = resumeProgress.refetch;
+  useEffect(() => {
+    if (!resumeReady || !watchedProcessing || doneEvent) return;
+    const backfillKey = `${sessionId}:${resumeProgress.data?.generation ?? ""}`;
+    if (doneBackfilledFor.current === backfillKey) return;
+    doneBackfilledFor.current = backfillKey;
+    void refetchResumeProgress();
+  }, [
+    doneEvent,
+    refetchResumeProgress,
+    resumeProgress.data?.generation,
+    resumeReady,
+    sessionId,
+    watchedProcessing,
+  ]);
 
   useEffect(() => {
     if (!resumeRecovery || preview.isFetching) return;
