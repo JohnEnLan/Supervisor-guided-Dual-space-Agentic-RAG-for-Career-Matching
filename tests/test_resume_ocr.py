@@ -1128,7 +1128,9 @@ async def test_o3_decompression_bomb_upload_maps_to_422(monkeypatch) -> None:
         raise AssertionError("invalid image must not be persisted")
 
     def bomb(_raw: bytes, _suffix: str):
-        # 双参签名与真实 helper 一致（Codex 终审二轮 m3）
+        # 双参签名与真实 helper 一致（Codex 终审二轮 m3：旧单参 fake 被
+        # 端点的宽泛 except 以 TypeError 假绿，DecompressionBombError
+        # 这条真路径从未被执行）
         raise Image.DecompressionBombError("178M pixels")
 
     monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", True)

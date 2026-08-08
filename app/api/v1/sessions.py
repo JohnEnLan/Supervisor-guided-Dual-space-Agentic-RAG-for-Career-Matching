@@ -1271,7 +1271,9 @@ async def _normalize_resume(
 
     def _mark_external_attempt() -> None:
         # §1.2 置位点收紧（整批终审 Codex M3）：由 VL 边界在真正发起传输
-        # 紧前回调——排队等闸/base64 阶段失败时不产生外部成本，可返还
+        # 紧前回调。可返还口径＝置位前**被 except Exception 捕获**的失败
+        # （编码/准备类）；任务取消（CancelledError）不是返还路径——
+        # 服务重启丢任务烧 1 次由 §1.2 定价、§5.3 救济（终审三轮裁决）。
         nonlocal external_started
         external_started = True
 

@@ -360,6 +360,27 @@ CREATE TABLE resume_intake_progress (
   有界；VL Semaphore 上限；图片上传阶段 VL 0 次；docx 无文本引导；
   `RESUME_OCR_ENABLED=false` 逐字节等价；无 span→error；前端图片全流程。
 
+### 4.1 B4 执行期偏差备案（终审收敛后入库，终局三方 diff 援引本清单）
+
+细化方案三方收敛于会话工作稿（子 agent 三轮/Codex 四轮 PASS），执行与
+终审（子 agent 二轮 PASS、Codex 三轮至纯文档收尾）产生的超字面增量：
+
+1. `extract_resume_text` 对外签名不变，页级化为内部函数（§4 括注"对外
+   拼接兼容"的落实读法）。
+2. J1 失败语义：页本地确定性失败跳页保原生；首个 VL 异常熔断整段 OCR、
+   继续归一化、汇总非静默（§4 跳页字面仅授权尺寸双超，此为裁决扩展）。
+3. flag-on 时 0 页 PDF 上传态提前 422（flag-off 逐字节回 B4 前行为）。
+4. 409 Literal 增 `resume_ocr_disabled`（回滚窗口：开启期上传的图片在
+   关闭后确认解析，扣额度前拒绝）。
+5. 后缀-真实格式绑定严于收敛稿；.jpg/.jpeg 含 MPO（同族解码器）。
+6. VL 墙钟 wait_for(90s) 叠加 60s 分段超时；external_started 置位点＝
+   on_attempt（传输紧前）；**可返还＝置位前被 except Exception 捕获的
+   失败**；任务取消不返还（重启丢任务烧 1 次由 §1.2 定价、§5.3 救济）。
+7. base64 编码在 VL Semaphore 内但未经 to_thread（毫秒级，接受）。
+8. 解码/光栅化/编码另设 prep Semaphore（与 VL 闸分离不嵌套）。
+
+四门与被测 SHA 见 docs/validation/2026-08-09-b4-acceptance.md。
+
 ## 5. B5 计量 + 管理员（migration 0011，完整 DDL）
 
 ```sql

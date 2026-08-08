@@ -110,7 +110,9 @@ frontend/e2e/        浏览器端流程回归
 再套 `asyncio.wait_for(90s)` 总墙钟、`max_retries=0` 把一次逻辑调用钉死为
 至多一次传输尝试；`Semaphore(VL_MAX_CONCURRENCY=2)` 同时限制调用与 base64
 内存峰值；`on_attempt` 回调在真正发起传输紧前触发——解析任务据此置
-external_started（§1.2 返还语义的置位点）。图像解码/光栅化/编码另有独立
+external_started（§1.2 返还语义的置位点；可返还＝置位前被
+`except Exception` 捕获的失败，任务取消不返还——重启丢任务烧一次由
+§1.2 定价、admin 重置救济）。图像解码/光栅化/编码另有独立
 的 prep 信号量（sessions.py `_OCR_PREP_SEMAPHORE`，与 VL 闸不嵌套持有）。
 
 `app/normalization/image_prep.py` 的八步管线依次是：①校验容器并执行 4000 万
