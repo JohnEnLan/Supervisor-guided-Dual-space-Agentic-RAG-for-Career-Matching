@@ -92,6 +92,9 @@ Return this JSON shape:
 Rules:
 - Keep normalized_base_resume concise and query-friendly.
 - Preserve real names of schools, employers, projects, tools, and measurable outcomes.
+- Copy institutions, organizations, project names, job titles, dates, and locations
+  verbatim from the evidence spans — never reformat dates or rephrase names.
+- Internships, part-time jobs, and research/teaching assistant roles are experience.
 - If a fact is unclear, omit it or mark the field as an empty string.
 - Never fabricate metrics, employers, degrees, dates, or skills.
 """
@@ -451,7 +454,15 @@ def _validated_fact_items(
             evidence_span_ids,
             evidence_text_by_id,
         )
-        if reject_unsupported and not supported:
+        if (
+            reject_unsupported
+            and not supported
+            and not _identity_is_supported(
+                value,
+                evidence_span_ids,
+                evidence_text_by_id,
+            )
+        ):
             continue
         result.append(
             {
@@ -501,6 +512,35 @@ def _fact_is_supported(
 ) -> bool:
     claims = _claim_strings(value)
     return bool(claims) and all(
+        _claim_is_supported(
+            claim,
+            evidence_span_ids,
+            evidence_text_by_id,
+        )
+        for claim in claims
+    )
+
+
+_IDENTITY_FIELDS = ("institution", "organization", "name", "title")
+
+
+def _identity_is_supported(
+    value: dict[str, Any],
+    evidence_span_ids: list[str],
+    evidence_text_by_id: dict[str, str],
+) -> bool:
+    """条目的身份锚点（校名/公司/项目名/职位）至少一个能逐字对上证据。
+
+    锚点在证据里 → 条目是真实经历的规范化改写（保留并标记 unverified，
+    避免日期重排、措辞润色导致整条真实经历被丢弃）；
+    锚点全对不上 → 条目无法追溯到任何证据，按编造处理（丢弃）。
+    """
+    claims = [
+        text
+        for field_name in _IDENTITY_FIELDS
+        if (text := str(value.get(field_name) or "").strip())
+    ]
+    return any(
         _claim_is_supported(
             claim,
             evidence_span_ids,

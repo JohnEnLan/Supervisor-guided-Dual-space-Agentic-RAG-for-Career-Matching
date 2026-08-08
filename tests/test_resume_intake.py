@@ -134,6 +134,60 @@ async def test_normalization_rejects_facts_without_retained_span_ids(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_normalization_keeps_paraphrased_real_items_as_unverified(monkeypatch):
+    """真实经历被模型改写（日期重排、措辞润色）时不再整条丢弃：
+    身份锚点（公司/职位/项目名）能逐字对上证据 → 保留并标记 unverified；
+    身份锚点全对不上的条目仍按编造拒绝。"""
+    from app.normalization import resume_intake as intake
+
+    async def fake_chat(_system, _user, **_kwargs):
+        return json.dumps(
+            {
+                "education": [],
+                "experience": [
+                    {
+                        "organization": "杭州云帆科技有限公司",
+                        "title": "数据分析实习",
+                        "dates": "2024.06-2024.08",
+                        "location": "",
+                        "responsibilities": ["搭建销售数据看板并输出周报"],
+                        "achievements": [],
+                        "technologies": [],
+                        "evidence_span_ids": ["R003"],
+                    },
+                    {
+                        "organization": "编造集团",
+                        "title": "首席科学家",
+                        "dates": "2020-2024",
+                        "responsibilities": ["领导百人团队"],
+                        "evidence_span_ids": ["R003"],
+                    },
+                ],
+                "projects": [],
+                "skills": [],
+                "resume_quality_issues": [],
+                "normalized_base_resume": "数据分析实习",
+            }
+        )
+
+    monkeypatch.setattr(intake, "chat", fake_chat)
+    spans = [
+        intake.EvidenceSpan(
+            span_id="R003",
+            text="杭州云帆科技有限公司 数据分析实习 2024年6月至8月，负责销售数据看板的搭建与每周汇报",
+        )
+    ]
+
+    result = await intake.normalize_resume_text("ignored", spans)
+
+    assert len(result.experience) == 1
+    kept = result.experience[0]
+    assert kept["organization"] == "杭州云帆科技有限公司"
+    assert kept["verification_status"] == "unverified"
+    assert kept["evidence_span_ids"] == ["R003"]
+
+
+@pytest.mark.asyncio
 async def test_intake_resume_save_to_db_does_not_close_global_pool(monkeypatch):
     from app.normalization import resume_intake as intake
     from app.state.schema import ResumeState
