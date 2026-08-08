@@ -1285,3 +1285,75 @@ def test_consult_and_finalize_block_new_states_regardless_of_flag(
     assert consult.json()["detail"] == detail
     assert finalize.status_code == 409
     assert finalize.json()["detail"] == detail
+
+
+@pytest.mark.asyncio
+async def test_flag_off_consult_downgrades_to_transcript_only_on_regen(
+    monkeypatch,
+) -> None:
+    """flag-off 且 LLM 等待期间换代：persist_turn 必须返回
+    MutationOutcome(status_override=None)，只合并 transcript、不合并
+    career 字段、不覆盖 status（B2 对侧抽查二轮 M3 点名的缺口）。"""
+    from app.agents.consult_engine import ConsultTurn
+    from app.api.v1 import sessions
+    from app.db.state_store import ConsultContext, MutationOutcome
+    from app.state.schema import SharedState
+
+    loaded = SharedState(session_id="session-1", user_id="user-1")
+
+    async def context(_session_id):
+        return ConsultContext(
+            state=loaded.model_copy(deep=True),
+            status="intent_consulting",
+            resume_version=1,
+            confirmed_resume_version=1,
+            resume_upload_generation=1,
+        )
+
+    async def advisor(working, **_kwargs):
+        working.career_state.current_goal = ["Data analyst"]
+        working.career_state.consult_rounds_used = 1
+        working.career_state.consult_transcript.append(
+            {"round": 1, "user_message": "数据分析"}
+        )
+        return ConsultTurn(
+            assistant_reply="收到。",
+            next_question="地点呢？",
+            phase="template",
+            completeness=0.2,
+            can_finalize=False,
+            round=1,
+            profile_draft={},
+        )
+
+    captured = {}
+
+    async def mutate(*, session_id, mutator, status=None, **_kwargs):
+        # 模拟真实 mutate：行锁内已换代（generation 1→2）、状态为新流程态
+        latest = loaded.model_copy(deep=True)
+        raw = mutator(latest, 1, 2, "resume_uploaded")
+        captured["raw"] = raw
+        captured["latest"] = latest
+        if isinstance(raw, MutationOutcome):
+            return raw.result
+        return raw
+
+    monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
+    monkeypatch.setattr(sessions.settings, "consult_coach_enabled", False)
+    monkeypatch.setattr(sessions, "load_consult_context", context)
+    monkeypatch.setattr(sessions, "run_consult_round", advisor, raising=False)
+    monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
+
+    with TestClient(_api_app()) as client:
+        response = client.post(
+            "/api/v1/sessions/session-1/consult",
+            json={"mode": "targeted", "message": "数据分析", "expected_round": 0},
+        )
+
+    assert response.status_code == 200
+    raw = captured["raw"]
+    assert isinstance(raw, MutationOutcome)
+    assert raw.status_override is None
+    persisted = captured["latest"]
+    assert persisted.career_state.consult_transcript, "transcript 必须落库"
+    assert persisted.career_state.current_goal == [], "career 字段不得合并旧代产物"

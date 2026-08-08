@@ -39,8 +39,9 @@ Career-RAG 是一个 Supervisor 监督的双空间 Agentic RAG 职业匹配系�
 ```text
 认证与额度
   → 创建 session
-  → 上传简历（API 立即返回 202）
-  → 后台解析、归一化、建立 R### 证据
+  → 上传简历（200：入库 + 本地提取，零 LLM，免费预览）
+  → 用户「确认解析」（202：扣一次解析额度）
+  → 后台归一化、建立 R### 证据
   → 预览并确认 resume_version
   → 咨询：三项必需信息 → 可选 resume_clarify → deepen
   → PM note（可选、有预算、fail-open）

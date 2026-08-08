@@ -598,7 +598,11 @@ export function WorkbenchPage() {
       if (
         error instanceof ApiError &&
         error.status === 409 &&
-        (error.message === "resume_changed" || error.message === "resume_unparsed")
+        // resume_processing = 另一标签页/双击已先确认解析——同样刷新，
+        // 让确认卡退场（GET 404）并由 preview 409 进入处理中轮询
+        (error.message === "resume_changed" ||
+          error.message === "resume_unparsed" ||
+          error.message === "resume_processing")
       ) {
         void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
         void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
@@ -904,7 +908,7 @@ export function WorkbenchPage() {
         </Bubble>
 
         {!resumeReady && !resumeProcessing && !resumeError && !previewLoadError &&
-        !uploadPending && !pendingFile ? (
+        !uploadPending && !pendingFile && !pendingUploadLoadError ? (
           <Bubble persona="intent_consultant" tone="card">
             <p>
               把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——

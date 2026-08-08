@@ -82,6 +82,9 @@ function installV2Api(page: Page, state: FlowState) {
       return json({ detail: "no pending resume upload" }, 404);
     }
     if (path.endsWith("/resume/parse") && method === "POST") {
+      // 契约校验：必须回传预览所得 generation，否则按后端语义 409
+      const body = request.postDataJSON() as { generation?: number };
+      if (body?.generation !== 1) return json({ detail: "resume_changed" }, 409);
       state.parsed = true;
       return json(apiFixtures.resumeAccepted(), 202);
     }

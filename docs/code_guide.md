@@ -11,7 +11,8 @@
 一次主流程如下：
 
 ```text
-登录 → 建会话 → 上传简历（generation+1）→ 后台归一化
+登录 → 建会话 → 上传简历（200，generation+1，零 LLM 本地提取）
+→ 用户确认解析（202，扣一次解析额度）→ 后台归一化
 → 预览并确认 resume_version → 咨询三项必需信息
 → 可选简历澄清 → 可选 PM note → finalize
 → Match Brief 锁定 → run 执行 → 七阶段播报
@@ -52,7 +53,7 @@ frontend/e2e/        浏览器端流程回归
 | 路由装配 | `app/api/v1/router.py:15` `capabilities` | 前端从能力声明得知 OTP 通道、监控、评估等可见能力。 |
 | 认证 API | `app/api/auth/routes.py:75` `request_otp`；`:119` `verify_otp`；`:148` `logout`；`:155` `me` | OTP 请求、核验、Cookie 会话和当前账号。 |
 | 数据库池 | `app/db/pool.py:18` `get_pool` | `asyncpg` 连接池复用连接；请求不自行新建数据库进程。 |
-| 状态原子变更 | `app/db/state_store.py:327` `mutate_state_atomically` | 行级锁和字段级 mutation 防止两个请求互相覆盖。 |
+| 状态原子变更 | `app/db/state_store.py` `mutate_state_atomically` | 行级锁 + MutationOutcome 协议（B2）：mutator 在锁内拿到 version/generation/status，可动态决定本次是否写 status 列。 |
 | 对外投影 | `app/api/result_projector.py`；`app/api/conversation_projector.py` | 内部 SharedState 与监督日志不会原样发给浏览器；群聊播报由确定性模板投影。 |
 
 长任务采用“提交后轮询”：run API 执行、查状态、读对话和取结果分别位于 `app/api/v1/runs.py:54`、`:83`、`:95`、`:135`。这不是进程内任务队列；run 状态和事件落数据库。
@@ -88,9 +89,11 @@ frontend/e2e/        浏览器端流程回归
 | 确认档案 | `confirm_resume` | 行锁内核对 ready 与版本；uploaded 态返回 `resume_unparsed`。 |
 
 **无条件生命周期保护（与澄清开关解耦）**：consult/finalize 端点对
-`resume_uploaded`/`resume_queued` 一律 409；consult 落库经
-`MutationOutcome`（mutator 第四参拿到行锁内 status）在发现换代/新状态时
-降级为只追加 transcript、不覆盖 status；match-brief 的 generation CAS
+`resume_uploaded`/`resume_queued` 一律 409。consult 落库对"LLM 等待期间
+发生换代"的处理分两层：**澄清开关开启时由 Feature A 既有契约优先**
+（409 resume_changed，本轮 transcript 不落）；**开关关闭时**（原先无
+任何保护的路径）经 `MutationOutcome`（mutator 第四参拿到行锁内 status）
+降级为只追加 transcript、不覆盖 status。match-brief 的 generation CAS
 无条件生效（version 比对维持 Feature A 门控）。
 
 这套生命周期堵住“重确认洞”：用户上传新简历后，旧确认立即失效；即使旧请求稍后返回，也不能让旧档案重新变成 current。发生竞态时后端返回 409，前端统一失效并重取 preview 与 consult 数据，入口在 `frontend/src/v2/WorkbenchPage.tsx:535`。

@@ -206,10 +206,12 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
   accept/begin 三时序交错；解析中重传→在途产物作废且新行完好；重传竞态下
   预外呼失败仍返还；外呼后失败不返还；415/422；刷新恢复；双清定向；
   flag=false 下 uploaded/queued 态 consult/finalize 409；consult LLM 等待
-  期 upload → 落库只追加 transcript 不覆盖 status（双 flag）；match-brief
-  flag-off 并发上传 → 409；parse 回传旧 generation → 409；confirm
-  uploaded→resume_unparsed；GET resume-upload 非 uploaded→404；
-  save/mark CAS miss 时终态事件全回滚；限额后新建会话可用。
+  期换代 → **flag-on 按 Feature A 契约 409 且 transcript 不落、flag-off
+  降级为 MutationOutcome(status_override=None) 只追加 transcript**（两条
+  路径各测）；match-brief flag-off 并发上传 → 409；parse 回传旧
+  generation → 409；confirm uploaded→resume_unparsed；GET resume-upload
+  非 uploaded→404；限额后新建会话可用。（终态事件 CAS-miss 回滚测试随
+  terminal_event 归属 B3，见 §1.2 跨批归属澄清与 §3.1 测试清单。）
 - 原样回归：四开关矩阵（test_consult_coach.py:944 起）、
   test_resume_clarification_api/engine、test_intent_consultation、
   test_api_concurrency、e2e/mobile.spec.ts。

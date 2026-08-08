@@ -1077,8 +1077,9 @@ async def _normalize_resume(
     """B2 确认解析后台任务：输入为上传时已提取的文本与原始字节（字节随
     begin_resume_parse 事务取出并入内存，任何并发重传都影响不到本任务；
     B2 只消费 raw_text，suffix/content 为 B4 视觉 OCR 兜底预留的输入契约）。
-    单 try/finally 结构＝每任务至多一次返还的结构保证；external_started
-    在首个 LLM 外呼前置位——之前失败返还额度（用户没花到钱），之后不返。
+    返还位于唯一的 except 分支且本函数是 begin 后的唯一任务体——
+    "每任务至多一次返还"由该唯一调用点保证；external_started 在首个
+    LLM 外呼前置位——之前失败返还额度（用户没花到钱），之后不返。
     """
     del suffix, content  # B4 起用于低文本 OCR 路由；B2 契约先行贯通
     external_started = False
