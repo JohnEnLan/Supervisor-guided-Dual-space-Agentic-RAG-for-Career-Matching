@@ -127,6 +127,12 @@ _QUALITY_SEVERITIES = frozenset({"low", "medium", "high"})
 _MIN_CLARIFICATION_DESCRIPTION_CHARS = 12
 
 
+class ResumeIntakeUserError(ValueError):
+    def __init__(self, user_message: str) -> None:
+        super().__init__(user_message)
+        self.user_message = user_message
+
+
 def _compact_text(text: str) -> str:
     lines = [" ".join(line.strip().split()) for line in text.splitlines()]
     compact_lines: list[str] = []

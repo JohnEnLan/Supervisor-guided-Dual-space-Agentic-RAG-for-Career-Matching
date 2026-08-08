@@ -12,6 +12,8 @@ rank-bm25>=0.2.2        # 若不用 Postgres 全文检索时的备选
 python-multipart>=0.0.9 # FastAPI 文件上传
 pypdf>=4.2              # 简历 PDF 解析
 python-docx>=1.1        # 简历 docx 解析
+pypdfium2==5.12.1       # B4：低文本 PDF 页光栅化
+Pillow==12.3.0          # B4：图片校验、缩放与 JPEG 编码
 PyJWT>=2.8              # 签发/校验本站 __Host- session Cookie
 aiosmtplib>=3.0         # 邮箱 OTP 的异步 SMTP provider
 # 评估

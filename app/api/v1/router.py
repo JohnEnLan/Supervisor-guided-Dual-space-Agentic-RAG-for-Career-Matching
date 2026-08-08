@@ -21,6 +21,7 @@ async def capabilities() -> CapabilitiesResponse:
         otp_channels.append("phone")
     return CapabilitiesResponse(
         dual_space_enabled=settings.dual_space_enabled,
+        resume_image_upload_enabled=settings.resume_ocr_enabled,
         explain_enabled=settings.evaluation_capability_enabled,
         monitoring_enabled=settings.monitoring_enabled,
         otp_channels=otp_channels,

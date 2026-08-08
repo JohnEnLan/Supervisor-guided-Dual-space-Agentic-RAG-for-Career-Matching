@@ -16,6 +16,7 @@ class PublicDTO(BaseModel):
 class CapabilitiesResponse(PublicDTO):
     api_version: Literal["v1"] = "v1"
     dual_space_enabled: bool
+    resume_image_upload_enabled: bool
     explain_enabled: bool
     monitoring_enabled: bool
     execution_durability: Literal["process_local"] = "process_local"

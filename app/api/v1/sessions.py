@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import logging
+import math
 import time
 import uuid
 from copy import deepcopy
@@ -11,6 +13,7 @@ import re
 
 from typing import Annotated
 
+import pypdfium2
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -23,7 +26,7 @@ from fastapi import (
 from app.api.auth.deps import optional_current_user, require_owned_session
 from app.api.auth.routes import load_profile, merge_profile
 from app.api.auth.sessions import AuthedUser
-from app.api.uploads import read_resume_upload
+from app.api.uploads import IMAGE_RESUME_SUFFIXES, read_resume_upload
 from app.api.v1.schemas import (
     ClarificationProgress,
     ConsultBriefDraftResponse,
@@ -96,9 +99,15 @@ from app.db.state_store import (
     save_state,
 )
 from app.domain.match_brief import create_match_brief
+from app.llm.qwen_vl import ocr_image_jpeg
+from app.normalization.image_prep import prepare_image_jpeg, validate_image_header
 from app.normalization.resume_intake import (
+    ResumeIntakeUserError,
+    _compact_text,
     build_evidence_spans,
+    extract_resume_pages_from_bytes,
     extract_resume_text_from_bytes,
+    join_pdf_pages,
     normalize_resume_text,
 )
 from app.state.schema import ResumeState, SharedState
@@ -174,6 +183,7 @@ async def create_session(
 # B2：ocr_suggested 路由提示阈值（B4 引入 RESUME_OCR_* 配置前的常量）
 _OCR_SUGGEST_MIN_CHARS = 150
 _TEXT_PREVIEW_CHARS = 600
+_IMAGE_UPLOAD_PREVIEW = "图片简历，确认解析后将进行视觉识别（约几分钱）"
 
 
 def _upload_response(
@@ -181,6 +191,7 @@ def _upload_response(
     *,
     generation: int,
     filename: str,
+    suffix: str,
     extracted_text: str,
     pages: int,
     chars: int,
@@ -194,7 +205,12 @@ def _upload_response(
         pages=pages,
         chars=chars,
         # 先对全文脱敏再截断：600 字边界穿过电话/邮箱时不得泄漏半截 token
-        text_preview=_redact_contact_text(extracted_text)[:_TEXT_PREVIEW_CHARS],
+        text_preview=(
+            _IMAGE_UPLOAD_PREVIEW
+            if suffix.casefold() in IMAGE_RESUME_SUFFIXES
+            and not extracted_text.strip()
+            else _redact_contact_text(extracted_text)[:_TEXT_PREVIEW_CHARS]
+        ),
         parses_used=parses_used,
         parses_limit=settings.resume_parse_limit,
         ocr_suggested=ocr_suggested,
@@ -219,19 +235,40 @@ async def upload_resume(
 ) -> ResumeUploadedResponse:
     """B2 上传确认流：存库 + 本地提取（零 LLM），等待用户「确认解析」。"""
     filename, suffix, content = await read_resume_upload(file)
-    try:
-        extracted_text, pages = await asyncio.to_thread(
-            extract_resume_text_from_bytes, content, suffix
-        )
-    except Exception:
-        # 损坏/不可解析：不入库、不占 generation、不扣额度。
-        # 完整堆栈落日志——解析器自身的程序性缺陷不允许被 422 静默吞没。
-        logger.warning(
-            "resume extraction failed for %s (%s)", session_id, suffix, exc_info=True
-        )
-        raise HTTPException(status_code=422, detail="unreadable_file") from None
-    chars = len(extracted_text)
-    ocr_suggested = chars < _OCR_SUGGEST_MIN_CHARS
+    if suffix in IMAGE_RESUME_SUFFIXES:
+        try:
+            await asyncio.to_thread(validate_image_header, content)
+        except Exception:
+            logger.warning(
+                "resume image validation failed for %s (%s)",
+                session_id,
+                suffix,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=422, detail="unreadable_file") from None
+        extracted_text = ""
+        pages = 1
+        chars = 0
+        ocr_suggested = True
+    else:
+        try:
+            extracted_text, pages = await asyncio.to_thread(
+                extract_resume_text_from_bytes, content, suffix
+            )
+            if suffix == ".pdf" and pages < 1:
+                raise ValueError("PDF contains no pages")
+        except Exception:
+            # 损坏/不可解析：不入库、不占 generation、不扣额度。
+            # 完整堆栈落日志——解析器自身的程序性缺陷不允许被 422 静默吞没。
+            logger.warning(
+                "resume extraction failed for %s (%s)",
+                session_id,
+                suffix,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=422, detail="unreadable_file") from None
+        chars = len(extracted_text)
+        ocr_suggested = chars < _OCR_SUGGEST_MIN_CHARS
     try:
         accepted = await accept_resume_upload(
             session_id=session_id,
@@ -249,6 +286,7 @@ async def upload_resume(
         session_id,
         generation=int(accepted["resume_upload_generation"]),
         filename=filename,
+        suffix=suffix,
         extracted_text=extracted_text,
         pages=pages,
         chars=chars,
@@ -271,6 +309,7 @@ async def pending_resume_upload(session_id: str) -> ResumeUploadedResponse:
         session_id,
         generation=int(pending["generation"]),
         filename=str(pending["filename"]),
+        suffix=str(pending["suffix"]),
         extracted_text=str(pending["extracted_text"] or ""),
         pages=int(pending["pages"]),
         chars=int(pending["chars"]),
@@ -1138,6 +1177,54 @@ class _IntakeNarrator:
             )
 
 
+def _render_pdf_page_jpeg(content: bytes, page_number: int) -> bytes:
+    document = pypdfium2.PdfDocument(content)
+    page = None
+    bitmap = None
+    rendered = None
+    try:
+        page = document[page_number - 1]
+        width, height = page.get_size()
+        if width <= 0 or height <= 0:
+            raise ValueError("PDF page has invalid dimensions")
+        scale = min(
+            settings.resume_ocr_render_scale,
+            math.sqrt(settings.resume_ocr_max_pixels / (width * height)),
+        )
+        bitmap = page.render(scale=scale)
+        rendered = bitmap.to_pil()
+        buffer = io.BytesIO()
+        rendered.save(buffer, format="PNG")
+        return prepare_image_jpeg(buffer.getvalue())
+    finally:
+        if rendered is not None:
+            rendered.close()
+        if bitmap is not None:
+            bitmap.close()
+        if page is not None:
+            page.close()
+        document.close()
+
+
+def _ocr_summary_text(
+    *,
+    skipped_pages: int,
+    empty_pages: int,
+    truncated_pages: int,
+    interrupted_pages: int,
+) -> str:
+    parts: list[str] = []
+    if skipped_pages:
+        parts.append(f"{skipped_pages} 页图像准备失败")
+    if empty_pages:
+        parts.append(f"{empty_pages} 页视觉识别未读到文字")
+    if truncated_pages:
+        parts.append(f"{truncated_pages} 页超出本次视觉识别上限")
+    if interrupted_pages:
+        parts.append(f"视觉识别中断，{interrupted_pages} 页未识别")
+    return "；".join(parts) + "——档案可能不完整，可重新上传重试"
+
+
 async def _normalize_resume(
     *,
     session_id: str,
@@ -1151,16 +1238,98 @@ async def _normalize_resume(
     begin_resume_parse 事务取出并入内存，任何并发重传都影响不到本任务；
     B2 只消费 raw_text，suffix/content 为 B4 视觉 OCR 兜底预留的输入契约）。
     返还位于唯一的 except 分支且本函数是 begin 后的唯一任务体——
-    "每任务至多一次返还"由该唯一调用点保证；external_started 与
-    normalizing 进度阶段同点置位——之前失败返还额度（用户没花到钱），
-    之后不返。B3：终态事件经 terminal_event 随 save/mark 的 CAS 事务写入，
+    "每任务至多一次返还"由该唯一调用点保证；external_started 仅在真实
+    VL/normalize 外呼紧前置位——之前失败返还额度（用户没花到钱），之后
+    不返。B3：终态事件经 terminal_event 随 save/mark 的 CAS 事务写入，
     CAS 未命中（解析中重传换代）则零事件。
     """
-    del suffix, content  # B4 起用于低文本 OCR 路由；B2 契约先行贯通
     narrator = _IntakeNarrator(session_id, expected_generation)
     external_started = False
     try:
         await narrator.emit("received", "收到！我现在就把你的简历完整读一遍～")
+        if settings.resume_ocr_enabled and suffix.casefold() in IMAGE_RESUME_SUFFIXES:
+            jpeg = await asyncio.to_thread(prepare_image_jpeg, content)
+            await narrator.emit(
+                "ocr",
+                "这份是扫描件/图片，我用视觉识别读一读～",
+            )
+            external_started = True
+            raw_text = await ocr_image_jpeg(jpeg)
+        elif settings.resume_ocr_enabled and suffix.casefold() == ".pdf" and content:
+            pages, _total_pages = await asyncio.to_thread(
+                extract_resume_pages_from_bytes,
+                content,
+                suffix,
+            )
+            low_text_pages = [
+                (page_number, page_text)
+                for page_number, page_text in pages
+                if len(page_text.strip()) < settings.resume_ocr_page_min_chars
+            ]
+            candidates = low_text_pages[: settings.resume_ocr_max_pages]
+            truncated_pages = max(0, len(low_text_pages) - len(candidates))
+            skipped_pages = 0
+            empty_pages = 0
+            interrupted_pages = 0
+            page_positions = {
+                page_number: index
+                for index, (page_number, _page_text) in enumerate(pages)
+            }
+            for candidate_index, (page_number, _page_text) in enumerate(candidates):
+                try:
+                    jpeg = await asyncio.to_thread(
+                        _render_pdf_page_jpeg,
+                        content,
+                        page_number,
+                    )
+                except Exception:
+                    skipped_pages += 1
+                    continue
+                if not external_started:
+                    await narrator.emit(
+                        "ocr",
+                        "检测到扫描页，我用视觉识别补读一下～",
+                    )
+                external_started = True
+                try:
+                    ocr_text = await ocr_image_jpeg(jpeg)
+                except Exception:
+                    interrupted_pages = len(candidates) - candidate_index
+                    break
+                compact_ocr_text = _compact_text(ocr_text)
+                if compact_ocr_text:
+                    pages[page_positions[page_number]] = (
+                        page_number,
+                        compact_ocr_text,
+                    )
+                else:
+                    empty_pages += 1
+            if any(
+                (
+                    skipped_pages,
+                    empty_pages,
+                    truncated_pages,
+                    interrupted_pages,
+                )
+            ):
+                await narrator.emit(
+                    "ocr",
+                    _ocr_summary_text(
+                        skipped_pages=skipped_pages,
+                        empty_pages=empty_pages,
+                        truncated_pages=truncated_pages,
+                        interrupted_pages=interrupted_pages,
+                    ),
+                )
+            raw_text = join_pdf_pages(pages)
+        if (
+            settings.resume_ocr_enabled
+            and suffix.casefold() == ".docx"
+            and not raw_text.strip()
+        ):
+            raise ResumeIntakeUserError(
+                "这份 DOCX 里我没能读到文字，转成 PDF 或图片再传一次就好啦～"
+            )
         if not raw_text.strip():
             raise ValueError("empty resume text")
         evidence_spans = build_evidence_spans(raw_text)
@@ -1171,11 +1340,11 @@ async def _normalize_resume(
             f"读完啦！我从简历里整理出 {len(evidence_spans)} 条原文片段，"
             "每一条后面都会当作证据来用。",
         )
-        external_started = True
         await narrator.emit(
             "normalizing",
             "正在把这些经历梳理成结构化档案——这一步最花心思，稍等我一下…",
         )
+        external_started = True
         resume_state = await normalize_resume_text(raw_text, evidence_spans)
         await narrator.emit(
             "validated",
@@ -1199,20 +1368,25 @@ async def _normalize_resume(
                 elapsed_ms=narrator.elapsed_ms(),
             ),
         )
-    except Exception:
+    except Exception as exc:
         try:
             if not external_started:
                 await refund_parse_count(session_id=session_id)
+            error_text = (
+                exc.user_message
+                if isinstance(exc, ResumeIntakeUserError)
+                else (
+                    f"抱歉，这次解析中途出了点问题（用时 "
+                    f"{narrator.elapsed_text()}）。别担心，你可以再试一次，"
+                    "或换一份文件重新上传～"
+                )
+            )
             await mark_resume_error(
                 session_id=session_id,
                 expected_generation=expected_generation,
                 terminal_event=TerminalEvent(
                     step="error",
-                    text=(
-                        f"抱歉，这次解析中途出了点问题（用时 "
-                        f"{narrator.elapsed_text()}）。别担心，你可以再试一次，"
-                        "或换一份文件重新上传～"
-                    ),
+                    text=error_text,
                     elapsed_ms=narrator.elapsed_ms(),
                 ),
             )

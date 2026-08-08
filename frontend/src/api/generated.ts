@@ -476,6 +476,8 @@ export interface components {
             monitoring_enabled: boolean;
             /** Otp Channels */
             otp_channels?: ("email" | "phone")[];
+            /** Resume Image Upload Enabled */
+            resume_image_upload_enabled: boolean;
         };
         /** CareerPathItem */
         CareerPathItem: {

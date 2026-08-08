@@ -109,6 +109,7 @@ export const apiFixtures = {
     ({
       api_version: "v1",
       dual_space_enabled: true,
+      resume_image_upload_enabled: true,
       execution_durability: "process_local",
       explain_enabled: false,
       monitoring_enabled: false,

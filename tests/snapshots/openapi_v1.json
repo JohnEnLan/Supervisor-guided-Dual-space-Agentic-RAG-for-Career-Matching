@@ -52,10 +52,15 @@
             },
             "title": "Otp Channels",
             "type": "array"
+          },
+          "resume_image_upload_enabled": {
+            "title": "Resume Image Upload Enabled",
+            "type": "boolean"
           }
         },
         "required": [
           "dual_space_enabled",
+          "resume_image_upload_enabled",
           "explain_enabled",
           "monitoring_enabled"
         ],

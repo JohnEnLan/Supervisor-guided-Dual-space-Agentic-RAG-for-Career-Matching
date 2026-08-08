@@ -4,10 +4,19 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
+from app.config import settings
 
-ALLOWED_RESUME_SUFFIXES = {".pdf", ".docx", ".txt"}
+
+ALLOWED_RESUME_SUFFIXES = frozenset({".pdf", ".docx", ".txt"})
+IMAGE_RESUME_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 64 * 1024
+
+
+def allowed_resume_suffixes() -> frozenset[str]:
+    if settings.resume_ocr_enabled:
+        return ALLOWED_RESUME_SUFFIXES | IMAGE_RESUME_SUFFIXES
+    return ALLOWED_RESUME_SUFFIXES
 
 
 async def read_resume_upload(
@@ -21,7 +30,7 @@ async def read_resume_upload(
     (原始文件名, 归一化后缀, 字节)。非白名单后缀 415（不再伪装 .txt）；
     超过 10MB 413（原 persist_upload 闸门语义在此保留）。"""
     resolved_allowed_suffixes = (
-        ALLOWED_RESUME_SUFFIXES
+        allowed_resume_suffixes()
         if allowed_suffixes is None
         else allowed_suffixes
     )

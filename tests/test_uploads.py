@@ -36,7 +36,10 @@ async def test_read_resume_upload_buffers_in_memory_and_normalizes_suffix():
 
 
 @pytest.mark.asyncio
-async def test_read_resume_upload_rejects_non_whitelist_suffix_with_415():
+async def test_read_resume_upload_rejects_non_whitelist_suffix_with_415(monkeypatch):
+    from app.api import uploads
+
+    monkeypatch.setattr(uploads.settings, "resume_ocr_enabled", False)
     file = _FakeUploadFile("shot.png", b"\x89PNG")
 
     with pytest.raises(HTTPException) as excinfo:
