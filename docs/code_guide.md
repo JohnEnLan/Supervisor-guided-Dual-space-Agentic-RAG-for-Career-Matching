@@ -1,6 +1,6 @@
 # Career-RAG 代码导览（冻结态 V2）
 
-> 对齐代码：`2474e48`。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号。
+> 对齐代码：`eada18b`。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号。
 
 ## 1. 一分钟理解代码
 
@@ -104,7 +104,34 @@ frontend/e2e/        浏览器端流程回归
 
 `app/normalization/resume_intake.py:191` 的 `build_evidence_spans` 先在本地把原文切成 `R001`、`R002`……；模型只能基于这些片段结构化教育、经历、项目与技能。`app/normalization/resume_intake.py:281` 的 `build_clarification_targets` 再把质量问题和内容过短的经历转成确定性的澄清目标，功能门在 `app/normalization/resume_intake.py:612`。
 
-### 6.2 pending 锚点防止答非所问
+### 6.2 视觉 OCR 兜底（B4）
+
+`app/llm/qwen_vl.py` 是 Qwen VL 的异步边界：`timeout=60`、`max_retries=0`
+把一次逻辑调用钉死为至多一次传输尝试，`Semaphore(VL_MAX_CONCURRENCY=2)`
+同时限制调用与 base64 内存峰值；JPEG 字节在信号量内编码成 data URL 后送入
+固定 OCR 指令。
+
+`app/normalization/image_prep.py` 的八步管线依次是：①校验容器并执行 4000 万
+解码像素闸门；②JPEG 用 `draft()` 预缩；③按 EXIF 纠正方向；④缩到 400 万
+输出像素内；⑤透明图在白底展平、其余转 RGB；⑥先按 JPEG quality 70 编码；
+⑦核算 base64 后是否不超过 10MB；⑧超限只再按 quality 50 编码一次，仍超限
+就拒绝。顺序不能颠倒：方向纠正必须早于最终缩放，透明像素必须铺白底，否则
+会出现尺寸判断偏差或黑底。
+
+`app/api/v1/sessions.py` 的 `_normalize_resume` 有两路：图片在确认解析后准备 JPEG
+并做一次 VL；PDF 先逐页本地提取，只把少于 `RESUME_OCR_PAGE_MIN_CHARS` 的前
+`RESUME_OCR_MAX_PAGES` 页光栅化补读，成功文本替换对应页后再按原页序拼接。
+J1 熔断语义是：图片 VL 失败进入统一 `resume_error`；PDF 第一次 VL 异常即停止
+余下视觉调用，保留此前成功 OCR 与失败/未处理页的原生文本，并发“识别中断/
+未识别”汇总。
+
+`RESUME_OCR_ENABLED=false` 会撤回图片上传白名单并完全跳过 VL，回到 B4 前
+文本路径；`tests/test_extraction_golden.py` 用冻结 fixture 逐字节守卫
+PDF/DOCX/TXT 的文本与页数等价线。上传边界跟随 capability 开关：开启时只增加
+PNG/JPG/JPEG/WEBP，上传阶段仅做本地校验和持久化、零 VL，图片的 POST/刷新
+恢复都返回固定预览“图片简历，确认解析后将进行视觉识别（约几分钱）”。
+
+### 6.3 pending 锚点防止答非所问
 
 `app/agents/consult_engine.py:292` 的 `run_consult_round` 是咨询主函数。进入一轮时，它先读取上一轮保存的 `pending_clarification`（`:311`），只有当前问题、目标和简历基线仍对得上，回答才会被消费。新问题及其 `target_ref`、`asked_round`、`baseline_version` 在 `:460` 附近一起落状态。
 
@@ -119,7 +146,7 @@ open target → 生成一个澄清问题并保存 pending
 
 有效回答的 `span.text` 保存用户原话，`source=user_clarification`；编号由 `app/api/v1/sessions.py:893` `_next_clarification_span_id` 生成。回答摘要还要经过 `app/agents/consult_engine.py:586` `validated_answer_summary`，它不能加入用户原话中没有的 token。
 
-### 6.3 消费范围与隐私边界
+### 6.4 消费范围与隐私边界
 
 显式检索从 `app/retrieval/query_builder.py:40` `build_resume_retrieval_query` 读取有效简历；策略 Agent 和 Supervisor 也读取统一证据视图，所以 `C###` 可以支撑结果解释。匿名案例的隐式查询由 `app/retrieval/implicit_search.py:43` `build_implicit_query_text` 构造，只读取结构化教育、经历、项目和技能，不拼入澄清原话。这是“新证据可用于本人匹配，但不直接流入匿名案例查询文本”的边界。
 

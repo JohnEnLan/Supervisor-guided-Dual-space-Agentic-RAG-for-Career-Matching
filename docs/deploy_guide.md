@@ -141,9 +141,27 @@ Caddy 会在域名解析生效后**自动申请 HTTPS 证书**（首次访问约
 绕过确认制烧钱）：
 
 ```bash
-# ① 后端：解包 → 迁移 → 重启 → 健康检查
+# ① 后端：解包 → 补依赖/配置 → 重启 → 健康检查
 cd /opt/career-rag && tar -xzf app.tar.gz -C app && chown -R career:career app
-cd /opt/career-rag/app && sudo -u career ../venv/bin/python -m app.db.migrate
+
+# B4 新增 pypdfium2/Pillow；已有环境重复执行无害。
+# 若已 cd 到 app，等价命令是 ../venv/bin/pip install -r requirements.txt
+sudo -u career ./venv/bin/pip install -r app/requirements.txt
+
+# B4 的 8 个 OCR 变量须追加到既有 .env；printf 开头保留换行，
+# 避免再次与末行连在一起
+printf '\n%s\n' \
+  'RESUME_OCR_ENABLED=true' \
+  'QWEN_VL_MODEL=qwen-vl-ocr' \
+  'VL_MAX_CONCURRENCY=2' \
+  'RESUME_OCR_PAGE_MIN_CHARS=50' \
+  'RESUME_OCR_MAX_PAGES=6' \
+  'RESUME_OCR_MAX_PIXELS=4000000' \
+  'RESUME_OCR_RENDER_SCALE=2.0' \
+  'RESUME_OCR_MAX_IMAGE_PIXELS_DECODE=40000000' \
+  >> app/.env
+
+# 本批无需 migrate（B4 未新增数据库迁移）
 systemctl restart career-rag && sleep 8
 curl -s http://127.0.0.1:8000/api/v1/capabilities   # 吐 JSON 才继续
 
