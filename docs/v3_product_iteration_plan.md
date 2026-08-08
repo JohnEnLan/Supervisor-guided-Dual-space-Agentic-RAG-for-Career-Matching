@@ -1,9 +1,11 @@
-# v3 产品迭代方案（修订稿 v2.3 · 2026-08-08 · 自包含终审稿）
+# v3 产品迭代方案（v2.4 · 2026-08-08 · 唯一权威全文）
 
-> 修订记录：v1→v2→v2.1→v2.2 四轮三方评审逐轮收敛（历史意见 60+ 条全部处置；
-> 四轮子 agent 已 PASS，Codex 第四轮残留 2B/12M/4m 于本版全部处置，见 §12）。
-> 本版**自包含**：所有表结构/契约/回滚不再引用历史版本。本文件随本版起纳入
-> git 跟踪。
+> 修订史：v1→v2.3 经五轮三方评审收敛（子 agent 第四、五轮 PASS；Codex 第五轮
+> 残留 1B/7M 于本版处置，见 §12）。v1–v2.2 仅为工作草稿、未曾入库——**本版
+> 为唯一权威全文，无任何外部引用**；git 内前版仅 v2.3（3368613）。
+> 宪法裁决（用户 2026-08-08，已入库 de88946）：`asyncio.to_thread` 卸载阻塞
+> 库调用为"禁 threading"硬约束的明确允许例外（AGENTS.md §2.2 /
+> CLAUDE_LANGGRAPH.md §2.2）；仍禁自建线程/线程池/共享可变状态。
 > 原则：无状态服务（Postgres 单一状态源）、bounded loop、硬过滤走 SQL、
 > evidence 不编造、外部调用过 Semaphore、一次一批跑通再下一批。
 
@@ -17,17 +19,15 @@
 | R4 | 确认上传/解析+限3次 | B2 | | R9 | 移除评估/监控入口 | B5 |
 | R5 | 逐条出现+用户气泡 | B1+B2 | | R10 | 管理员页 | B5 |
 
-顺序 **B2 → B1 → B3 → B4 → B5**；迁移 B2=0009、B3=0010、B5=0011。
+顺序 **B2 → B1 → B3 → B4 → B5**（裁决落地后五批均无前置阻塞）。
+迁移：B2=0009、B3=0010、B5=0011。
 
-**R4 口径**：限额按解析次数（`RESUME_PARSE_LIMIT=3`）；重传不耗额度；外部
-调用发起前失败不耗额度。**R1 裁减**：纯扫描 DOCX 引导转 PDF/图片重传。
+**R4 口径（用户知悉）**：限额按解析次数（`RESUME_PARSE_LIMIT=3`）；重传不耗
+额度；外部调用发起前失败不耗额度（§1.2 返还）。
+**R1 裁减（用户知悉）**：纯扫描 DOCX 不做内嵌图 OCR，引导转 PDF/图片重传；
+覆盖 PDF（原生/扫描/混合）+ 图片 + 文本 DOCX。
 
-**用户已裁决（2026-08-08，B4 门控解除）**：`asyncio.to_thread` 卸载阻塞库
-调用（文件解析、光栅化/编码）为硬约束的**明确允许例外**；仍禁自建线程/
-线程池/线程间共享可变状态。裁决已写入 AGENTS.md §2.2 与
-CLAUDE_LANGGRAPH.md §2.2 修订行——Codex B1 的"规则文本缺失"由此闭环。
-
-## 1. B2 上传确认流 + 解析限额
+## 1. B2 上传确认流 + 解析限额（后端 + 前端，同批部署）
 
 ### 1.1 持久化（migration 0009，完整 DDL）
 
@@ -49,106 +49,147 @@ ALTER TABLE session_state ADD COLUMN resume_parse_count INT NOT NULL DEFAULT 0
   CHECK (resume_parse_count >= 0);
 ```
 
-同步 schema.sql。上传不落磁盘；10MB 上限以流式读入内存缓冲、超限 413 在新
-持久化函数内重写（persist_upload/unlink 移除，test_uploads.py 整文件重写）。
-**上传时提取契约**：POST 内经现行 intake 同款 to_thread 边界执行本地提取
-（存量行为）；文件损坏/不可解析 → **422 `unreadable_file`**（新 detail，
-不入库不扣额度）。**intake 输入契约**：intake_resume/extract_resume_text 增
-`bytes + suffix` 重载；CLI 保留 Path 适配。
+同步 schema.sql。上传不落磁盘（`persist_upload`/unlink 移除，
+test_uploads.py 整文件重写）；10MB 上限在新持久化函数内**流式读入内存缓冲、
+超限 413**。**上传时本地提取**：POST 处理器内经 `asyncio.to_thread(
+extract_resume_text_bytes, ...)` 执行（裁决允许；与现行 intake 同边界）；
+损坏/不可解析文件 → **422 `unreadable_file`**（不入库、不占 generation——
+提取在 accept 事务之前执行，失败即返回）。**intake 输入契约**：
+`extract_resume_text`/`intake_resume` 增 `bytes + suffix` 重载；CLI 保留
+Path 适配。
 
-### 1.2 状态机与原子操作
+### 1.2 状态机与原子操作（SQL 语义写死；不假设请求串行）
 
 ```
 awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_error
 ```
 
-- `accept_resume_upload`（单事务）：
+- `accept_resume_upload`（单事务，行锁先行）：
   ① `UPDATE session_state SET resume_upload_generation =
      resume_upload_generation + 1, status='resume_uploaded',
      confirmed_resume_version=NULL, resume_confirmed_at=NULL
      WHERE session_id=$1 RETURNING resume_upload_generation`；
-  ② `DELETE FROM resume_uploads WHERE session_id=$1`；③ INSERT。
-- `begin_resume_parse(session_id, generation, max)`（单事务）：
+  ② `DELETE FROM resume_uploads WHERE session_id=$1`；③ INSERT 新行。
+- `begin_resume_parse(session_id, generation, max)`（单事务，单快照分类）：
   ① `SELECT status, resume_upload_generation, resume_parse_count,
      owner_user_id FROM session_state WHERE session_id=$1 FOR UPDATE`
-     （owner_user_id 于此步取得，供 usage 归因；无行→404）；
+     （无行→404；owner_user_id 供 §5.1 归因）；
   ② 锁内分类，优先级 `parse_limit ＞ resume_changed ＞ resume_processing
      ＞ resume_unparsed`；
   ③ `UPDATE session_state SET status='resume_queued',
      resume_parse_count = resume_parse_count + 1 WHERE session_id=$1`；
-  ④ 同事务 `SELECT ... FROM resume_uploads WHERE session_id=$1 AND
-     generation=$2`，字节入内存传 BackgroundTask（行缺失→回滚
-     resume_changed）。四轮已证锁序安全、双击单扣。
-- `save_normalized_resume`/`mark_resume_error`：前置
-  `resume_upload_generation=$n AND status='resume_queued'`；**两函数各增
-  可选 `terminal_event` 参数，在其自身既有事务内先 INSERT 进度终态事件、
-  再 UPDATE 状态**（跨层同事务的唯一可行机制；进度回调不落终态事件，
-  仅承载信息，见 §3.1）。
-- **返还**：`_normalize_resume` 单 try/finally 结构内维护 `external_started`
-  标记（进度阶段 normalizing/ocr 置位=首个外呼即将发起）；失败且未置位 →
+  ④ 同事务 `SELECT filename, suffix, content, extracted_text, pages, chars
+     FROM resume_uploads WHERE session_id=$1 AND generation=$2`——字节入
+     内存传 BackgroundTask（行缺失→回滚，按 resume_changed）。
+  已证：与 accept 的全部交错在行锁串行化下安全；双击单扣。
+- `save_normalized_resume` / `mark_resume_error`（**改造为单事务 CAS +
+  终态事件**）：两函数各增可选 `terminal_event` 参数；实现为**同一事务内**
+  `UPDATE session_state ... WHERE resume_upload_generation=$n AND
+  status='resume_queued' RETURNING session_id` —— **RETURNING 命中才**
+  INSERT 终态进度事件（不带 §3.1 的 EXISTS 守卫，事件正当性由 CAS 保证）；
+  未命中则整体 no-op、不写任何事件（杜绝旧代孤儿终态事件；补 CAS miss
+  全回滚测试）。
+- **返还**：`_normalize_resume` 单 try/finally 内维护 `external_started`
+  （进度阶段 normalizing/ocr 置位）；失败且未置位 →
   `UPDATE session_state SET resume_parse_count =
   GREATEST(resume_parse_count - 1, 0) WHERE session_id=$1`（无 generation
-  谓词；扣费先于任务启动已提交，归纳可证正常运行不触 GREATEST 下限；
-  每任务≤1 次返还是单 finally 的结构保证）。admin 重置与在途任务交错可多
-  还 1 次（上界 1/任务，偏向用户，已接受）。restart 丢任务烧 1 次，救济
-  见 §5.3 重置端点（会一并解锁状态）。
+  谓词；扣费先于任务启动已提交，归纳保证正常运行不触下限；单 finally =
+  每任务≤1 次返还的结构保证）。admin 重置与在途任务交错可多还 1 次
+  （上界 1/任务，偏向用户，已接受）。restart 丢任务烧 1 次，救济 §5.3。
 - 清理：任务 finally `UPDATE resume_uploads SET content=NULL,
-  extracted_text=NULL WHERE session_id=$1 AND generation=$2`
-  （**清理范围＝上传原件与临时提取副本**；resume_state 的
-  original_evidence_spans/normalized_base_resume 属产品功能数据，保留）。
+  extracted_text=NULL WHERE session_id=$1 AND generation=$2`（清理范围＝
+  上传原件与临时提取副本；resume_state 的证据/摘要属产品数据，保留）。
 - `_RESUME_LIFECYCLE_DETAILS` 增 `resume_unparsed`、`resume_parse_limit`。
 - **生命周期无条件保护（与 clarify flag 解耦）**：
-  - consult/finalize 端点前置：`resume_uploaded`→409 unparsed、
-    `resume_queued`→409 processing（无条件）；`resume_error` 留 flag 门控。
-  - **consult 落库保护以 generation 为准**：consult 读取 state 时记录
-    generation；落库在 `mutate_state_atomically` **行锁内**比对
-    `locked.generation != loaded_generation` **或** `locked.status ∈
-    {uploaded, queued}` → `status=None` 只追加 transcript 不写状态
-    （status=None 写路径已存在，coach CAS2 在用）。双 flag 配置各测一遍。
-  - **match-brief 同保护**：其状态写入同样带无条件 generation CAS
-    （flag-off 也生效），失配 → 409 resume_changed，杜绝
-    `match_brief_approved` 覆盖新生命周期。
+  - consult/finalize 端点前置（无条件）：`resume_uploaded`→409 unparsed、
+    `resume_queued`→409 processing；`resume_error` 留 flag 门控（基线）。
+  - **consult 落库保护（generation 为主判据）+ 所需契约扩展（三件，
+    实现前置写死）**：(i) `mutate_state_atomically` 向 mutator 增传
+    locked.status（`_load_locked_state` 已 SELECT 该列，仅穿参）；
+    (ii) 允许 mutator 返回值覆写本次落库的 status（动态降级为 None＝
+    不写状态列，只落 state；`status=None` 写路径已存在）；(iii) flag-off
+    consult 读路径由 `load_state` 换为带 generation 的 context loader。
+    判定：行锁内 `locked.generation != loaded_generation ∨ locked.status ∈
+    {uploaded, queued}` → 只追加 transcript（降级路径跳过
+    `_merge_feature_a_resume_state`），不覆盖 status。双 flag 配置各测。
+  - **match-brief**：generation 比对提出 flag 门控（无条件生效，失配→409
+    resume_changed）；**version 比对维持 flag 门控不变**（防打破
+    test_api_v1.py:198 既有 fixture 基线；如该批顺手补 fake 实参亦可，
+    二选一在实现时定，测试口径以此为准）。
 
 ### 1.3 API 契约
 
 - `POST /sessions/{id}/resume`（202→200，require_owned_session）→
   `ResumeUploadedResponse{generation, filename, pages, chars,
-  text_preview(≤600字·脱敏), parses_used, parses_limit, ocr_suggested}`；
-  415 `unsupported_file_type`；422 `unreadable_file`。
+  text_preview(≤600字·经 _redact_contact_text 脱敏), parses_used,
+  parses_limit, ocr_suggested}`；415 `unsupported_file_type`；
+  422 `unreadable_file`。
 - `GET /sessions/{id}/resume-upload`（require_owned_session）：仅
-  `status='resume_uploaded'` 返回元数据，否则 404。
-- `POST /sessions/{id}/resume/parse`（require_owned_session，202）：
-  **请求 DTO `ResumeParseRequest{generation: int}`**——必须回传预览时拿到
-  的 generation（旧标签页解析未预览的新代 → 409 resume_changed）。
-- `resume-preview`/`resume-confirm` 在 uploaded 态 → 409 `resume_unparsed`。
-- OpenAPI 快照 + generated.ts + apiFixtures 同批再生。**文档同步（B2 批）**：
-  project_functionality_and_code_guide.md、code_guide.md、product_guide.md、
-  deploy_guide.md 的上传/解析章节。
+  `status='resume_uploaded'` 返回上述同构元数据（不含 content），否则 404。
+- `POST /sessions/{id}/resume/parse`（require_owned_session，202
+  `resume_queued`）：**请求 DTO `ResumeParseRequest{generation: int}`**——
+  必须回传预览所得 generation；旧标签页解析未预览新代 → 409 resume_changed。
+- `resume-preview` / `resume-confirm` 在 uploaded 态 → 409 `resume_unparsed`。
+- OpenAPI 快照 + generated.ts + apiFixtures.ts 同批再生。
+- **文档同步（B2 批内完成）**：project_functionality_and_code_guide.md、
+  code_guide.md、product_guide.md 的上传/解析章节；**deploy_guide.md 的
+  前端与 Caddy 章节**（全新安装路径改 releases/symlink 布局 + 首次
+  bootstrap：创建初始 `frontend-current` 符号链接、旧 `frontend-dist`
+  目录废弃说明），与 §7 部署布局保持一致。
 
-### 1.4 前端
+### 1.4 前端（WorkbenchPage 上传 UX 整体迁移）
 
-同 v2.2：composer 回形针 → 用户气泡确认上传 → 小意预览气泡（parses 计数 +
-ocr 提示）→ 确认解析 → 轮询；GET resume-upload 刷新恢复；reset effect 覆盖
-两 mutation；旧 input 收敛；PM 欢迎语/占位符同批改；limit 态禁用 +
-「新建会话继续」CTA + "会话额度也满时联系管理员重置"。
+- Composer 左侧回形针按钮（`accept=".pdf,.docx,.txt"`；图片后缀 B4 放开，
+  之前置灰提示"图片识别即将开放"）。选文件 → **用户侧气泡**（文件名+大小+
+  「确认上传」「取消」）→ POST upload → 小意气泡预览（页数/字数/前 600 字
+  + `parses_used/parses_limit` + ocr_suggested 提示）+「确认解析」→
+  POST parse → 现有 processing 轮询。
+- 挂载时 GET resume-upload 恢复确认卡；沿用会话切换 reset effect
+  （WorkbenchPage.tsx L666-676）并覆盖 upload/parse 两个 mutation。
+- 三处旧 `<input type="file">`（L851/L886/Accordion）收敛到 composer；
+  `resume_error` 文案指向 composer；**PM 欢迎语（L841）与输入框占位符
+  （L1112）同批改写指向 composer**。
+- `resume_parse_limit` → 解析按钮禁用 + "本会话解析次数已用完（3/3）" +
+  「新建会话继续」CTA + 附注"会话额度也用完时请联系管理员重置"。
 
 ### 1.5 测试
 
-v2.2 清单全部保留（lifecycle L233/263/425/819、PUBLIC_PATHS、test_uploads
-整文件、phase_e:583、auth_ownership +2 端点、config RESUME_PARSE_LIMIT、
-WorkbenchPage 六用例、apiFixtures、e2e/full-flow；三时序交错、重传竞态返还、
-重复返还不可能、外呼后不返还、415/422、刷新恢复、双清、flag=false 下
-uploaded/queued 409、consult 等待期 upload 不覆盖状态、限额后新会话），另增：
-**parse DTO 回传旧 generation → 409**；**match-brief flag-off 并发上传 →
-409 resume_changed**；confirm uploaded→resume_unparsed；GET resume-upload
-非 uploaded→404。原样回归：四开关矩阵、clarification api/engine、
-intent_consultation、api_concurrency、e2e/mobile。
+- 必改后端：test_resume_generation_lifecycle.py（L233/263/425/819 区）、
+  test_api_v1.py（`PUBLic_PATHS` 常量为 `PUBLIC_PATHS`，加 2 新端点 +
+  快照重生成）、test_uploads.py（整文件）、test_memory_phase_e.py:583、
+  test_auth_ownership.py（GET resume-upload、POST parse）、
+  test_config_env_boundary.py（RESUME_PARSE_LIMIT）。
+- 必改前端：WorkbenchPage.test.tsx（~L409/700/706/716/1481/1510，6–10 个
+  用例重写）、apiFixtures.ts、e2e/full-flow.spec.ts。
+- 新增：双击 parse 单扣费；upload 零 LLM；第 4 次 parse 409；分类优先级；
+  accept/begin 三时序交错；解析中重传→在途产物作废且新行完好；重传竞态下
+  预外呼失败仍返还；外呼后失败不返还；415/422；刷新恢复；双清定向；
+  flag=false 下 uploaded/queued 态 consult/finalize 409；consult LLM 等待
+  期 upload → 落库只追加 transcript 不覆盖 status（双 flag）；match-brief
+  flag-off 并发上传 → 409；parse 回传旧 generation → 409；confirm
+  uploaded→resume_unparsed；GET resume-upload 非 uploaded→404；
+  save/mark CAS miss 时终态事件全回滚；限额后新建会话可用。
+- 原样回归：四开关矩阵（test_consult_coach.py:944 起）、
+  test_resume_clarification_api/engine、test_intent_consultation、
+  test_api_concurrency、e2e/mobile.spec.ts。
 
-## 2. B1 前端体验包（同 v2.2 全文保留）
+## 2. B1 前端体验包（纯前端）
 
-R7 首访流（回读兜底 + 内存旗标 + 失败直达 /login）；R5 stagger（新增消息
-i*450ms，PM→600ms→小意，reduced-motion 即时）；R3 折叠 details；R8 三档
-宽度检查项 + 截图验收。
+1. **R7 首访流**：`/` 在 `!hasSeenIntro()` 时 `<Navigate to="/welcome">`
+   （CSR 同步判断）。/welcome 顶部「跳过介绍」与底部 CTA 均执行
+   `markIntroSeen()` 后**回读 `hasSeenIntro()`**——true → `navigate("/")`；
+   false（localStorage 不可写）→ `navigate("/login")` 直达；introSeen.ts
+   增模块级内存旗标兜底。首页「进入应用」→ 已登录 `/app` 否则 `/login`；
+   「了解它如何工作」入口保留。更新 HomePage/WelcomePage/router 测试。
+2. **R5 逐条出现**：`useStaggeredReveal` hook——仅对**本次轮询新增**消息
+   按序 `animation-delay = i*450ms`（历史消息不重播）；PM 与小意两条欢迎语
+   先 PM、600ms 后小意；`prefers-reduced-motion` 全部即时。
+3. **R3 折叠**：ResumeProfileAccordion 内「档案质量提示」「原文证据」移至
+   末尾各包 `<details>`（summary 带条数徽标）；vitest 断言默认收起、
+   点击展开。
+4. **R8 对齐（可量化）**：375/768/1280px 三档检查项——grouped 消息左缩进
+   = 头像列宽+间距；气泡内卡片 padding 统一 16px；composer 行内元素垂直
+   居中；stage divider 上下间距相等；确认卡按钮右对齐。验收物＝三档截图。
 
 ## 3. B3 小意解析叙事 + 档案逐行 + 计时 + 人设
 
@@ -167,44 +208,76 @@ CREATE TABLE resume_intake_progress (
 );
 ```
 
-- 首事件事务：`DELETE ... WHERE session_id=$1 AND generation < $2` + 守卫
-  INSERT；每条 INSERT 带 `WHERE EXISTS(... generation=$2 AND
-  status='resume_queued')`；孤儿行无害有界（如实表述）。
-- **终态事件归属（歧义消除）**：done/error 事件**由
-  save_normalized_resume/mark_resume_error 经 terminal_event 参数在自身
-  事务内写入**（§1.2）；intake 回调只发非终态事件（received/extracted/
-  normalizing/ocr/validated），并为 §1.2 阶段标记提供信息。
-- `GET /sessions/{id}/resume-progress`（require_owned_session）。
-- 测试：回调序列；DELETE 代数谓词交错；终态事件与翻转同 tx；所有权；
-  **前端 1200ms 轮询渲染、逐行动画 + reduced-motion、§3.3 存活子串快照**
-  （B3 测试清单补齐）。
+- 非终态事件（intake 回调发出：received/extracted/normalizing/ocr/
+  validated）：首事件事务 = `DELETE ... WHERE session_id=$1 AND
+  generation < $2` + 守卫 INSERT；每条 INSERT 带 `WHERE EXISTS(SELECT 1
+  FROM session_state WHERE session_id=$1 AND resume_upload_generation=$2
+  AND status='resume_queued')`；EXISTS 为快照读，极端交错可残留一条无害
+  孤儿行（PK 含 generation、读端按当前代过滤）。
+- **终态事件（done/error）**：由 save_normalized_resume/mark_resume_error
+  经 `terminal_event` 参数在 §1.2 的单事务 CAS 内写入（RETURNING 命中才
+  写）；intake 回调**不落**终态事件，仅承载信息（含 §1.2 阶段标记信息源）。
+- `intake_resume` 增可选异步回调 `progress`（默认 None 行为与现状一致）。
+- **`GET /sessions/{id}/resume-progress`（require_owned_session）契约**：
+  200 `ResumeProgressResponse{generation: int|null, status: str,
+  events: [{seq, step, text, elapsed_ms, created_at}], done: bool}`——
+  events 取 `session_state.resume_upload_generation` 当前代、`ORDER BY seq`
+  全量返回（每代 ≤10 条，无需游标）；无记录 → `events=[]`；
+  `done = status ∈ {resume_ready, resume_error}`；前端 processing 期
+  1200ms 轮询，`done=true` 即停。
+- 前端：事件按小意气泡逐条出现（复用 B1 stagger）；done 展示"用时 X.X 秒"。
+- 测试：回调序列；DELETE 代数谓词交错（迟到旧任务删不掉新代）；终态事件
+  仅随 CAS 命中写入；所有权；**前端 1200ms 轮询渲染、done 停轮询、逐行
+  动画 + reduced-motion、§3.3 存活子串快照**。
 
-### 3.2 档案逐行（前端动画，同 v2.2）。
+### 3.2 档案逐行 print（前端动画）
 
-### 3.3 小意人设（同 v2.2：语气段扩写 + 存活子串清单逐字保留 + 120/80/
-phase/retry 不动 + 欢迎语热情化）。
+- 解析完成后小意发"档案摘要"气泡：前端由 preview 数据合成行数组（教育/
+  每段经历/每个项目/技能各一行），逐行显现（~350ms/行，reduced-motion
+  即时）；末行指向「查看完整档案」。不引入 SSE。
 
-## 4. B4 视觉 OCR 兜底（**开工前置：§0 to_thread 裁决**）
+### 3.3 小意人设（R6）
 
-- `qwen_vl.py`（DashScope OpenAI 兼容，QWEN_VL_MODEL=qwen-vl-ocr 首日冒烟，
-  Semaphore(VL_MAX_CONCURRENCY=2)）。
-- 提取契约页级重构 `[(page_no, text)]`。
-- PDF：页文本 < RESUME_OCR_PAGE_MIN_CHARS(50) → 读 mediabox，
-  `scale = min(RESUME_OCR_RENDER_SCALE(2.0),
-  sqrt(RESUME_OCR_MAX_PIXELS(4_000_000)/(w*h)))` 光栅化 → JPEG → base64
-  ≤10MB（超限降质重试一次 q70→q50，仍超 → 跳过该页 + 进度事件说明，
-  不硬失败）→ OCR。**合并＝按页替换**，页序不变；`RESUME_OCR_MAX_PAGES(6)`
-  只限 OCR 页数，之后的页保留原生文本。
-- 图片：**解码级防炸**——`Image.MAX_IMAGE_PIXELS =
-  RESUME_OCR_MAX_IMAGE_PIXELS_DECODE(40_000_000)`（超限 422/resume_error
-  硬拒绝）+ JPEG draft 解码降采样 → 归一化到 MAX_PIXELS → 同管线。
-- DOCX：无文本 → resume_error + 转 PDF/图片引导。
-- 终止：无可用 evidence span → resume_error（G17）。
-- 依赖入 requirements.txt；**前端**：accept 放开图片 + ocr 提示（前后端批）。
-- 测试：混合 PDF 按页替换；**MAX_PAGES 截断后原生文本页保留**（oracle 与
-  正文对齐）；base64 降质重试→跳页链路；解码防炸硬拒绝；scale 收敛内存
-  有界；VL Semaphore；docx 引导；开关关闭逐字节等价；无 span→error；
-  前端图片全流程。
+- CONSULT_PROMPT 语气段扩写（热情、称呼、先共情再提问、emoji ≤1/条）。
+- **存活子串逐字保留**：开头 `PHASE_C2_CONSULT_ADVISOR\n`、
+  `Current consultation phase: {phase}`、`Ask exactly ONE heuristic
+  question per turn`、`question max 80 Chinese characters`、`Never invent
+  facts about the user`、JSON 键 `assistant_reply/next_question/
+  profile_updates/phase_suggestion`、role_clusters 词表、clarify 后缀键名
+  （test_consult_engine.py:112-121、test_resume_clarification_engine.py:
+  94-99/479 钉死）。120/80 上限、phase 枚举、bounded retry 2 不动。
+- 前端欢迎语/错误文案热情化（不回退 B2 的 composer 指向）；进度事件模板
+  即小意口吻（"收到！我先把简历读一遍～"）。
+
+## 4. B4 视觉 OCR 兜底（后端 + 前端 accept；无迁移）
+
+- `app/llm/qwen_vl.py`：DashScope OpenAI 兼容，`QWEN_VL_MODEL=qwen-vl-ocr`
+  （首日真实冒烟确认模型名/参数），`Semaphore(VL_MAX_CONCURRENCY=2)`。
+- 阻塞卸载：光栅化/编码走 `asyncio.to_thread`（宪法裁决允许例外）。
+- 提取契约页级重构：`extract_resume_text` → `[(page_no, text)]`（对外拼接
+  兼容；evidence page 语义不变；test_resume_intake 回归）。
+- 策略：
+  - PDF：页文本 `< RESUME_OCR_PAGE_MIN_CHARS(50)` → 读 mediabox，
+    `scale = min(RESUME_OCR_RENDER_SCALE(2.0),
+    sqrt(RESUME_OCR_MAX_PIXELS(4_000_000)/(w*h)))` 光栅化 → JPEG q70 →
+    base64 ≤10MB？否则 q50 重试 → 仍超则**跳过该页**（保留原生文本 +
+    进度事件说明，不硬失败）→ OCR。**合并＝按页替换**，页序不变；
+    `RESUME_OCR_MAX_PAGES(6)` 只限 OCR 页数，其后页保留原生文本。
+  - 图片：**解码防炸=显式尺寸检查**——`Image.open` 后读 header 尺寸，
+    `width*height > RESUME_OCR_MAX_IMAGE_PIXELS_DECODE(40_000_000)` →
+    硬拒绝（上传态 422 / 解析态 resume_error）；不依赖 Pillow
+    `MAX_IMAGE_PIXELS`（其超限默认仅告警、超两倍才抛错）；JPEG draft
+    降采样 → 归一化到 MAX_PIXELS → 同管线。
+  - DOCX：仅文本；无文本 → resume_error + "转 PDF 或图片重传"。
+- 终止：归一化后无任何可用 evidence span → resume_error（G17）。
+- pypdfium2、Pillow 入 requirements.txt；前端 accept 放开图片 +
+  ocr_suggested 文案（前后端批，四门含 vitest + frontend-dist 包）。
+- 测试（oracle 与正文逐分支闭合）：混合 PDF 仅低文本页 OCR + 按页替换；
+  **q70 合格→调用 VL；q70 超→q50 合格→调用 VL；双超→不调用 VL +
+  保留原生文本 + 跳页事件**；MAX_PAGES 截断后原生文本页保留；
+  **40_000_001 像素边界硬拒**；scale 收敛内存有界；VL Semaphore 上限；
+  docx 无文本引导；`RESUME_OCR_ENABLED=false` 逐字节等价；无 span→error；
+  前端图片上传全流程。
 
 ## 5. B5 计量 + 管理员（migration 0011，完整 DDL）
 
@@ -227,105 +300,153 @@ CREATE TABLE product_events (
 CREATE INDEX idx_product_events_kind ON product_events (kind, created_at);
 ```
 
-### 5.1 计量
+### 5.1 计量（任务入口 usage_scope，零签名改动）
 
-- 两表均 **await 写入 + fail-open**。`usage_scope` 任务体内设置：
-  `_normalize_resume`（owner_user_id 来自 §1.2 步骤①；normalize/嵌套 ocr）、
-  consult（consult）、coach（coach）、**run 统一包装器
-  `_run_with_usage_scope(executor_call)`——透传 executor 既有全部参数与
-  注入（含 LangGraph checkpointer，runs.py:68-74 的注入原样保留），仅额外
-  包 scope，覆盖经典与 LangGraph 两支**、case_base（case_embed）。
-- 记录在客户端内部：deepseek.chat、qwen_embed（**embed_one 直接复用
-  embed_texts 时只在最内层 provider 请求处写一行，杜绝重复计量**；LRU
-  命中零行）、reranker（仅 total）、qwen_vl。签名不变。
-- 测试：双 executor 归因带 session_id/user_id 且 **checkpointer 仍生效
-  （checkpoint 写入断言）**；嵌套 scope；fail-open；缓存零行；单请求单行。
+- 两表均 **await 写入 + fail-open**（遥测异常不得影响 P0；单测覆盖）。
+- `app/llm/usage_context.py::usage_scope(user_id, session_id, purpose)`
+  （contextvars），**全部在任务体内设置**：`_normalize_resume`
+  （owner_user_id 来自 §1.2 步骤①；normalize，OCR 段嵌套 ocr）、consult
+  端点（consult）、coach（coach）、**run 统一包装器
+  `_run_with_usage_scope(...)`——透传 executor 既有全部参数与注入（含
+  LangGraph checkpointer，runs.py:68-74 注入原样保留），仅额外包 scope，
+  覆盖经典 orchestrator 与 `run_graph_match` 两支**（内层 supervisor/
+  strategy/explain 嵌套细分）、memory/case_base（case_embed）。
+- 记录在客户端内部：deepseek.chat、qwen_embed（embed_one 复用 embed_texts
+  时**只在最内层 provider 请求处写一行**；LRU 命中零行）、reranker
+  （仅 total）、qwen_vl。所有函数签名不变，既有测试假件零冲击。
+- product_events 写入点：login / session_created / consult_turn /
+  run_started / resume_parse。
+- 测试：双 executor 归因带 session_id/user_id 且 **checkpoint 写入断言仍
+  生效**；嵌套 scope；fail-open；缓存零行；单 provider 请求单行。
 
-### 5.2 管理员鉴权（同 v2.2：require_admin 无条件 fail-closed + 每请求实时
-白名单 + 登录同步列 + trim/casefold/去重 + phone 恒非 admin；monitoring
-先 flag 404 后 require_admin，匿名用例重写）。
+### 5.2 管理员鉴权（fail-closed + 即时撤权）
 
-### 5.3 管理端
+- `require_admin`：任何配置下要求已登录 + `users.is_admin` + **每请求实时
+  校验 email 身份 ∈ ADMIN_EMAILS**（一次 user_identities 索引查询；白名单
+  移除即时生效）。登录时同步列 `is_admin = (email ∈ 白名单)`（升降权自动；
+  phone 身份恒非 admin）。解析规范：逗号分隔、trim、casefold、去重。
+  break-glass：SQL 直改列 + 临时加回白名单。
+- monitoring：**先 flag（关闭→404 语义保留）再 require_admin**（开启后
+  匿名 → 401/403）；test_monitoring_api.py 匿名 200/404 用例按新序重写。
+- 评估页：/admin/evaluation 走新 admin 端点（跨用户）；用户自查
+  `/runs/{id}/explain`（require_owned_run）保留不动。
 
-- overview / users?page（最新简历定序 `resume_confirmed_at DESC NULLS LAST,
-  resume_version DESC, session_id`，全空显示"未上传"）/ users/{id}/resume
-  （不脱敏）/ `GET /admin/runs/{run_id}/explain`（require_admin 跨用户，
-  复用 explain DTO）。
-- `POST /admin/sessions/{id}/reset-parse-count`（require_admin）：**语义
-  扩展**——重置计数 + 若 status='resume_queued'（restart 遗留）则置
-  resume_error + 清该会话 resume_uploads 的 content/extracted_text
-  （限额死局与 restart 遗留的统一救济，兼隐私清理）。
-- 前端 /admin shell + 用户表 + 简历抽屉 + 重置按钮；评估/监控入口迁移 +
-  旧路径重定向；用户侧移除（R9）。
+### 5.3 管理端 API 与页面
 
-### 5.4 联系人结构化（同 v2.2：contact 字段 + 逐字段 extractive 验证 +
-落点全列 + 用户侧脱敏/admin 原样）。
+- `GET /api/v1/admin/overview`：用户/登录/会话/consult/run 计数（今日/7日/
+  30日）、按日 token 曲线、按模型 token 与估算成本（前端单价常量，标注
+  "估算·价格版本 2026-08"）。
+- `GET /api/v1/admin/users?page`：email、注册/最近登录（last_login_at 回填
+  最近一次）、会话数、最近简历摘要列。**最新简历定序**：
+  `resume_confirmed_at DESC NULLS LAST, resume_version DESC, session_id`
+  取首；全空 → "未上传"。
+- `GET /api/v1/admin/users/{id}/resume`：最新 resume_state 全量（不脱敏，
+  仅 admin）。
+- `GET /api/v1/admin/runs/{run_id}/explain`（require_admin，跨用户，复用
+  现有 explain DTO）。
+- `POST /api/v1/admin/sessions/{id}/reset-parse-count`（require_admin，
+  **单事务 FOR UPDATE**）：重置 `resume_parse_count=0`；**仅当
+  status='resume_queued'（restart 遗留）** → 置 resume_error + 清该会话
+  resume_uploads 的 content/extracted_text；**status='resume_uploaded'
+  （合法待解析）→ 保留上传原件不清理**（防止重置销毁可解析内容）。
+- 前端 `/admin` 轻 shell（入口仅 `me.is_admin` 可见）：Dashboard + 用户表
+  + 简历详情抽屉 + 重置按钮；「评估（答辩）」「监控（答辩）」入口移入
+  /admin（旧路径 Navigate 重定向）；用户侧 sidebar 移除两入口（R9）。
 
-### 5.5 测试（同 v2.2 清单，另加：即时撤权矩阵、reset 端点三重语义、
-admin explain 跨用户、R9 双端断言、confirm/GET/定序/空态精确用例）。
+### 5.4 简历联系人结构化
+
+- `resume_state.contact = {name, phone, email, evidence_span_ids}`
+  （additive）。落点全列：app/state/schema.py ResumeState 增字段、
+  resume_intake.py SYSTEM_PROMPT JSON shape 增 contact 段、LLMResumePayload
+  增字段、**逐字段 extractive 验证（name/phone/email 各自逐字命中所引
+  span，否则该字段置空；不用身份锚点回退）**、tests/test_resume_intake.py
+  新增用例。用户侧 preview 维持脱敏；admin 端点原样返回。
+
+### 5.5 B3/B4/B5 测试清单
+
+- B5：test_monitoring_api（匿名用例按新序重写）、test_auth_sessions
+  （登录 SQL 改写 → fake DB 匹配更新，L101-140/198-223）、test_auth_api、
+  test_auth_ownership（admin 端点矩阵 + 即时撤权：白名单移除后下一请求
+  403）、admin API 新测试（reset 三态语义、admin explain 跨用户、R9 双端
+  断言：用户 sidebar 无两入口 / admin 可见）、contact 验证、usage 双
+  executor + checkpoint 断言。
+- B3/B4：见 §3.1/§4 各自清单。
 
 ## 6. 锁定契约兼容清单
 
-1. Feature A 自 resume_ready 起不变；四开关矩阵预期不改。
-2. 409 Literal 只加值（unparsed/parse_limit）+ 415/422 新 detail；
-   `_RESUME_LIFECYCLE_DETAILS` 同步。
-3. consult 契约与存活子串不动。4. G17/G18 不变。
-5. `-m app.serve`、Semaphore、无状态沿用；in-flight 字节与任务同实例。
-6. 每批快照/类型/fixtures 再生。7. to_thread 事项按 §0 裁决条款执行。
-8. consult/match-brief 落库保护是新增防御，基线状态转移不变。
+1. Feature A 自 resume_ready 起不变；四开关矩阵预期不改（新增状态由 B2
+   无条件前置拦截，基线状态行为逐字节一致）。
+2. 409 Literal 只加值（resume_unparsed/resume_parse_limit）+ 415/422 新
+   detail；`_RESUME_LIFECYCLE_DETAILS` 同步增补；`resume_missing` 仍仅
+   API 层抛。
+3. consult 契约与 §3.3 存活子串不动。
+4. G17/G18 不变（parse 计数 + 预外呼返还恰为保 G17）。
+5. `-m app.serve`、Semaphore、无状态沿用；in-flight 字节与任务同实例，
+   不跨实例寻址。
+6. 每批 OpenAPI 快照 + generated.ts + apiFixtures 再生。
+7. to_thread 按宪法裁决条款执行（AGENTS.md §2.2）。
+8. consult/match-brief 落库保护是新增防御；基线状态转移不变。
 
 ## 7. 部署与迁移
 
-- 常规批：四门 → commit → 打包 → scp → 解包 → 迁移 → restart → 健康检查。
-- **B2 部署顺序**：① 后端先行（解包 app → migrate → restart → curl 健康；
-  旧前端×新后端已验证无害：upload 200 被忽略，preview 收到未知 409 回落
-  上传入口，零 LLM）；② **前端版本目录 + 符号链接原子切换**：解包到
-  `/opt/career-rag/releases/frontend-<版本>` → `ln -sfn` 切
-  `/opt/career-rag/frontend-current`（Caddyfile root 改指 frontend-current，
-  B2 批一并改；rename 原子、无空窗、可回切、无 .old 残留问题）；
-  ③ `caddy validate` → `systemctl reload caddy`（index.html no-store 生效）；
-  ④ 旧标签页刷新恢复（已接受残留）。
-- B4：pip install -r + env（VL/OCR 全套）；B5：env ADMIN_EMAILS。
+- 常规批：四门 → commit → 打包 → scp → 解包 → 迁移（0009/0010/0011 批）→
+  restart → curl 健康检查。
+- **B2 部署顺序（写死）**：
+  ① 后端先行：解包 app → migrate → `systemctl restart career-rag` →
+     curl capabilities；此窗口＝旧前端×新后端，已验证无害（upload 200 被
+     旧端忽略，preview 收到未知 409 `resume_unparsed` 后回落上传入口，
+     零 LLM 零崩溃）；**杜绝反向窗口**（新前端×旧后端会绕过确认自动烧
+     LLM）——前端必须后于后端；
+  ② 前端版本目录 + 符号链接切换：解包到
+     `/opt/career-rag/releases/frontend-<版本>` →
+     `ln -sn <目录> current.tmp && mv -Tf current.tmp
+     /opt/career-rag/frontend-current`（rename(2) 真原子；Caddy v2
+     file_server 默认跟随 symlink 并按请求解析，翻链即时生效）；
+     Caddyfile root 改指 `frontend-current`（B2 批一并改，含 index.html
+     `Cache-Control: no-store`）；
+  ③ `caddy validate --config /etc/caddy/Caddyfile` →
+     `systemctl reload caddy`（仅因 Caddyfile 本身变更）；
+  ④ 已打开的旧标签页刷新即恢复（已接受残留）。
+  首次切换 bootstrap 与全新安装布局写入 deploy_guide.md（§1.3 文档同步）。
+- B4：`pip install -r requirements.txt` + env（QWEN_VL_MODEL、
+  VL_MAX_CONCURRENCY、RESUME_OCR_ENABLED、RESUME_OCR_PAGE_MIN_CHARS、
+  RESUME_OCR_MAX_PAGES、RESUME_OCR_MAX_PIXELS、RESUME_OCR_RENDER_SCALE、
+  RESUME_OCR_MAX_IMAGE_PIXELS_DECODE）。
+- B5：env 增 ADMIN_EMAILS；用户邮箱重登获权。
 
 ## 8. 风险与回滚
 
-- 每批独立 commit/包；0009-0011 additive，回滚=上一包 + 表保留。
-- OCR 闸：确认制+限额+Semaphore+页数/像素/解码防炸/base64 上限。
-- 返还偏置只向用户（GREATEST+CHECK 双下限；reset 交错上界 1/任务）。
-- 遥测 fail-open；ADMIN_EMAILS 空→全 403。
+- 每批独立 commit/包，回滚＝上一包；0009-0011 均 additive。
+- OCR 成本闸：确认制 + 解析限额 + VL Semaphore + 页数/像素/解码防炸/
+  base64 上限。
+- 返还偏置只向用户（GREATEST + CHECK 双下限；reset 交错上界 1/任务）。
+- 遥测 fail-open；ADMIN_EMAILS 空 → /admin 全 403，主线无影响。
+- 进度孤儿行无害且有界（每代 ≤1）。
 
 ## 9. 流程
 
-方案三方全 PASS 才动代码；每批四门+对侧抽查；全部批次后三方全量 diff
-查 bug 至干净。
+方案三方全 PASS 才动代码；每批四门 + 对侧抽查；全部批次完成后三方对全量
+diff 查 bug（正确性/契约/并发/安全/回归），修复回审至三方干净。
 
-## 10-11. 历史处置
+## 10-11. 历史意见处置
 
-v1 23 条、二轮 22 组、三轮 20 组意见的处置对照表见本文件 git 历史
-（v2/v2.1/v2.2 版）；本文件自 v2.3 起入库跟踪。
+五轮评审历史意见（v1 23 条、二轮 22 组、三轮 20 组、四轮 20 组）的处置
+对照表见 v2.3（git 3368613）§12 及本文件修订史；全部已并入本版正文。
 
-## 12. 第四轮意见处置（v2.3）
+## 12. 第五轮意见处置（v2.4）
 
 | 来源 | 意见 | 处置 |
 |---|---|---|
-| Codex B1 | to_thread 违宪 | §0 用户裁决条款（仅门控 B4；B2 提取属存量行为） |
-| Codex B2 | 文档不自包含/未入库 | 本版 DDL 全部内联 + 文件入 git |
-| Codex M1 | CHECK 简写无效 SQL | §1.1 全表达式 |
-| Codex M2 | parse 无 DTO | §1.3 ResumeParseRequest{generation} + 旧标签页 409 测试 |
-| Codex M3 | consult 保护应以 generation 为准 | §1.2 行锁内 generation 比对 ∨ 状态判定 |
-| Codex M4 | match-brief 同类竞态 | §1.2 无条件 generation CAS + 测试 |
-| Codex M5 | 终态事件事务归属矛盾 | §1.2/§3.1 terminal_event 参数、回调不落终态（子 agent 建议 1 同源） |
-| Codex M6 | restart 遗留无救济/PII | §5.3 reset 端点三重语义（计数+解锁+清理） |
-| Codex M7 | 包装器丢 checkpointer | §5.1 透传全部注入 + checkpoint 断言 |
-| Codex M8 | mv 两步有空窗/.old 残留 | §7 releases 目录 + symlink 原子切换 + Caddy root 改 |
-| Codex M9 | 上传提取执行契约缺失 | §1.1 to_thread 存量边界 + 422 unreadable_file |
-| Codex M10 | 图片解码炸弹 | §4 MAX_IMAGE_PIXELS_DECODE 硬拒 + draft 降采样 |
-| Codex M11 | B3 测试缺前端项 | §3.1 补齐 |
-| Codex M12 | B4 oracle 与正文不闭合 | §4 测试与正文逐条对齐（降质重试→跳页） |
-| Codex m1 | 精确测试未列 | §1.5/§5.5 |
-| Codex m2 | 文档同步范围 | §1.3 四份文档点名 |
-| Codex m3 | embed 重复计量 | §5.1 最内层单行 |
-| Codex m4 | 隐私表述过宽 | §1.2 限定清理范围 |
-| 子 agent 建议 2 | 保护条件评估位置 | §1.2 行锁内 + 双 flag 测试 |
-| 子 agent 建议 3 | owner_user_id 来源 | §1.2 步骤①（§5.1 同步改） |
-| 子 agent 建议 4/5 | reset 交错偏置/单 finally | §1.2/§8 |
+| Codex B1 | "同 v2.2"引用不可恢复、git 历史缺失 | 本版全文自包含，无任何外部引用；修订史声明如实（v1-v2.2 为草稿未入库） |
+| Codex M1 | §0 治理条款自相矛盾 | 裁决已落地（de88946），§0 改为裁决记录；顺序与门控矛盾随之消除 |
+| Codex M2 | consult 保护接口不可实现 | §1.2 三件契约扩展写死（穿参 locked.status、mutator 覆写 status、flag-off 换 loader）（子 agent 五审 M 级同源） |
+| Codex M3 | mark_resume_error 无既有事务；孤儿终态事件 | §1.2 改为单事务 UPDATE…RETURNING 命中后 INSERT；miss 全 no-op + 回滚测试 |
+| Codex M4 | reset 会销毁合法待解析上传 | §5.3 三态语义：仅 queued 遗留才清理，uploaded 保留 |
+| Codex M5 | progress API 无 DTO | §3.1 ResumeProgressResponse 完整契约（当前代/排序/空态/done/停轮询） |
+| Codex M6 | Pillow MAX_IMAGE_PIXELS 40-80M 不拦 | §4 显式尺寸乘积检查 + 40_000_001 边界测试 |
+| Codex M7 | B4 oracle 分支缺口 | §4 三分支断言（q70 过/ q50 过/双超跳页不调 VL） |
+| 子 agent M | mutate 契约三件 | §1.2（与 Codex M2 合并） |
+| 子 agent m1 | version 比对门控归属 | §1.2 match-brief 条款写死 |
+| 子 agent m2 | ln -sfn 非原子 | §7 ln -sn + mv -Tf（rename 真原子） |
+| 子 agent m3 | deploy_guide 全新安装矛盾/bootstrap | §1.3 文档同步扩围 + §7 bootstrap |
+| 子 agent m4 | B2 返工敞口半句 | 裁决为"允许"，条款已闭（无需保留敞口） |
