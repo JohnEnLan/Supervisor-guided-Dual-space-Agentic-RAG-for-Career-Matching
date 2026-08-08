@@ -182,6 +182,9 @@ async def create_session(
 
 # B2：ocr_suggested 路由提示阈值（B4 引入 RESUME_OCR_* 配置前的常量）
 _OCR_SUGGEST_MIN_CHARS = 150
+# 整批终审 Codex M2：解码/光栅化/编码的 CPU 与内存也要有并发闸——与 VL
+# 网络闸分离（不嵌套持有，无死锁），上界同取 vl_max_concurrency。
+_OCR_PREP_SEMAPHORE = asyncio.Semaphore(settings.vl_max_concurrency)
 _TEXT_PREVIEW_CHARS = 600
 _IMAGE_UPLOAD_PREVIEW = "图片简历，确认解析后将进行视觉识别（约几分钱）"
 
@@ -204,10 +207,12 @@ def _upload_response(
         filename=filename,
         pages=pages,
         chars=chars,
-        # 先对全文脱敏再截断：600 字边界穿过电话/邮箱时不得泄漏半截 token
+        # 先对全文脱敏再截断：600 字边界穿过电话/邮箱时不得泄漏半截 token。
+        # 图片固定文案随开关（Codex M4）：flag 关掉后不得再承诺视觉识别
         text_preview=(
             _IMAGE_UPLOAD_PREVIEW
-            if suffix.casefold() in IMAGE_RESUME_SUFFIXES
+            if settings.resume_ocr_enabled
+            and suffix.casefold() in IMAGE_RESUME_SUFFIXES
             and not extracted_text.strip()
             else _redact_contact_text(extracted_text)[:_TEXT_PREVIEW_CHARS]
         ),
@@ -237,7 +242,9 @@ async def upload_resume(
     filename, suffix, content = await read_resume_upload(file)
     if suffix in IMAGE_RESUME_SUFFIXES:
         try:
-            await asyncio.to_thread(validate_image_header, content)
+            # 真实格式必须匹配后缀（整批终审 Codex M1：改名 GIF/PNG 混入
+            # 会扩大解码器攻击面）
+            await asyncio.to_thread(validate_image_header, content, suffix)
         except Exception:
             logger.warning(
                 "resume image validation failed for %s (%s)",
@@ -255,7 +262,13 @@ async def upload_resume(
             extracted_text, pages = await asyncio.to_thread(
                 extract_resume_text_from_bytes, content, suffix
             )
-            if suffix == ".pdf" and pages < 1:
+            # 0 页 PDF 提前 422 随开关（整批终审 Codex M4：flag=false 必须
+            # 逐字节回到 B4 前行为——彼时接受入库、解析期报错返还）
+            if (
+                settings.resume_ocr_enabled
+                and suffix == ".pdf"
+                and pages < 1
+            ):
                 raise ValueError("PDF contains no pages")
         except Exception:
             # 损坏/不可解析：不入库、不占 generation、不扣额度。
@@ -360,6 +373,16 @@ async def parse_resume(
     background_tasks: BackgroundTasks,
 ) -> ResumeAcceptedResponse:
     """确认解析（LLM 成本发生点）：CAS 扣一次解析额度并入队后台归一化。"""
+    # Codex 整批终审 M4：开着开关上传的图片、关掉开关后确认解析——必须在
+    # 扣额度之前拒绝（否则任务跳过 VL → 空文本 → resume_error 白烧额度）。
+    # flag 常开时零额外查询。
+    if not settings.resume_ocr_enabled:
+        pending = await get_pending_resume_upload(session_id=session_id)
+        if (
+            pending is not None
+            and str(pending["suffix"] or "").casefold() in IMAGE_RESUME_SUFFIXES
+        ):
+            raise HTTPException(status_code=409, detail="resume_ocr_disabled")
     try:
         started = await begin_resume_parse(
             session_id=session_id,
@@ -1195,7 +1218,7 @@ def _render_pdf_page_jpeg(content: bytes, page_number: int) -> bytes:
         rendered = bitmap.to_pil()
         buffer = io.BytesIO()
         rendered.save(buffer, format="PNG")
-        return prepare_image_jpeg(buffer.getvalue())
+        return prepare_image_jpeg(buffer.getvalue(), ".png")
     finally:
         if rendered is not None:
             rendered.close()
@@ -1245,16 +1268,27 @@ async def _normalize_resume(
     """
     narrator = _IntakeNarrator(session_id, expected_generation)
     external_started = False
+
+    def _mark_external_attempt() -> None:
+        # §1.2 置位点收紧（整批终审 Codex M3）：由 VL 边界在真正发起传输
+        # 紧前回调——排队等闸/base64 阶段失败时不产生外部成本，可返还
+        nonlocal external_started
+        external_started = True
+
     try:
         await narrator.emit("received", "收到！我现在就把你的简历完整读一遍～")
         if settings.resume_ocr_enabled and suffix.casefold() in IMAGE_RESUME_SUFFIXES:
-            jpeg = await asyncio.to_thread(prepare_image_jpeg, content)
+            async with _OCR_PREP_SEMAPHORE:
+                jpeg = await asyncio.to_thread(
+                    prepare_image_jpeg, content, suffix.casefold()
+                )
             await narrator.emit(
                 "ocr",
                 "这份是扫描件/图片，我用视觉识别读一读～",
             )
-            external_started = True
-            raw_text = await ocr_image_jpeg(jpeg)
+            raw_text = await ocr_image_jpeg(
+                jpeg, on_attempt=_mark_external_attempt
+            )
         elif settings.resume_ocr_enabled and suffix.casefold() == ".pdf" and content:
             pages, _total_pages = await asyncio.to_thread(
                 extract_resume_pages_from_bytes,
@@ -1275,24 +1309,30 @@ async def _normalize_resume(
                 page_number: index
                 for index, (page_number, _page_text) in enumerate(pages)
             }
+            ocr_narrated = False
             for candidate_index, (page_number, _page_text) in enumerate(candidates):
                 try:
-                    jpeg = await asyncio.to_thread(
-                        _render_pdf_page_jpeg,
-                        content,
-                        page_number,
-                    )
+                    async with _OCR_PREP_SEMAPHORE:
+                        jpeg = await asyncio.to_thread(
+                            _render_pdf_page_jpeg,
+                            content,
+                            page_number,
+                        )
                 except Exception:
                     skipped_pages += 1
                     continue
-                if not external_started:
+                if not ocr_narrated:
+                    # 叙事与计费解耦：气泡在首个 VL 尝试前进群；
+                    # external_started 只随真实传输（on_attempt）置位
                     await narrator.emit(
                         "ocr",
                         "检测到扫描页，我用视觉识别补读一下～",
                     )
-                external_started = True
+                    ocr_narrated = True
                 try:
-                    ocr_text = await ocr_image_jpeg(jpeg)
+                    ocr_text = await ocr_image_jpeg(
+                        jpeg, on_attempt=_mark_external_attempt
+                    )
                 except Exception:
                     interrupted_pages = len(candidates) - candidate_index
                     break

@@ -1148,7 +1148,7 @@ export interface components {
              * Detail
              * @enum {string}
              */
-            detail: "resume_changed" | "resume_processing" | "resume_error" | "resume_missing" | "resume_unparsed" | "resume_parse_limit";
+            detail: "resume_changed" | "resume_processing" | "resume_error" | "resume_missing" | "resume_unparsed" | "resume_parse_limit" | "resume_ocr_disabled";
         };
         /** ResumeParseRequest */
         ResumeParseRequest: {

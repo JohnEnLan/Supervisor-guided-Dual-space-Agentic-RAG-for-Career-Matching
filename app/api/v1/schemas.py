@@ -136,6 +136,8 @@ class ResumeLifecycleConflictResponse(PublicDTO):
     # 会话会被前端当成处理中而失去上传入口——审计二轮阻断项）
     # resume_unparsed = 已上传未确认解析（B2）；resume_parse_limit = 解析
     # 次数额度用尽（B2，防烧钱限额）
+    # resume_ocr_disabled = 图片在 OCR 开启期上传、确认解析时开关已关
+    # （B4 回滚窗口；扣额度前拒绝，引导重传文字版）
     detail: Literal[
         "resume_changed",
         "resume_processing",
@@ -143,6 +145,7 @@ class ResumeLifecycleConflictResponse(PublicDTO):
         "resume_missing",
         "resume_unparsed",
         "resume_parse_limit",
+        "resume_ocr_disabled",
     ]
 
 

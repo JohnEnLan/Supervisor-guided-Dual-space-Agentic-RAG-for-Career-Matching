@@ -479,6 +479,29 @@ describe("resume confirmation profile", () => {
     );
   });
 
+  it("shows the re-upload guidance when parse hits 409 resume_ocr_disabled", async () => {
+    // B4 回滚窗口（整批终审 Codex M4）：OCR 开启期上传的图片、关掉后确认
+    // 解析被 409 拒绝（不扣额度）——确认卡原地给出重传文字版引导
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.resumePreview).mockRejectedValue(new ApiError(409, "resume_unparsed"));
+    vi.mocked(api.pendingResumeUpload).mockResolvedValue(
+      apiFixtures.resumeUploaded({ filename: "resume.png", ocr_suggested: true }),
+    );
+    vi.spyOn(api, "parseResume").mockRejectedValue(
+      new ApiError(409, "resume_ocr_disabled"),
+    );
+    renderWorkbench();
+
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
+
+    expect(
+      await screen.findByText(/图片识别功能暂时关闭/),
+    ).toBeVisible();
+    // 上传仍在场：确认卡不退场，等待用户重传
+    expect(screen.getByRole("button", { name: "确认解析" })).toBeVisible();
+  });
+
   it("enables image accept, title, OCR guidance, and 415 copy only when capability is true", async () => {
     const user = userEvent.setup();
     mockWorkbenchApi();

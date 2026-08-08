@@ -111,8 +111,14 @@ async def test_ocr_semaphore_caps_concurrent_calls(monkeypatch) -> None:
     tasks = [
         asyncio.create_task(qwen_vl.ocr_image_jpeg(b"jpeg")) for _ in range(5)
     ]
-    await asyncio.sleep(0.05)
-    assert peak <= qwen_vl.settings.vl_max_concurrency
+    # 事件驱动而非固定 sleep（整批终审 Codex m2：调度抖动会假绿/假红）：
+    # 轮询等待并发爬到闸值，全程断言不越界
+    for _ in range(400):
+        assert peak <= qwen_vl.settings.vl_max_concurrency
+        if peak == qwen_vl.settings.vl_max_concurrency:
+            break
+        await asyncio.sleep(0.005)
+    assert peak == qwen_vl.settings.vl_max_concurrency
     release.set()
     await asyncio.gather(*tasks)
     assert peak == qwen_vl.settings.vl_max_concurrency

@@ -9,6 +9,7 @@ v3 B4 视觉 OCR 兜底：
 """
 import asyncio
 import base64
+from collections.abc import Callable
 
 from openai import AsyncOpenAI
 
@@ -17,8 +18,12 @@ from app.config import settings
 # 与 qwen_embed 同一 DashScope OpenAI 兼容 endpoint。
 # timeout/max_retries 写死（B4 方案三轮 Codex 裁定）：J1 熔断语义承诺
 # "成本放大上界=1 次调用"——SDK 默认 max_retries=2 会让一次逻辑调用变
-# 3 次传输尝试、且 60s 超时罩不住整个逻辑调用，必须归零重试。
+# 3 次传输尝试，必须归零重试。
+# 墙钟上限（整批终审 Codex M3）：httpx 的 timeout=60 是 connect/read/
+# write/pool 各阶段上限，read 为"等下一个数据块"的上限——慢滴响应可
+# 远超 60s 并占住 VL 名额；wait_for 提供真正的总墙钟 deadline。
 _VL_TIMEOUT_SECONDS = 60.0
+_VL_WALL_CLOCK_SECONDS = 90.0
 _client = AsyncOpenAI(
     api_key=settings.qwen_api_key,
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -32,30 +37,42 @@ _sem = asyncio.Semaphore(settings.vl_max_concurrency)
 _OCR_INSTRUCTION = "Read all the text in the image."
 
 
-async def ocr_image_jpeg(jpeg_bytes: bytes) -> str:
+async def ocr_image_jpeg(
+    jpeg_bytes: bytes,
+    *,
+    on_attempt: Callable[[], None] | None = None,
+) -> str:
     """对单张 JPEG 图片做 OCR，返回识别出的全部文本（失败向上抛，由任务
 
     的统一 except 兜底走 resume_error——图片路径如此；PDF 路径由调用点
-    捕获熔断（方案偏差备案 #2）。"""
+    捕获熔断（方案偏差备案 #2）。
+    on_attempt：在真正发起传输（create 调用）紧前回调——§1.2 的
+    external_started 以此为准（整批终审 Codex M3：排队等 Semaphore /
+    base64 编码阶段失败时尚未产生外部成本，不得提前置位）。"""
     async with _sem:
         # base64 编码在 Semaphore 内（Codex 一轮 m3）：并发内存峰值随
         # 并发闸受限，而非只限网络段
         encoded = base64.b64encode(jpeg_bytes).decode("ascii")
-        response = await _client.chat.completions.create(
-            model=settings.qwen_vl_model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{encoded}"
+        if on_attempt is not None:
+            on_attempt()
+        response = await asyncio.wait_for(
+            _client.chat.completions.create(
+                model=settings.qwen_vl_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{encoded}"
+                                },
                             },
-                        },
-                        {"type": "text", "text": _OCR_INSTRUCTION},
-                    ],
-                }
-            ],
+                            {"type": "text", "text": _OCR_INSTRUCTION},
+                        ],
+                    }
+                ],
+            ),
+            timeout=_VL_WALL_CLOCK_SECONDS,
         )
     return (response.choices[0].message.content or "").strip()

@@ -102,7 +102,7 @@ frontend/e2e/        浏览器端流程回归
 
 ### 6.1 归一化先建立证据
 
-`app/normalization/resume_intake.py:191` 的 `build_evidence_spans` 先在本地把原文切成 `R001`、`R002`……；模型只能基于这些片段结构化教育、经历、项目与技能。`app/normalization/resume_intake.py:281` 的 `build_clarification_targets` 再把质量问题和内容过短的经历转成确定性的澄清目标，功能门在 `app/normalization/resume_intake.py:612`。
+`app/normalization/resume_intake.py:241` 的 `build_evidence_spans` 先在本地把原文切成 `R001`、`R002`……；模型只能基于这些片段结构化教育、经历、项目与技能。`app/normalization/resume_intake.py:331` 的 `build_clarification_targets` 再把质量问题和内容过短的经历转成确定性的澄清目标，功能门在 `app/normalization/resume_intake.py:701`。
 
 ### 6.2 视觉 OCR 兜底（B4）
 
@@ -240,7 +240,7 @@ RAPTOR 离线建树入口是 `app/retrieval/raptor.py:300` `build_raptor_index`�
 
 `app/evaluation/metrics.py:12` `evaluate_rankings` 计算 P@K、R@K、MRR、NDCG；`:141` 核验硬过滤；`:169` 检查解释是否引用本岗位证据。演示评估入口是 `scripts/evaluate_demo_corpus.py:136`。
 
-冻结态实测计数：pytest **642 passed**、Vitest **105/105**、Playwright **14/14**、全局冒烟 **32 passed, 0 failed**。唯一计数来源是 `docs/validation/2026-08-07-batch9-acceptance.md`。
+冻结态实测计数（V2 交付线）：pytest **642 passed**、Vitest **105/105**、Playwright **14/14**、全局冒烟 **32 passed, 0 failed**，来源 `docs/validation/2026-08-07-batch9-acceptance.md`。v3 各批的最新计数以 `docs/validation/` 下对应批次验收记录为准（B4：`2026-08-09-b4-acceptance.md`）。注：正文行号锚点对齐各批封版提交，个别锚点随后续批次会漂移，终局全量核对在 v3 五批完成后的三方 diff 阶段统一执行。
 
 检索指标只引用 `data/eval/demo_corpus_cross_v1/` 与 `docs/validation/2026-08-06-cross-encoder-ablation.md`：15 条查询、852 个 LLM 池化判定对；双开结果 P@5 `0.920`、R@10 `0.323`、MRR `1.000`、NDCG@5 `0.939`。标签未经人工复核，Recall 是池内口径，不能解释成个人求职成功率。
 

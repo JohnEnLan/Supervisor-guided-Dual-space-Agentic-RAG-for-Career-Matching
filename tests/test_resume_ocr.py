@@ -26,7 +26,7 @@ def test_o2_prepare_image_jpeg_flattens_rgba_transparency_to_white() -> None:
     image = Image.new("RGBA", (64, 64), (255, 0, 0, 0))
     image.paste((0, 0, 0, 255), (32, 0, 64, 64))
 
-    jpeg = prepare_image_jpeg(_image_bytes(image, "PNG"))
+    jpeg = prepare_image_jpeg(_image_bytes(image, "PNG"), ".png")
 
     with Image.open(BytesIO(jpeg)) as prepared:
         assert prepared.format == "JPEG"
@@ -40,7 +40,7 @@ def test_o2_prepare_image_jpeg_applies_exif_orientation_before_encoding() -> Non
     exif[274] = 6
     raw = _image_bytes(image, "JPEG", exif=exif)
 
-    jpeg = prepare_image_jpeg(raw)
+    jpeg = prepare_image_jpeg(raw, ".jpg")
 
     with Image.open(BytesIO(jpeg)) as prepared:
         assert prepared.size == (40, 20)
@@ -66,31 +66,55 @@ def test_o2_prepare_image_jpeg_accepts_palette_cmyk_and_multiframe_webp() -> Non
     webp_raw = webp_buffer.getvalue()
 
     palette_raw = _image_bytes(palette, "PNG", transparency=0)
-    with Image.open(BytesIO(prepare_image_jpeg(palette_raw))) as prepared_palette:
+    with Image.open(
+        BytesIO(prepare_image_jpeg(palette_raw, ".png"))
+    ) as prepared_palette:
         assert all(
             channel >= 245 for channel in prepared_palette.getpixel((16, 16))
         )
-    with Image.open(BytesIO(prepare_image_jpeg(webp_raw))) as prepared_webp:
+    with Image.open(
+        BytesIO(prepare_image_jpeg(webp_raw, ".webp"))
+    ) as prepared_webp:
         red, _green, blue = prepared_webp.getpixel((16, 16))
         assert red > blue
 
-    for raw in (
-        palette_raw,
-        _image_bytes(cmyk, "JPEG"),
-        webp_raw,
+    for raw, suffix in (
+        (palette_raw, ".png"),
+        (_image_bytes(cmyk, "JPEG"), ".jpeg"),
+        (webp_raw, ".webp"),
     ):
-        with Image.open(BytesIO(prepare_image_jpeg(raw))) as prepared:
+        with Image.open(BytesIO(prepare_image_jpeg(raw, suffix))) as prepared:
             assert prepared.format == "JPEG"
             assert prepared.mode == "RGB"
 
 
 def test_o3_validate_image_header_rejects_malformed_and_truncated_images() -> None:
     valid = _image_bytes(Image.new("RGB", (32, 32), "white"), "PNG")
-    validate_image_header(valid)
+    validate_image_header(valid, ".png")
 
     for raw in (b"not-an-image", valid[:-12]):
         with pytest.raises(Exception):
-            validate_image_header(raw)
+            validate_image_header(raw, ".png")
+
+
+def test_codexM1_image_format_must_match_declared_suffix() -> None:
+    """整批终审 Codex M1：改名图片（真实容器 ≠ 后缀）必须拒绝——
+    GIF/BMP 等白名单之外的解码器不得被伪装后缀带进管线。"""
+    png_raw = _image_bytes(Image.new("RGB", (16, 16), "white"), "PNG")
+    gif_raw = _image_bytes(Image.new("P", (16, 16)), "GIF")
+
+    # PNG 改名 .jpg / GIF 伪装 .png：一律格式失配拒绝
+    with pytest.raises(ValueError, match="does not match"):
+        validate_image_header(png_raw, ".jpg")
+    with pytest.raises(ValueError, match="does not match"):
+        validate_image_header(gif_raw, ".png")
+    with pytest.raises(ValueError, match="does not match"):
+        prepare_image_jpeg(gif_raw, ".webp")
+    # 非白名单后缀直接拒绝
+    with pytest.raises(ValueError, match="unsupported"):
+        validate_image_header(png_raw, ".gif")
+    # 正身通过
+    assert validate_image_header(png_raw, ".png") == (16, 16)
 
 
 def test_o12_decode_gate_is_strict_and_output_is_resized_to_pixel_limit(
@@ -103,21 +127,33 @@ def test_o12_decode_gate_is_strict_and_output_is_resized_to_pixel_limit(
     exact = _image_bytes(Image.new("RGB", (10, 10), "white"), "PNG")
     over = _image_bytes(Image.new("RGB", (10, 11), "white"), "PNG")
 
-    assert validate_image_header(exact) == (10, 10)
+    assert validate_image_header(exact, ".png") == (10, 10)
     with pytest.raises(ValueError, match="decode pixel limit"):
-        validate_image_header(over)
+        validate_image_header(over, ".png")
 
-    with Image.open(BytesIO(prepare_image_jpeg(exact))) as prepared:
+    with Image.open(BytesIO(prepare_image_jpeg(exact, ".png"))) as prepared:
         assert prepared.width * prepared.height <= 16
 
 
-def test_o12_literal_40m_decode_boundary_accepts_exact_and_rejects_over() -> None:
+def test_o12_literal_40m_decode_boundary_accepts_exact_and_rejects_over(
+    monkeypatch,
+) -> None:
     exact = _image_bytes(Image.new("1", (8_000, 5_000)), "PNG")
     over = _image_bytes(Image.new("1", (8_001, 5_000)), "PNG")
 
-    assert validate_image_header(exact) == (8_000, 5_000)
+    assert validate_image_header(exact, ".png") == (8_000, 5_000)
     with pytest.raises(ValueError, match="decode pixel limit"):
-        validate_image_header(over)
+        validate_image_header(over, ".png")
+
+    # 整批终审 Codex m2：8001×5000=40_005_000 不是恰 40M+1——用降一位的
+    # 闸值让同一张 40_000_000 像素图被拒，精确钉死严格 ">" 边界语义
+    monkeypatch.setattr(
+        image_prep.settings,
+        "resume_ocr_max_image_pixels_decode",
+        39_999_999,
+    )
+    with pytest.raises(ValueError, match="decode pixel limit"):
+        validate_image_header(exact, ".png")
 
 
 def test_v1_2_q70_payload_at_base64_limit_is_encoded_once(monkeypatch) -> None:
@@ -131,7 +167,7 @@ def test_v1_2_q70_payload_at_base64_limit_is_encoded_once(monkeypatch) -> None:
     monkeypatch.setattr(image_prep, "_encode_jpeg", fake_encode)
     raw = _image_bytes(Image.new("RGB", (8, 8), "white"), "PNG")
 
-    assert len(prepare_image_jpeg(raw)) == max_raw_bytes
+    assert len(prepare_image_jpeg(raw, ".png")) == max_raw_bytes
     assert calls == [70]
 
 
@@ -146,7 +182,7 @@ def test_v1_3_q70_payload_over_limit_reencodes_once_at_q50(monkeypatch) -> None:
     monkeypatch.setattr(image_prep, "_encode_jpeg", fake_encode)
     raw = _image_bytes(Image.new("RGB", (8, 8), "white"), "PNG")
 
-    assert prepare_image_jpeg(raw) == b"q50"
+    assert prepare_image_jpeg(raw, ".png") == b"q50"
     assert calls == [70, 50]
 
 
@@ -164,7 +200,7 @@ def test_o12_q50_payload_over_limit_is_rejected_after_two_encodes(
     raw = _image_bytes(Image.new("RGB", (8, 8), "white"), "PNG")
 
     with pytest.raises(ValueError, match="base64 payload limit"):
-        prepare_image_jpeg(raw)
+        prepare_image_jpeg(raw, ".png")
     assert calls == [70, 50]
 
 
@@ -229,7 +265,9 @@ async def test_image_resume_ocr_runs_after_confirmation_and_normalizes_text(
     record = _install_normalization_sinks(monkeypatch, sessions)
     ocr_inputs: list[bytes] = []
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         ocr_inputs.append(jpeg)
         return "OCR resume text with enough evidence"
 
@@ -269,7 +307,9 @@ async def test_v1_2_q70_bytes_are_sent_to_exactly_one_vl_call(
         encode_qualities.append(quality)
         return b"q70-payload"
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         vl_payloads.append(jpeg)
         return "OCR evidence from q70 payload"
 
@@ -306,7 +346,9 @@ async def test_v1_3_q50_bytes_are_sent_to_exactly_one_vl_call(
         encode_qualities.append(quality)
         return b"over" if quality == 70 else b"fit"
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         vl_payloads.append(jpeg)
         return "OCR evidence from q50 payload"
 
@@ -349,7 +391,9 @@ async def test_o12_pdf_double_over_skips_vl_and_preserves_native_text(
         encode_qualities.append(quality)
         return b"over"
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         vl_payloads.append(jpeg)
         return "unreachable"
 
@@ -419,7 +463,9 @@ async def test_o5_pdf_vl_exception_fuses_remaining_pages_and_keeps_prior_ocr(
     def render(_content: bytes, page_number: int) -> bytes:
         return f"jpeg-{page_number}".encode()
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         page_number = int(jpeg.decode().rsplit("-", 1)[1])
         vl_pages.append(page_number)
         if page_number == 2:
@@ -450,6 +496,9 @@ async def test_o5_pdf_vl_exception_fuses_remaining_pages_and_keeps_prior_ocr(
     ]
     assert len(summaries) == 1
     assert "视觉识别中断" in summaries[0]["text"]
+    # 整批终审 Codex m2：钉死精确口径——当前失败页也计入"未识别"
+    # （3 候选、第 2 页失败于 index 1 → 2 页未识别）
+    assert "2 页未识别" in summaries[0]["text"]
     assert record.refunds == []
     assert len(record.saves) == 1
 
@@ -475,7 +524,9 @@ async def test_o1_pure_scan_local_failures_refund_once_without_start_event(
         lambda _content, _page: (_ for _ in ()).throw(OSError("render failed")),
     )
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         ocr_calls.append(jpeg)
         return "unreachable"
 
@@ -554,7 +605,9 @@ async def test_o4_local_page_failure_skips_only_that_page(monkeypatch) -> None:
             raise OSError("page render failed")
         return str(page_number).encode()
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         page_number = int(jpeg)
         ocr_pages.append(page_number)
         return "Recovered evidence on page two"
@@ -598,7 +651,9 @@ async def test_o8_empty_pdf_ocr_preserves_native_page_text(monkeypatch) -> None:
         sessions, "_render_pdf_page_jpeg", lambda _content, _page: b"jpeg"
     )
 
-    async def empty_ocr(_jpeg: bytes) -> str:
+    async def empty_ocr(_jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         return "   \n "
 
     monkeypatch.setattr(sessions, "ocr_image_jpeg", empty_ocr)
@@ -631,7 +686,9 @@ async def test_o9_empty_image_ocr_marks_error_without_refund(monkeypatch) -> Non
     record = _install_normalization_sinks(monkeypatch, sessions)
     monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", True)
 
-    async def empty_ocr(_jpeg: bytes) -> str:
+    async def empty_ocr(_jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         return " \n "
 
     monkeypatch.setattr(sessions, "ocr_image_jpeg", empty_ocr)
@@ -669,7 +726,9 @@ async def test_o10_zero_page_pdf_marks_error_and_refunds_without_vl(
         lambda _content, _suffix: ([], 0),
     )
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         vl_calls.append(jpeg)
         return "unreachable"
 
@@ -705,7 +764,9 @@ async def test_o12_image_prepare_failure_refunds_once_before_any_vl_call(
         lambda _raw: (_ for _ in ()).throw(ValueError("too large")),
     )
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         vl_calls.append(jpeg)
         return "unreachable"
 
@@ -756,7 +817,9 @@ async def test_o13_max_pages_counts_low_text_pages_not_physical_positions(
         rendered_pages.append(page_number)
         return str(page_number).encode()
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         return f"OCR evidence page {int(jpeg)}"
 
     monkeypatch.setattr(sessions, "_render_pdf_page_jpeg", render)
@@ -805,7 +868,9 @@ async def test_o13_skip_and_truncation_emit_one_combined_summary(
             raise OSError("render failed")
         return str(page_number).encode()
 
-    async def ocr(_jpeg: bytes) -> str:
+    async def ocr(_jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         return "Recovered evidence"
 
     monkeypatch.setattr(sessions, "_render_pdf_page_jpeg", render)
@@ -847,7 +912,9 @@ async def test_v1_13_cancelled_vl_call_is_not_caught_as_pipeline_failure(
         sessions, "_render_pdf_page_jpeg", lambda _content, _page: b"jpeg"
     )
 
-    async def cancelled(_jpeg: bytes) -> str:
+    async def cancelled(_jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(sessions, "ocr_image_jpeg", cancelled)
@@ -877,7 +944,9 @@ async def test_v1_9_flag_false_preserves_legacy_error_copy_and_zero_vl(
 
     record = _install_normalization_sinks(monkeypatch, sessions)
 
-    async def forbidden_ocr(_jpeg: bytes) -> str:
+    async def forbidden_ocr(_jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         raise AssertionError("disabled OCR must not call VL")
 
     monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", False)
@@ -917,7 +986,9 @@ async def test_o11_six_long_ocr_pages_cap_evidence_at_120_spans(
         lambda _content, page_number: str(page_number).encode(),
     )
 
-    async def ocr(jpeg: bytes) -> str:
+    async def ocr(jpeg: bytes, *, on_attempt=None) -> str:
+        if on_attempt is not None:
+            on_attempt()
         page_number = int(jpeg)
         return "\n".join(
             f"- page {page_number} evidence line {line_number} with detail"
@@ -1107,3 +1178,112 @@ async def test_o14_capabilities_exposes_image_upload_state(
     response = await router_module.capabilities()
 
     assert response.resume_image_upload_enabled is enabled
+
+
+@pytest.mark.asyncio
+async def test_codexM4_parse_rejects_grandfathered_image_before_quota(
+    monkeypatch,
+) -> None:
+    """整批终审 Codex M4：OCR 开启期上传的图片、关掉开关后确认解析——
+    必须在扣额度之前 409 resume_ocr_disabled（begin 不得被调用）。"""
+    from fastapi import BackgroundTasks
+
+    from app.api.v1 import sessions
+    from app.api.v1.schemas import ResumeParseRequest
+
+    async def pending(*, session_id: str):
+        return {
+            "generation": 3,
+            "filename": "resume.png",
+            "suffix": ".png",
+            "extracted_text": "",
+            "pages": 1,
+            "chars": 0,
+            "ocr_suggested": True,
+            "resume_parse_count": 1,
+        }
+
+    async def forbidden_begin(**_kwargs):
+        raise AssertionError("must reject before the quota CAS")
+
+    monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", False)
+    monkeypatch.setattr(sessions, "get_pending_resume_upload", pending)
+    monkeypatch.setattr(sessions, "begin_resume_parse", forbidden_begin)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await sessions.parse_resume(
+            "grandfather-session",
+            ResumeParseRequest(generation=3),
+            BackgroundTasks(),
+        )
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail == "resume_ocr_disabled"
+
+
+def test_codexM4_image_preview_falls_back_when_ocr_disabled(monkeypatch) -> None:
+    """flag 关闭后固定视觉识别 preview 不得再出现（GET 恢复同层）。"""
+    from app.api.v1 import sessions
+
+    monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", False)
+    response = sessions._upload_response(
+        "grandfather-session",
+        generation=3,
+        filename="resume.png",
+        suffix=".png",
+        extracted_text="",
+        pages=1,
+        chars=0,
+        ocr_suggested=True,
+        parses_used=1,
+    )
+    assert response.text_preview == ""
+
+    monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", True)
+    enabled = sessions._upload_response(
+        "grandfather-session",
+        generation=3,
+        filename="resume.png",
+        suffix=".png",
+        extracted_text="",
+        pages=1,
+        chars=0,
+        ocr_suggested=True,
+        parses_used=1,
+    )
+    assert "视觉识别" in enabled.text_preview
+
+
+@pytest.mark.asyncio
+async def test_codexM4_zero_page_pdf_upload_gate_tracks_flag(monkeypatch) -> None:
+    """0 页 PDF 上传 422 随开关（flag=false 逐字节回到 B4 前行为：接受
+    入库，解析期报错返还）。"""
+    from app.api.v1 import sessions
+
+    writer = PdfWriter()
+    empty_buffer = BytesIO()
+    writer.write(empty_buffer)
+    raw = empty_buffer.getvalue()
+    accepted: list[dict] = []
+
+    async def accept(**kwargs):
+        accepted.append(kwargs)
+        return {"resume_upload_generation": 1, "resume_parse_count": 0}
+
+    monkeypatch.setattr(sessions, "accept_resume_upload", accept)
+
+    monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", True)
+    with pytest.raises(HTTPException) as excinfo:
+        await sessions.upload_resume(
+            "zero-page-session",
+            UploadFile(filename="resume.pdf", file=BytesIO(raw)),
+        )
+    assert excinfo.value.status_code == 422
+    assert accepted == []
+
+    monkeypatch.setattr(sessions.settings, "resume_ocr_enabled", False)
+    response = await sessions.upload_resume(
+        "zero-page-session",
+        UploadFile(filename="resume.pdf", file=BytesIO(raw)),
+    )
+    assert response.pages == 0
+    assert len(accepted) == 1

@@ -760,6 +760,8 @@ export function WorkbenchPage() {
         void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
         void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
       }
+      // resume_ocr_disabled（B4 回滚窗口）：不刷新——上传仍在场，确认卡
+      // 原地展示引导文案（见 parseErrorText），用户重传文字版即可
     },
   });
   const confirmResume = useMutation({
@@ -1301,7 +1303,13 @@ export function WorkbenchPage() {
                 ) : null}
               </>
             ) : parseResume.isError ? (
-              <p className="v2-error">确认解析失败，请重试。</p>
+              <p className="v2-error">
+                {parseResume.error instanceof ApiError &&
+                parseResume.error.status === 409 &&
+                parseResume.error.message === "resume_ocr_disabled"
+                  ? "图片识别功能暂时关闭，这份图片暂无法解析——请重新上传文字版简历（PDF/DOCX/TXT）。"
+                  : "确认解析失败，请重试。"}
+              </p>
             ) : null}
           </Bubble>
         ) : null}

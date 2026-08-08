@@ -148,9 +148,10 @@ cd /opt/career-rag && tar -xzf app.tar.gz -C app && chown -R career:career app
 # 若已 cd 到 app，等价命令是 ../venv/bin/pip install -r requirements.txt
 sudo -u career ./venv/bin/pip install -r app/requirements.txt
 
-# B4 的 8 个 OCR 变量须追加到既有 .env；printf 开头保留换行，
-# 避免再次与末行连在一起
-printf '\n%s\n' \
+# B4 的 8 个 OCR 变量**一次性**追加（幂等守卫：已有该键就整段跳过——
+# dotenv 重复键后值胜出，盲目重复追加会静默覆盖你手动调过的值，比如
+# 回滚时设的 RESUME_OCR_ENABLED=false）；printf 开头保留换行防连行
+grep -q '^RESUME_OCR_ENABLED=' app/.env || printf '\n%s\n' \
   'RESUME_OCR_ENABLED=true' \
   'QWEN_VL_MODEL=qwen-vl-ocr' \
   'VL_MAX_CONCURRENCY=2' \
@@ -160,6 +161,12 @@ printf '\n%s\n' \
   'RESUME_OCR_RENDER_SCALE=2.0' \
   'RESUME_OCR_MAX_IMAGE_PIXELS_DECODE=40000000' \
   >> app/.env
+
+# B4 功能回滚（不换包）：把 .env 里 RESUME_OCR_ENABLED 改为 false →
+# systemctl restart career-rag → 校验 capability 具体值为 false：
+#   curl -s http://127.0.0.1:8000/api/v1/capabilities | grep -o '"resume_image_upload_enabled":[a-z]*'
+# 开关关闭后图片上传回到 415；OCR 开启期已上传未解析的图片，确认解析会
+# 得到 409 resume_ocr_disabled（不扣额度），引导用户重传文字版。
 
 # 本批无需 migrate（B4 未新增数据库迁移）
 systemctl restart career-rag && sleep 8
