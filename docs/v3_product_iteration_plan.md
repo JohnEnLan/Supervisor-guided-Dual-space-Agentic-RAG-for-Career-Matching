@@ -22,12 +22,10 @@
 **R4 口径**：限额按解析次数（`RESUME_PARSE_LIMIT=3`）；重传不耗额度；外部
 调用发起前失败不耗额度。**R1 裁减**：纯扫描 DOCX 引导转 PDF/图片重传。
 
-**待用户裁决（仅门控 B4）**：`asyncio.to_thread` 用于卸载阻塞的光栅化/文件
-提取，是否属于"禁 threading"硬约束的例外。事实：仓库现行代码已用
-（resume_intake.py:689-691）且特征测试强制要求（test_resume_intake.py:232）；
-Codex 评审认为历史实现不构成规则豁免，须宪法所有者（用户）一句话裁决并
-写入 AGENTS.md/CLAUDE_LANGGRAPH.md。**裁决前 B4 不开工；B2/B1/B3/B5 不受
-影响**（B2 上传提取沿用现行 intake 的既有 to_thread 边界，属存量行为）。
+**用户已裁决（2026-08-08，B4 门控解除）**：`asyncio.to_thread` 卸载阻塞库
+调用（文件解析、光栅化/编码）为硬约束的**明确允许例外**；仍禁自建线程/
+线程池/线程间共享可变状态。裁决已写入 AGENTS.md §2.2 与
+CLAUDE_LANGGRAPH.md §2.2 修订行——Codex B1 的"规则文本缺失"由此闭环。
 
 ## 1. B2 上传确认流 + 解析限额
 

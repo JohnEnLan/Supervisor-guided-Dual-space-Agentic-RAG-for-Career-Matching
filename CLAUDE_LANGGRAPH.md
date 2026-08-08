@@ -22,7 +22,7 @@
 | §2.3 "三个业务 Agent = 三次带不同 system prompt 的 LLM 调用" | 不变。Agent 本体仍是普通异步函数（prompt + LLM 调用 + state 读写），LangGraph 只接管**编排**（节点顺序、条件边、恢复），不接管 Agent 内部逻辑。 |
 | §2.4 "Supervisor = 核查 prompt + 有界循环" | 有界恢复改用 LangGraph 机制表达：clarification / re-retrieval / repair 三类循环用**条件边 + GraphState 中的 loop 计数器**实现，每类上限仍为 1；图编译时设置 `recursion_limit` 作为最后防线。禁止在节点内写开放式循环（不变）。 |
 | §2.1 "状态绝不进进程全局变量" | 不变，且加强：GraphState 必须是 `app/state/schema.py` 的 SharedState 的**类型化包装**（单一事实来源不变）。checkpointer 使用官方 **AsyncPostgresSaver**（psycopg3 + psycopg-pool 独立异步池，同一个数据库/DSN，**不是**复用 asyncpg 池；lifespan 管理生命周期；`durability="sync"`）。禁止 MemorySaver 出现在任何非测试代码。checkpoint 表含 SharedState 副本（PII），须登记清理策略；反序列化安全由 `app/api/main.py` 的显式类型 allowlist 控制。 |
-| §2.2 "并发用 asyncio，不用 threading" | 修订为：**业务代码**不得创建线程；允许锁定版本的依赖内部受控线程（如 AsyncPostgresSaver 的 `asyncio.to_thread` 序列化）。 |
+| §2.2 "并发用 asyncio，不用 threading" | 修订为：**业务代码**不得创建线程；允许锁定版本的依赖内部受控线程（如 AsyncPostgresSaver 的 `asyncio.to_thread` 序列化）。**用户裁决（2026-08-08）**：业务代码经 `asyncio.to_thread` 卸载阻塞库调用（文件解析、图片光栅化/编码）同样属允许例外；禁止的是自建线程/线程池与线程间共享可变状态。 |
 | 其余硬约束（asyncio、SQL 硬过滤、evidence_spans、Semaphore 限流、一次一个模块） | 全部不变。 |
 
 ## 2. 迁移映射（自研 Harness → LangGraph）

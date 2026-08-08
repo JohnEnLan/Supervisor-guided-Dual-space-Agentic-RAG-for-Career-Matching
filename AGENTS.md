@@ -52,6 +52,7 @@
 1. **状态绝不进进程全局变量。** 所有 Shared Structured State 按 `session_id` 存进 Postgres。
    原因：多人同时使用时全局变量会互相覆盖。服务进程必须是**无状态**的。
 2. **并发用 asyncio，不用 threading / multiprocessing。** 本系统是 I/O 密集（等 DB、等 embedding、等 LLM），异步足够。
+   **允许例外（用户裁决 2026-08-08）**：用 `asyncio.to_thread` 把阻塞的库调用（文件解析、图片光栅化/编码等）卸载到解释器线程池，属 asyncio 官方标准用法，允许；仍然禁止自建线程/线程池、线程间共享可变状态、以线程实现并发架构。
 3. **三个业务 Agent ＝ 三次带不同 system prompt 的 LLM 调用**，共享同一个 state 对象。
    **不是**三个微服务，**不要**引入 LangGraph / AutoGen / CrewAI 等重框架。Harness 自己用普通函数写。
 4. **Supervisor ＝ 核查 prompt + 有界循环（bounded loop）。** 每类 loop（clarification / re-retrieval / repair）默认最多触发 1 次，必须有最大次数上限，禁止开放式 while True。
