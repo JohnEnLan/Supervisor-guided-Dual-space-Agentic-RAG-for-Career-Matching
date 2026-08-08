@@ -89,6 +89,21 @@ class Settings(BaseSettings):
     resume_clarify_max: int = Field(default=2, ge=1, le=5)
     # v3 B2：每会话解析（LLM 归一化）次数上限；上传/预览零成本不计额
     resume_parse_limit: int = Field(default=3, ge=1, le=10)
+    # v3 B4：视觉 OCR 兜底（R1 主线功能，默认开；false=B4 前逐字节等价，
+    # 供回退与对照测试）。上传阶段零 VL 调用——只在确认解析后的任务内，
+    # 对低文本 PDF 页/图片简历触发（方案 §4）。
+    resume_ocr_enabled: bool = True
+    qwen_vl_model: str = "qwen-vl-ocr"
+    vl_max_concurrency: int = Field(default=2, ge=1)
+    resume_ocr_page_min_chars: int = Field(default=50, ge=0)
+    resume_ocr_max_pages: int = Field(default=6, ge=1)
+    resume_ocr_max_pixels: int = Field(default=4_000_000, ge=100_000)
+    resume_ocr_render_scale: float = Field(default=2.0, gt=0)
+    # 解码防炸：显式尺寸乘积检查（不依赖 Pillow MAX_IMAGE_PIXELS——其超限
+    # 默认仅告警、超两倍才抛错）
+    resume_ocr_max_image_pixels_decode: int = Field(
+        default=40_000_000, ge=1_000_000
+    )
     consult_coach_enabled: bool = False
     consult_coach_max: int = Field(default=3, ge=1, le=5)
     max_reretrieval_loops: int = 1
