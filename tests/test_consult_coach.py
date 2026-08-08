@@ -601,6 +601,7 @@ def test_get_consult_omits_absent_note_key_but_returns_persisted_note(
         return state
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     with TestClient(_api_app()) as client:
         legacy = client.get("/api/v1/sessions/session-1/consult")
         state.career_state.consult_transcript[0]["supervisor_notes"] = [_note()]
@@ -609,6 +610,28 @@ def test_get_consult_omits_absent_note_key_but_returns_persisted_note(
     assert legacy.status_code == coached.status_code == 200
     assert "supervisor_notes" not in legacy.json()["transcript"][0]
     assert coached.json()["transcript"][0]["supervisor_notes"] == [_note()]
+
+
+def _context_from_load(load):
+    """B2：consult 读路径统一走 load_consult_context（flag-off 也要拿
+    generation 供落库保护比对）。由既有 load 假件派生 context 假件；
+    generation=0 与本文件 fake mutate 的 mutator(state, 0, 0) 调用对齐，
+    保证既有用例的行为断言逐字不变。"""
+    from app.db.state_store import ConsultContext
+
+    async def context(session_id):
+        state = await load(session_id)
+        if state is None:
+            return None
+        return ConsultContext(
+            state=state,
+            status="intent_consulting",
+            resume_version=1,
+            confirmed_resume_version=1,
+            resume_upload_generation=0,
+        )
+
+    return context
 
 
 def _append_turn(
@@ -690,6 +713,7 @@ async def test_consult_post_waits_for_cas2_and_persists_verdict_twice(
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", coach, raising=False)
@@ -750,6 +774,7 @@ async def test_cas2_persistence_failure_is_fail_open(
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", coach, raising=False)
@@ -796,6 +821,7 @@ async def test_cas2_persistence_cancelled_error_propagates(monkeypatch) -> None:
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", coach, raising=False)
@@ -838,6 +864,7 @@ async def test_consult_coach_unavailable_is_fail_open_and_is_landed_before_retur
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", unavailable, raising=False)
@@ -879,6 +906,7 @@ async def test_cancelled_coach_leaves_reserved_burned_and_propagates(
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", cancelled, raising=False)
@@ -922,6 +950,7 @@ async def test_disabled_coach_is_x0_equivalent_with_zero_call_or_side_effect(
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", False)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", forbidden, raising=False)
@@ -1143,6 +1172,7 @@ async def test_same_round_cas_conflict_blocks_physical_coach_call(
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", forbidden, raising=False)
@@ -1189,6 +1219,7 @@ async def test_cas2_interleaved_with_next_persist_keeps_note_and_terminal_status
     monkeypatch.setattr(sessions.settings, "consult_coach_enabled", True)
     monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", False)
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", advisor)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
     monkeypatch.setattr(sessions, "run_consult_coach", forbidden, raising=False)

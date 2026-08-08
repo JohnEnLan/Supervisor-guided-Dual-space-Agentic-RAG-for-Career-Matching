@@ -1,28 +1,25 @@
 from __future__ import annotations
 
-import hashlib
-import uuid
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
 
-UPLOAD_DIR = Path("data/resumes/uploads")
 ALLOWED_RESUME_SUFFIXES = {".pdf", ".docx", ".txt"}
 MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 64 * 1024
 
 
-async def persist_upload(
-    session_id: str,
+async def read_resume_upload(
     file: UploadFile,
     *,
-    upload_dir: Path | None = None,
     allowed_suffixes: set[str] | None = None,
     max_upload_bytes: int | None = None,
     chunk_bytes: int | None = None,
-) -> Path:
-    resolved_upload_dir = UPLOAD_DIR if upload_dir is None else upload_dir
+) -> tuple[str, str, bytes]:
+    """B2 上传确认流：文件流式读入内存缓冲（不落磁盘），返回
+    (原始文件名, 归一化后缀, 字节)。非白名单后缀 415（不再伪装 .txt）；
+    超过 10MB 413（原 persist_upload 闸门语义在此保留）。"""
     resolved_allowed_suffixes = (
         ALLOWED_RESUME_SUFFIXES
         if allowed_suffixes is None
@@ -37,34 +34,21 @@ async def persist_upload(
         UPLOAD_CHUNK_BYTES if chunk_bytes is None else chunk_bytes
     )
 
-    resolved_upload_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "").suffix.lower()
+    filename = (file.filename or "resume").strip() or "resume"
+    suffix = Path(filename).suffix.lower()
     if suffix not in resolved_allowed_suffixes:
-        suffix = ".txt"
+        await file.close()
+        raise HTTPException(status_code=415, detail="unsupported_file_type")
 
-    session_hash = _safe_id(session_id)
-    # Keep enough entropy for unique immutable upload paths without pushing
-    # deeply nested Windows workspaces over the legacy MAX_PATH boundary.
-    upload_id = uuid.uuid4().hex[:16]
-    path = resolved_upload_dir / f"{session_hash}-{upload_id}{suffix}"
-    total_bytes = 0
+    buffer = bytearray()
     try:
-        with path.open("xb") as destination:
-            while chunk := await file.read(resolved_chunk_bytes):
-                total_bytes += len(chunk)
-                if total_bytes > resolved_max_upload_bytes:
-                    raise HTTPException(
-                        status_code=413,
-                        detail="resume file exceeds upload size limit",
-                    )
-                destination.write(chunk)
-        return path
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
+        while chunk := await file.read(resolved_chunk_bytes):
+            buffer.extend(chunk)
+            if len(buffer) > resolved_max_upload_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="resume file exceeds upload size limit",
+                )
     finally:
         await file.close()
-
-
-def _safe_id(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return filename, suffix, bytes(buffer)

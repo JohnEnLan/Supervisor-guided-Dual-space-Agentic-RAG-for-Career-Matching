@@ -36,6 +36,26 @@ def _authed_user():
     )
 
 
+def _context_from_load(load):
+    """B2：consult 读路径统一走 load_consult_context；由 load 假件派生。
+    generation=0 与本文件 fake mutate 的 mutator(x) 单参调用默认值对齐。"""
+    from app.db.state_store import ConsultContext
+
+    async def context(session_id):
+        state = await load(session_id)
+        if state is None:
+            return None
+        return ConsultContext(
+            state=state,
+            status="intent_consulting",
+            resume_version=1,
+            confirmed_resume_version=1,
+            resume_upload_generation=0,
+        )
+
+    return context
+
+
 def _complete_state(*, rounds: int = 0) -> SharedState:
     return SharedState(
         session_id="session-1",
@@ -102,6 +122,7 @@ def test_post_consult_uses_atomic_cas_and_returns_new_contract(monkeypatch) -> N
         return result
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", run, raising=False)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
 
@@ -206,6 +227,7 @@ def test_authenticated_first_consult_round_receives_remembered_profile(
         return mutator(state.model_copy(deep=True))
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "load_profile", load_profile, raising=False)
     monkeypatch.setattr(sessions, "run_consult_round", run)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
@@ -236,6 +258,7 @@ def test_post_consult_returns_409_before_llm_for_stale_expected_round(
         raise AssertionError("stale request must not call the LLM")
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", forbidden, raising=False)
 
     with TestClient(_app()) as client:
@@ -272,6 +295,7 @@ def test_post_consult_rechecks_cas_inside_locked_mutation(monkeypatch) -> None:
         return mutator(concurrent)
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", run, raising=False)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
 
@@ -314,6 +338,7 @@ def test_post_consult_cannot_overwrite_concurrent_brief_confirmation(
         return mutator(confirmed)
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "run_consult_round", run)
     monkeypatch.setattr(sessions, "mutate_state_atomically", mutate)
 
@@ -353,6 +378,7 @@ def test_get_consult_replays_transcript_and_current_profile(monkeypatch) -> None
         return state
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
 
     with TestClient(_app()) as client:
         response = client.get("/api/v1/sessions/session-1/consult")
@@ -379,6 +405,7 @@ def test_finalize_requires_complete_profile_and_is_idempotent(monkeypatch) -> No
         raise AssertionError("finalize must not create or persist a run")
 
     monkeypatch.setattr(sessions, "load_state", load)
+    monkeypatch.setattr(sessions, "load_consult_context", _context_from_load(load))
     monkeypatch.setattr(sessions, "create_run", forbidden)
     monkeypatch.setattr(sessions, "save_match_brief", forbidden)
 

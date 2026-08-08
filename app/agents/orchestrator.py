@@ -369,6 +369,7 @@ async def _persist_stage_state(
         latest: SharedState,
         _resume_version: int = 0,
         _resume_upload_generation: int = 0,
+        _status: str = "",
     ) -> SharedState:
         for field_name in owned_fields:
             setattr(latest, field_name, deepcopy(getattr(state, field_name)))

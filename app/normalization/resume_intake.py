@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import re
 from pathlib import Path
@@ -141,8 +142,8 @@ def _compact_text(text: str) -> str:
     return "\n".join(compact_lines).strip()
 
 
-def _read_pdf(path: Path) -> tuple[str, int]:
-    reader = PdfReader(str(path))
+def _read_pdf(path: "Path | io.BytesIO") -> tuple[str, int]:
+    reader = PdfReader(path if isinstance(path, io.BytesIO) else str(path))
     page_texts: list[str] = []
     for page_number, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
@@ -152,8 +153,8 @@ def _read_pdf(path: Path) -> tuple[str, int]:
     return "\n\n".join(page_texts).strip(), len(reader.pages)
 
 
-def _read_docx(path: Path) -> tuple[str, int]:
-    doc = Document(str(path))
+def _read_docx(path: "Path | io.BytesIO") -> tuple[str, int]:
+    doc = Document(path if isinstance(path, io.BytesIO) else str(path))
     parts: list[str] = []
     for block in doc.iter_inner_content():
         if isinstance(block, Paragraph):
@@ -189,6 +190,23 @@ def extract_resume_text(path: Path) -> tuple[str, int]:
     if suffix in {".txt", ".md"}:
         return _read_text(path)
     raise ValueError(f"Unsupported resume file type: {path.suffix}")
+
+
+def extract_resume_text_from_bytes(content: bytes, suffix: str) -> tuple[str, int]:
+    """B2 上传确认流：上传即在内存中本地提取（零 LLM），不落磁盘。"""
+    normalized_suffix = suffix.casefold()
+    if normalized_suffix == ".pdf":
+        return _read_pdf(io.BytesIO(content))
+    if normalized_suffix == ".docx":
+        return _read_docx(io.BytesIO(content))
+    if normalized_suffix in {".txt", ".md"}:
+        for encoding in ("utf-8-sig", "utf-8", "gbk"):
+            try:
+                return _compact_text(content.decode(encoding)), 1
+            except UnicodeDecodeError:
+                continue
+        return _compact_text(content.decode(errors="ignore")), 1
+    raise ValueError(f"Unsupported resume file type: {suffix}")
 
 
 def build_evidence_spans(raw_text: str, *, max_spans: int = 120) -> list[EvidenceSpan]:

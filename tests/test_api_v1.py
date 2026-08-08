@@ -17,6 +17,8 @@ PUBLIC_PATHS = {
     "/api/v1/capabilities",
     "/api/v1/sessions",
     "/api/v1/sessions/{session_id}/resume",
+    "/api/v1/sessions/{session_id}/resume-upload",
+    "/api/v1/sessions/{session_id}/resume/parse",
     "/api/v1/sessions/{session_id}/resume-preview",
     "/api/v1/sessions/{session_id}/resume-confirm",
     "/api/v1/sessions/{session_id}/consult",
@@ -42,14 +44,11 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     from app.state.schema import ResumeState, SharedState
 
     calls = []
-    normalized = SharedState(
-        session_id="session-1",
-        user_id="user-1",
-        resume_state=ResumeState(skills=["Python"]),
-    )
+    cleanup_calls = []
+    normalized_resume = ResumeState(skills=["Python"])
 
-    async def intake(*_args, **_kwargs):
-        return SimpleNamespace(state=normalized, raw_text="Python resume")
+    async def fake_normalize_text(_raw_text, _spans):
+        return normalized_resume
 
     async def save_normalized_resume(**kwargs):
         calls.append(kwargs)
@@ -61,7 +60,10 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     async def missing(_session_id):
         return None
 
-    monkeypatch.setattr(sessions, "intake_resume", intake)
+    async def cleanup(**kwargs):
+        cleanup_calls.append(kwargs)
+
+    monkeypatch.setattr(sessions, "normalize_resume_text", fake_normalize_text)
     monkeypatch.setattr(
         sessions,
         "save_normalized_resume",
@@ -70,14 +72,12 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     )
     monkeypatch.setattr(sessions, "save_state", forbidden)
     monkeypatch.setattr(sessions, "load_state", missing)
-
-    resume_path = tmp_path / "resume.txt"
-    resume_path.write_text("Python resume", encoding="utf-8")
+    monkeypatch.setattr(sessions, "clear_resume_upload_content", cleanup)
 
     await sessions._normalize_resume(
         session_id="session-1",
         user_id="user-1",
-        resume_path=resume_path,
+        raw_text="Python resume",
         expected_generation=7,
     )
 
@@ -85,7 +85,8 @@ async def test_normalize_resume_persists_resume_and_version_atomically(
     assert calls[0]["resume_state"].skills == ["Python"]
     assert len(calls[0]["content_hash"]) == 64
     assert calls[0]["expected_generation"] == 7
-    assert not resume_path.exists()
+    # B2：任务收尾定向清理 BYTEA 与临时提取副本
+    assert cleanup_calls == [{"session_id": "session-1", "generation": 7}]
 
 
 @pytest.mark.asyncio
@@ -93,30 +94,41 @@ async def test_normalize_resume_failure_updates_only_status_atomically(monkeypat
     from app.api.v1 import sessions
 
     calls = []
+    refunds = []
 
-    async def intake(*_args, **_kwargs):
+    async def failing_normalize(_raw_text, _spans):
         raise ValueError("bad resume")
 
     async def mark_error(*, session_id: str, expected_generation: int):
         calls.append((session_id, expected_generation))
         return True
 
+    async def refund(*, session_id: str):
+        refunds.append(session_id)
+
     async def forbidden(*_args, **_kwargs):
         raise AssertionError("failure fallback must not whole-save stale state")
 
-    monkeypatch.setattr(sessions, "intake_resume", intake)
+    async def cleanup(**_kwargs):
+        return None
+
+    monkeypatch.setattr(sessions, "normalize_resume_text", failing_normalize)
     monkeypatch.setattr(sessions, "mark_resume_error", mark_error)
+    monkeypatch.setattr(sessions, "refund_parse_count", refund)
+    monkeypatch.setattr(sessions, "clear_resume_upload_content", cleanup)
     monkeypatch.setattr(sessions, "load_state", forbidden)
     monkeypatch.setattr(sessions, "save_state", forbidden)
 
     await sessions._normalize_resume(
         session_id="session-1",
         user_id="user-1",
-        resume_path=Path("resume.txt"),
+        raw_text="Python resume with enough text to build spans",
         expected_generation=11,
     )
 
     assert calls == [("session-1", 11)]
+    # LLM 外呼已发起（normalize 阶段）才失败 → 不返还解析额度
+    assert refunds == []
 
 
 def _app() -> FastAPI:

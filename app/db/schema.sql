@@ -260,7 +260,24 @@ ALTER TABLE session_state
     ADD COLUMN IF NOT EXISTS confirmed_resume_version INTEGER,
     ADD COLUMN IF NOT EXISTS resume_content_hash TEXT,
     ADD COLUMN IF NOT EXISTS resume_confirmed_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS resume_upload_generation BIGINT NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS resume_upload_generation BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS resume_parse_count INT NOT NULL DEFAULT 0
+        CHECK (resume_parse_count >= 0);
+
+-- v3 B2: 待解析上传持久化（上传确认流；内容解析结束后按 generation 置 NULL）
+CREATE TABLE IF NOT EXISTS resume_uploads (
+    session_id  TEXT NOT NULL REFERENCES session_state(session_id) ON DELETE CASCADE,
+    generation  BIGINT NOT NULL,
+    filename    TEXT NOT NULL,
+    suffix      TEXT NOT NULL,
+    content     BYTEA,
+    extracted_text TEXT,
+    pages       INT NOT NULL DEFAULT 0 CHECK (pages >= 0),
+    chars       INT NOT NULL DEFAULT 0 CHECK (chars >= 0),
+    ocr_suggested BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (session_id, generation)
+);
 
 CREATE TABLE IF NOT EXISTS match_runs (
     run_id                   TEXT PRIMARY KEY,

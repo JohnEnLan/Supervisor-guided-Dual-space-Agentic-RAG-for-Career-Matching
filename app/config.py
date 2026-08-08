@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     max_consult_rounds: int = Field(default=8, ge=1, le=15)
     resume_clarify_enabled: bool = False
     resume_clarify_max: int = Field(default=2, ge=1, le=5)
+    # v3 B2：每会话解析（LLM 归一化）次数上限；上传/预览零成本不计额
+    resume_parse_limit: int = Field(default=3, ge=1, le=10)
     consult_coach_enabled: bool = False
     consult_coach_max: int = Field(default=3, ge=1, le=5)
     max_reretrieval_loops: int = 1

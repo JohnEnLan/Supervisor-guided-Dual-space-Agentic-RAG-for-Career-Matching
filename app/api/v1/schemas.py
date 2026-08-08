@@ -85,6 +85,26 @@ class ResumeAcceptedResponse(PublicDTO):
     status: Literal["resume_queued"] = "resume_queued"
 
 
+class ResumeUploadedResponse(PublicDTO):
+    """B2 上传确认流：上传即本地提取（零 LLM），等待用户确认解析。"""
+
+    session_id: str
+    status: Literal["resume_uploaded"] = "resume_uploaded"
+    generation: int
+    filename: str
+    pages: int
+    chars: int
+    text_preview: str
+    parses_used: int
+    parses_limit: int
+    ocr_suggested: bool
+
+
+class ResumeParseRequest(PublicDTO):
+    # 必须回传预览所得 generation：旧标签页解析未预览的新代 → 409 resume_changed
+    generation: int
+
+
 class ResumeConfirmRequest(PublicDTO):
     expected_resume_version: int | None = None
 
@@ -92,9 +112,21 @@ class ResumeConfirmRequest(PublicDTO):
 class ResumeLifecycleConflictResponse(PublicDTO):
     # resume_missing = 会话从未上传过简历（与"归一化中"必须可区分，否则新
     # 会话会被前端当成处理中而失去上传入口——审计二轮阻断项）
+    # resume_unparsed = 已上传未确认解析（B2）；resume_parse_limit = 解析
+    # 次数额度用尽（B2，防烧钱限额）
     detail: Literal[
-        "resume_changed", "resume_processing", "resume_error", "resume_missing"
+        "resume_changed",
+        "resume_processing",
+        "resume_error",
+        "resume_missing",
+        "resume_unparsed",
+        "resume_parse_limit",
     ]
+
+
+class ResumeUploadRejectedResponse(PublicDTO):
+    # 415 = 非白名单后缀；422 = 文件损坏/无法解析（不入库、不占 generation）
+    detail: Literal["unsupported_file_type", "unreadable_file"]
 
 
 class ResumeVersionRequiredResponse(PublicDTO):

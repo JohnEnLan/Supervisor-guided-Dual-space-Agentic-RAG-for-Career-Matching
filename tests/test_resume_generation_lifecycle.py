@@ -216,16 +216,17 @@ async def test_mutate_state_atomically_exposes_locked_version_and_generation(
 
     monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
 
-    def mutate(state, resume_version, resume_upload_generation):
+    def mutate(state, resume_version, resume_upload_generation, status):
+        # B2：mutator 契约扩至 4 参——行锁内的 status 供落库保护判定
         state.career_state.current_goal = ["Data analyst"]
-        return resume_version, resume_upload_generation
+        return resume_version, resume_upload_generation, status
 
     result = await state_store.mutate_state_atomically(
         session_id="session-1",
         mutator=mutate,
     )
 
-    assert result == (3, 9)
+    assert result == (3, 9, "resume_ready")
     assert "FOR UPDATE" in calls[0][1]
 
 
@@ -238,33 +239,55 @@ async def test_accept_resume_upload_is_one_update_without_state_rewrite(
     calls = []
 
     class Connection:
+        def transaction(self):
+            return _Transaction()
+
         async def fetchrow(self, sql, *args):
-            calls.append((sql, args))
+            calls.append(("fetchrow", sql, args))
             return {
                 "user_id": "user-1",
                 "resume_upload_generation": 5,
+                "resume_parse_count": 1,
             }
+
+        async def execute(self, sql, *args):
+            calls.append(("execute", sql, args))
 
     async def fake_get_pool():
         return _Pool(Connection())
 
     monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
 
-    accepted = await state_store.accept_resume_upload(session_id="session-1")
+    accepted = await state_store.accept_resume_upload(
+        session_id="session-1",
+        filename="resume.pdf",
+        suffix=".pdf",
+        content=b"pdf-bytes",
+        extracted_text="text",
+        pages=2,
+        chars=4,
+        ocr_suggested=False,
+    )
 
     assert accepted == {
         "user_id": "user-1",
         "resume_upload_generation": 5,
+        "resume_parse_count": 1,
     }
-    assert len(calls) == 1
-    sql = calls[0][0]
-    assert "UPDATE session_state" in sql
-    assert "status = 'resume_queued'" in sql
-    assert "resume_upload_generation = resume_upload_generation + 1" in sql
-    assert "confirmed_resume_version = NULL" in sql
-    assert "resume_confirmed_at = NULL" in sql
-    assert "state =" not in sql
-    assert "version = version + 1" not in sql
+    # B2：行锁 UPDATE 先行（置 resume_uploaded，不再直接入队），随后
+    # DELETE 旧上传行 + INSERT 新行；SharedState JSON 仍然一个字节不碰。
+    update_sql = calls[0][1]
+    assert calls[0][0] == "fetchrow"
+    assert "UPDATE session_state" in update_sql
+    assert "status = 'resume_uploaded'" in update_sql
+    assert "resume_upload_generation = resume_upload_generation + 1" in update_sql
+    assert "confirmed_resume_version = NULL" in update_sql
+    assert "resume_confirmed_at = NULL" in update_sql
+    assert "state =" not in update_sql
+    assert "version = version + 1" not in update_sql
+    assert "DELETE FROM resume_uploads" in calls[1][1]
+    assert "INSERT INTO resume_uploads" in calls[2][1]
+    assert calls[2][2][4] == b"pdf-bytes"
 
 
 @pytest.mark.asyncio
@@ -390,36 +413,82 @@ def test_feature_a_public_dto_contract_is_additive_and_preview_is_frozen() -> No
     assert "resume_upload_generation" not in ResumePreviewResponse.model_fields
 
 
-def test_upload_acceptance_passes_internal_generation_to_background_task(
+def test_upload_stores_and_extracts_without_llm_or_background_task(
     monkeypatch,
 ) -> None:
+    """B2：上传只存库+本地提取（零 LLM、零后台任务），返回 200 待确认。"""
     from app.api.v1 import sessions
 
-    calls = []
+    accepted_kwargs = {}
 
-    async def persist(_session_id, _file):
-        return Path("queued-resume.txt")
-
-    async def accept(*, session_id):
-        assert session_id == "session-1"
-        return {"user_id": "user-1", "resume_upload_generation": 6}
-
-    async def normalize(**kwargs):
-        calls.append(kwargs)
+    async def accept(**kwargs):
+        accepted_kwargs.update(kwargs)
+        return {
+            "user_id": "user-1",
+            "resume_upload_generation": 6,
+            "resume_parse_count": 1,
+        }
 
     async def forbidden(*_args, **_kwargs):
-        raise AssertionError("upload acceptance must not load or rewrite state JSON")
+        raise AssertionError("upload must not normalize, load or rewrite state")
 
-    monkeypatch.setattr(sessions, "persist_upload", persist)
     monkeypatch.setattr(sessions, "accept_resume_upload", accept, raising=False)
-    monkeypatch.setattr(sessions, "_normalize_resume", normalize)
+    monkeypatch.setattr(sessions, "_normalize_resume", forbidden)
     monkeypatch.setattr(sessions, "load_state", forbidden)
     monkeypatch.setattr(sessions, "save_state", forbidden)
 
     with TestClient(_api_app()) as client:
         response = client.post(
             "/api/v1/sessions/session-1/resume",
-            files={"file": ("resume.txt", b"Python", "text/plain")},
+            files={"file": ("resume.txt", b"Python data analysis", "text/plain")},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "resume_uploaded"
+    assert payload["session_id"] == "session-1"
+    assert payload["generation"] == 6
+    assert payload["parses_used"] == 1
+    assert payload["chars"] == len("Python data analysis")
+    assert accepted_kwargs["session_id"] == "session-1"
+    assert accepted_kwargs["content"] == b"Python data analysis"
+    assert accepted_kwargs["suffix"] == ".txt"
+
+
+def test_parse_confirm_begins_cas_and_passes_extracted_text_to_task(
+    monkeypatch,
+) -> None:
+    """B2：确认解析走 begin_resume_parse CAS，后台任务吃上传时的提取文本。"""
+    from app.api.v1 import sessions
+
+    calls = []
+
+    async def begin(*, session_id, generation, max_parses):
+        assert session_id == "session-1"
+        assert generation == 6
+        assert max_parses >= 1
+        return {
+            "owner_user_id": "user-1",
+            "resume_parse_count": 1,
+            "filename": "resume.txt",
+            "suffix": ".txt",
+            "content": b"Python data analysis",
+            "extracted_text": "Python data analysis",
+            "pages": 1,
+            "chars": 20,
+            "ocr_suggested": False,
+        }
+
+    async def normalize(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(sessions, "begin_resume_parse", begin, raising=False)
+    monkeypatch.setattr(sessions, "_normalize_resume", normalize)
+
+    with TestClient(_api_app()) as client:
+        response = client.post(
+            "/api/v1/sessions/session-1/resume/parse",
+            json={"generation": 6},
         )
 
     assert response.status_code == 202
@@ -431,7 +500,7 @@ def test_upload_acceptance_passes_internal_generation_to_background_task(
         {
             "session_id": "session-1",
             "user_id": "user-1",
-            "resume_path": Path("queued-resume.txt"),
+            "raw_text": "Python data analysis",
             "expected_generation": 6,
         }
     ]
@@ -816,23 +885,26 @@ async def test_acceptance_concurrent_with_consult_persist_does_not_lose_turn(
                 self.consult_read_started.set()
                 await asyncio.sleep(0)
                 return self.row()
-            if "status = 'resume_queued'" in sql:
-                await self.consult_read_started.wait()
-                async with self.row_lock:
-                    self.status = "resume_queued"
-                    self.resume_upload_generation += 1
-                    self.confirmed_resume_version = None
-                    return {
-                        "user_id": "user-1",
-                        "resume_upload_generation": self.resume_upload_generation,
-                    }
+            if "status = 'resume_uploaded'" in sql:
+                # B2 accept：整个函数已在 conn.transaction()（行锁）内执行
+                self.status = "resume_uploaded"
+                self.resume_upload_generation += 1
+                self.confirmed_resume_version = None
+                return {
+                    "user_id": "user-1",
+                    "resume_upload_generation": self.resume_upload_generation,
+                    "resume_parse_count": 0,
+                }
             raise AssertionError(sql)
 
         async def execute(self, sql, *args):
-            if "SET state = $1::jsonb" not in sql:
-                raise AssertionError(sql)
-            self.state = SharedState.model_validate_json(args[0])
-            return "UPDATE 1"
+            if "SET state = $1::jsonb" in sql:
+                self.state = SharedState.model_validate_json(args[0])
+                return "UPDATE 1"
+            if "resume_uploads" in sql:
+                # B2 accept 事务内的 DELETE/INSERT，对本测试无关紧要
+                return "OK"
+            raise AssertionError(sql)
 
     connection = Connection()
 
@@ -841,22 +913,35 @@ async def test_acceptance_concurrent_with_consult_persist_does_not_lose_turn(
 
     monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
 
-    def persist_turn(state, _version, _generation):
+    def persist_turn(state, _version, _generation, _status=""):
         state.career_state.consult_rounds_used = 1
         state.career_state.consult_transcript.append(
             {"round": 1, "user_message": "保留本轮"}
         )
 
-    await asyncio.gather(
+    consult_task = asyncio.create_task(
         state_store.mutate_state_atomically(
             session_id="session-1",
             mutator=persist_turn,
             status="intent_consulting",
-        ),
-        state_store.accept_resume_upload(session_id="session-1"),
+        )
     )
+    await connection.consult_read_started.wait()
+    accept_task = asyncio.create_task(
+        state_store.accept_resume_upload(
+            session_id="session-1",
+            filename="resume.pdf",
+            suffix=".pdf",
+            content=b"new-bytes",
+            extracted_text="new text",
+            pages=1,
+            chars=8,
+            ocr_suggested=False,
+        )
+    )
+    await asyncio.gather(consult_task, accept_task)
 
-    assert connection.status == "resume_queued"
+    assert connection.status == "resume_uploaded"
     assert connection.resume_upload_generation == 2
     assert connection.confirmed_resume_version is None
     assert connection.state.career_state.consult_rounds_used == 1

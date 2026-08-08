@@ -1,73 +1,59 @@
-import hashlib
-import io
-
+"""B2 上传确认流：read_resume_upload 的内存缓冲、415/413 闸门契约。"""
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
+
+from app.api.uploads import read_resume_upload
+
+
+class _FakeUploadFile:
+    def __init__(self, filename: str, content: bytes, chunk: int = 7):
+        self.filename = filename
+        self._content = content
+        self._offset = 0
+        self._chunk = chunk
+        self.closed = False
+
+    async def read(self, size: int = -1) -> bytes:
+        step = min(size if size > 0 else self._chunk, self._chunk)
+        piece = self._content[self._offset : self._offset + step]
+        self._offset += len(piece)
+        return piece
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 @pytest.mark.asyncio
-async def test_persist_upload_uses_full_session_hash_and_unique_upload_id(
-    monkeypatch,
-    tmp_path,
-):
-    from app.api import uploads
+async def test_read_resume_upload_buffers_in_memory_and_normalizes_suffix():
+    file = _FakeUploadFile("My Resume.PDF", b"pdf-bytes-here")
 
-    monkeypatch.setattr(uploads, "UPLOAD_DIR", tmp_path)
+    filename, suffix, content = await read_resume_upload(file)
 
-    first = await uploads.persist_upload(
-        "a/b",
-        UploadFile(file=io.BytesIO(b"first"), filename="resume.txt"),
-    )
-    collision = await uploads.persist_upload(
-        "a_b",
-        UploadFile(file=io.BytesIO(b"second"), filename="resume.txt"),
-    )
-    retransmit = await uploads.persist_upload(
-        "a/b",
-        UploadFile(file=io.BytesIO(b"third"), filename="resume.txt"),
-    )
-
-    first_hash = hashlib.sha256(b"a/b").hexdigest()
-    collision_hash = hashlib.sha256(b"a_b").hexdigest()
-    assert first.name.startswith(f"{first_hash}-")
-    assert collision.name.startswith(f"{collision_hash}-")
-    assert len({first.name, collision.name, retransmit.name}) == 3
-    assert first.read_bytes() == b"first"
-    assert collision.read_bytes() == b"second"
-    assert retransmit.read_bytes() == b"third"
+    assert filename == "My Resume.PDF"
+    assert suffix == ".pdf"
+    assert content == b"pdf-bytes-here"
+    assert file.closed
 
 
 @pytest.mark.asyncio
-async def test_persist_upload_streams_and_removes_oversize_partial(
-    monkeypatch,
-    tmp_path,
-):
-    from app.api import uploads
+async def test_read_resume_upload_rejects_non_whitelist_suffix_with_415():
+    file = _FakeUploadFile("shot.png", b"\x89PNG")
 
-    class TrackingUpload:
-        filename = "resume.pdf"
+    with pytest.raises(HTTPException) as excinfo:
+        await read_resume_upload(file)
 
-        def __init__(self):
-            self.content = io.BytesIO(b"123456")
-            self.read_sizes = []
-            self.closed = False
+    # 不再伪装成 .txt 硬吃（旧行为），显式 415 稳定契约
+    assert excinfo.value.status_code == 415
+    assert excinfo.value.detail == "unsupported_file_type"
+    assert file.closed
 
-        async def read(self, size=-1):
-            self.read_sizes.append(size)
-            return self.content.read(size)
 
-        async def close(self):
-            self.closed = True
+@pytest.mark.asyncio
+async def test_read_resume_upload_streams_and_rejects_oversize_with_413():
+    file = _FakeUploadFile("big.txt", b"x" * 64)
 
-    upload = TrackingUpload()
-    monkeypatch.setattr(uploads, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(uploads, "MAX_RESUME_UPLOAD_BYTES", 5)
-    monkeypatch.setattr(uploads, "UPLOAD_CHUNK_BYTES", 4)
+    with pytest.raises(HTTPException) as excinfo:
+        await read_resume_upload(file, max_upload_bytes=32, chunk_bytes=8)
 
-    with pytest.raises(HTTPException) as exc_info:
-        await uploads.persist_upload("session-1", upload)
-
-    assert exc_info.value.status_code == 413
-    assert upload.read_sizes and set(upload.read_sizes) == {4}
-    assert upload.closed is True
-    assert list(tmp_path.iterdir()) == []
+    assert excinfo.value.status_code == 413
+    assert file.closed

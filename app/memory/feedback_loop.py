@@ -149,6 +149,7 @@ async def record_feedback_closure_error(
             state: SharedState,
             _resume_version: int = 0,
             _resume_upload_generation: int = 0,
+            _status: str = "",
         ) -> dict[str, Any]:
             case_written = known_case_written
             case_id = known_case_id
@@ -208,6 +209,7 @@ async def _persist_closure_result(
         latest_state: SharedState,
         _resume_version: int = 0,
         _resume_upload_generation: int = 0,
+        _status: str = "",
     ) -> dict[str, Any]:
         nonlocal persisted_result
         latest_feedback = _feedback_entry(

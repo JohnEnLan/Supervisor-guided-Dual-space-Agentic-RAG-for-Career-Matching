@@ -22,7 +22,7 @@ from fastapi import (
 from app.api.auth.deps import optional_current_user, require_owned_session
 from app.api.auth.routes import load_profile, merge_profile
 from app.api.auth.sessions import AuthedUser
-from app.api.uploads import persist_upload
+from app.api.uploads import read_resume_upload
 from app.api.v1.schemas import (
     ClarificationProgress,
     ConsultBriefDraftResponse,
@@ -37,9 +37,12 @@ from app.api.v1.schemas import (
     ResumeEducationPreview,
     ResumeEvidencePreview,
     ResumeExperiencePreview,
+    ResumeParseRequest,
     ResumePreviewResponse,
     ResumeProjectPreview,
     ResumeLifecycleConflictResponse,
+    ResumeUploadedResponse,
+    ResumeUploadRejectedResponse,
     ResumeVersionRequiredResponse,
     RequestValidationErrorResponse,
     SessionCreateRequest,
@@ -69,20 +72,29 @@ from app.agents.consult_coach import (
 from app.db.run_store import RunConflict, create_run, save_match_brief
 from app.config import settings
 from app.db.state_store import (
+    MutationOutcome,
     ResumeLifecycleConflict,
     accept_resume_upload,
+    begin_resume_parse,
+    clear_resume_upload_content,
     confirm_resume,
     create_owned_session_with_quota,
+    get_pending_resume_upload,
     get_resume_metadata,
     load_consult_context,
     load_state,
     mutate_state_atomically,
     mark_resume_error,
+    refund_parse_count,
     save_normalized_resume,
     save_state,
 )
 from app.domain.match_brief import create_match_brief
-from app.normalization.resume_intake import intake_resume
+from app.normalization.resume_intake import (
+    build_evidence_spans,
+    extract_resume_text_from_bytes,
+    normalize_resume_text,
+)
 from app.state.schema import ResumeState, SharedState
 
 
@@ -153,32 +165,136 @@ async def create_session(
     return SessionResponse(session_id=session_id, status="awaiting_resume")
 
 
+# B2：ocr_suggested 路由提示阈值（B4 引入 RESUME_OCR_* 配置前的常量）
+_OCR_SUGGEST_MIN_CHARS = 150
+_TEXT_PREVIEW_CHARS = 600
+
+
+def _upload_response(
+    session_id: str,
+    *,
+    generation: int,
+    filename: str,
+    extracted_text: str,
+    pages: int,
+    chars: int,
+    ocr_suggested: bool,
+    parses_used: int,
+) -> ResumeUploadedResponse:
+    return ResumeUploadedResponse(
+        session_id=session_id,
+        generation=generation,
+        filename=filename,
+        pages=pages,
+        chars=chars,
+        text_preview=_redact_contact_text(extracted_text[:_TEXT_PREVIEW_CHARS]),
+        parses_used=parses_used,
+        parses_limit=settings.resume_parse_limit,
+        ocr_suggested=ocr_suggested,
+    )
+
+
 @router.post(
     "/sessions/{session_id}/resume",
-    response_model=ResumeAcceptedResponse,
-    status_code=202,
+    response_model=ResumeUploadedResponse,
+    responses={
+        413: {"description": "resume file exceeds upload size limit"},
+        415: {"model": ResumeUploadRejectedResponse},
+        422: {"model": ResumeUploadRejectedResponse},
+    },
     dependencies=[Depends(require_owned_session)],
 )
 async def upload_resume(
     session_id: str,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-) -> ResumeAcceptedResponse:
-    resume_path = await persist_upload(session_id, file)
+) -> ResumeUploadedResponse:
+    """B2 上传确认流：存库 + 本地提取（零 LLM），等待用户「确认解析」。"""
+    filename, suffix, content = await read_resume_upload(file)
     try:
-        accepted = await accept_resume_upload(session_id=session_id)
-    except KeyError:
-        resume_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=404, detail="session_id not found") from None
+        extracted_text, pages = await asyncio.to_thread(
+            extract_resume_text_from_bytes, content, suffix
+        )
     except Exception:
-        resume_path.unlink(missing_ok=True)
-        raise
+        # 损坏/不可解析：不入库、不占 generation、不扣额度
+        raise HTTPException(status_code=422, detail="unreadable_file") from None
+    chars = len(extracted_text)
+    ocr_suggested = chars < _OCR_SUGGEST_MIN_CHARS
+    try:
+        accepted = await accept_resume_upload(
+            session_id=session_id,
+            filename=filename,
+            suffix=suffix,
+            content=content,
+            extracted_text=extracted_text,
+            pages=pages,
+            chars=chars,
+            ocr_suggested=ocr_suggested,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session_id not found") from None
+    return _upload_response(
+        session_id,
+        generation=int(accepted["resume_upload_generation"]),
+        filename=filename,
+        extracted_text=extracted_text,
+        pages=pages,
+        chars=chars,
+        ocr_suggested=ocr_suggested,
+        parses_used=int(accepted["resume_parse_count"]),
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/resume-upload",
+    response_model=ResumeUploadedResponse,
+    dependencies=[Depends(require_owned_session)],
+)
+async def pending_resume_upload(session_id: str) -> ResumeUploadedResponse:
+    """刷新恢复：仅 resume_uploaded 态返回待解析上传元数据，否则 404。"""
+    pending = await get_pending_resume_upload(session_id=session_id)
+    if pending is None:
+        raise HTTPException(status_code=404, detail="no pending resume upload")
+    return _upload_response(
+        session_id,
+        generation=int(pending["generation"]),
+        filename=str(pending["filename"]),
+        extracted_text=str(pending["extracted_text"] or ""),
+        pages=int(pending["pages"]),
+        chars=int(pending["chars"]),
+        ocr_suggested=bool(pending["ocr_suggested"]),
+        parses_used=int(pending["resume_parse_count"]),
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/resume/parse",
+    response_model=ResumeAcceptedResponse,
+    status_code=202,
+    responses={409: {"model": ResumeLifecycleConflictResponse}},
+    dependencies=[Depends(require_owned_session)],
+)
+async def parse_resume(
+    session_id: str,
+    request: ResumeParseRequest,
+    background_tasks: BackgroundTasks,
+) -> ResumeAcceptedResponse:
+    """确认解析（LLM 成本发生点）：CAS 扣一次解析额度并入队后台归一化。"""
+    try:
+        started = await begin_resume_parse(
+            session_id=session_id,
+            generation=request.generation,
+            max_parses=settings.resume_parse_limit,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session_id not found") from None
+    except ResumeLifecycleConflict as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from None
     background_tasks.add_task(
         _normalize_resume,
         session_id=session_id,
-        user_id=str(accepted["user_id"]),
-        resume_path=resume_path,
-        expected_generation=int(accepted["resume_upload_generation"]),
+        user_id=str(started["owner_user_id"] or session_id),
+        raw_text=str(started["extracted_text"] or ""),
+        expected_generation=request.generation,
     )
     return ResumeAcceptedResponse(session_id=session_id)
 
@@ -193,6 +309,8 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
     context = await load_consult_context(session_id)
     if context is None:
         raise HTTPException(status_code=404, detail="session_id not found")
+    if context.status == "resume_uploaded":
+        raise HTTPException(status_code=409, detail="resume_unparsed")
     if context.status == "resume_queued":
         raise HTTPException(status_code=409, detail="resume_processing")
     if context.status == "resume_error":
@@ -326,17 +444,23 @@ async def continue_consultation(
 async def finalize_consultation(
     session_id: str,
 ) -> ConsultBriefDraftResponse:
+    # B2 无条件生命周期保护（与 clarify flag 解耦）：uploaded/queued 两个
+    # 新流程状态在任何开关组合下都不得进入 LLM/finalize 路径；resume_error
+    # 与 confirmed 契约仍按 Feature A 的 flag 门控（基线行为不变）。
+    context = await load_consult_context(session_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    if context.status == "resume_uploaded":
+        raise HTTPException(status_code=409, detail="resume_unparsed")
+    if context.status == "resume_queued":
+        raise HTTPException(status_code=409, detail="resume_processing")
     if settings.resume_clarify_enabled:
         # The confirmed-resume/generation contract is scoped to Feature A;
         # when disabled the legacy read-only finalize path below stays intact.
-        context = await load_consult_context(session_id)
-        if context is None:
-            raise HTTPException(status_code=404, detail="session_id not found")
         if context.status == "resume_error":
             raise HTTPException(status_code=409, detail="resume_error")
         if (
-            context.status == "resume_queued"
-            or context.resume_version < 1
+            context.resume_version < 1
             or context.confirmed_resume_version != context.resume_version
         ):
             raise HTTPException(status_code=409, detail="resume_processing")
@@ -350,6 +474,7 @@ async def finalize_consultation(
             latest: SharedState,
             current_resume_version: int,
             current_resume_upload_generation: int,
+            _current_status: str = "",
         ) -> dict:
             if (
                 current_resume_version != context.resume_version
@@ -375,11 +500,8 @@ async def finalize_consultation(
             raise HTTPException(status_code=404, detail="session_id not found") from None
         return ConsultBriefDraftResponse.model_validate(draft)
 
-    state = await load_state(session_id)
-    if state is None:
-        raise HTTPException(status_code=404, detail="session_id not found")
     try:
-        draft = build_brief_draft(state.career_state)
+        draft = build_brief_draft(context.state.career_state)
     except ConsultError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return ConsultBriefDraftResponse.model_validate(draft)
@@ -420,10 +542,15 @@ async def build_match_brief(
         state: SharedState,
         current_resume_version: int = 0,
         current_resume_upload_generation: int = 0,
+        _current_status: str = "",
     ) -> dict:
+        # B2：generation 比对无条件生效（flag-off 下并发重传也不得把新生命
+        # 周期覆盖成 match_brief_approved）；version 比对维持 Feature A 门控
+        # （保 test_api_v1 既有 fixture 基线，方案 §1.2 写死的口径）。
+        if current_resume_upload_generation != expected_generation:
+            raise _ResumeChangedConflict(session_id)
         if settings.resume_clarify_enabled and (
             current_resume_version != version
-            or current_resume_upload_generation != expected_generation
         ):
             raise _ResumeChangedConflict(session_id)
         if settings.resume_clarify_enabled:
@@ -470,17 +597,24 @@ async def _execute_consult_round(
 ):
     expected_resume_version: int | None = None
     expected_resume_upload_generation: int | None = None
+    # B2：读路径统一走 context loader（flag-off 也要拿到 generation 供落库
+    # 保护比对）；uploaded/queued 两个新流程状态无条件拦截，不进 LLM。
+    context = await load_consult_context(session_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="session_id not found")
+    if context.status == "resume_uploaded":
+        raise HTTPException(status_code=409, detail="resume_unparsed")
+    if context.status == "resume_queued":
+        raise HTTPException(status_code=409, detail="resume_processing")
+    loaded_generation = context.resume_upload_generation
+    state = context.state
     if settings.resume_clarify_enabled:
         # Feature-A lifecycle checks apply only while clarification is on;
         # keeping this branch scoped preserves the 00/01 baseline behavior.
-        context = await load_consult_context(session_id)
-        if context is None:
-            raise HTTPException(status_code=404, detail="session_id not found")
         if context.status == "resume_error":
             raise HTTPException(status_code=409, detail="resume_error")
         if (
-            context.status == "resume_queued"
-            or context.resume_version < 1
+            context.resume_version < 1
             or context.confirmed_resume_version != context.resume_version
         ):
             raise HTTPException(status_code=409, detail="resume_processing")
@@ -489,13 +623,8 @@ async def _execute_consult_round(
             context.resume_version,
         ):
             raise HTTPException(status_code=409, detail="resume_changed")
-        state = context.state
         expected_resume_version = context.resume_version
-        expected_resume_upload_generation = context.resume_upload_generation
-    else:
-        state = await load_state(session_id)
-        if state is None:
-            raise HTTPException(status_code=404, detail="session_id not found")
+        expected_resume_upload_generation = loaded_generation
     if state.career_state.consult_rounds_used != expected_round:
         raise HTTPException(status_code=409, detail="consultation round conflict")
     if state.career_state.intent_consulted:
@@ -538,7 +667,8 @@ async def _execute_consult_round(
         latest: SharedState,
         current_resume_version: int = 0,
         current_resume_upload_generation: int = 0,
-    ) -> SharedState:
+        current_status: str = "",
+    ) -> SharedState | MutationOutcome:
         completeness_before = calculate_completeness(latest.career_state)
         if settings.resume_clarify_enabled and (
             current_resume_version != expected_resume_version
@@ -563,6 +693,21 @@ async def _execute_consult_round(
             # Finalize/match-brief may have terminalized the pending target while
             # the LLM was outside the lock. Never revive that target or pending.
             raise _ConsultRoundConflict(expected_round)
+        # B2 无条件落库保护（行锁内判定；flag-on 的失配已在上方 raise，此
+        # 分支实际覆盖 flag-off）：LLM 等待期间发生重传/确认解析 → 本轮只
+        # 追加 transcript，不覆盖 status、不合并旧代 resume_state。
+        if (
+            current_resume_upload_generation != loaded_generation
+            or current_status in {"resume_uploaded", "resume_queued"}
+        ):
+            latest.career_state.consult_transcript = merge_consult_transcript(
+                latest.career_state.consult_transcript,
+                working.career_state.consult_transcript,
+            )
+            return MutationOutcome(
+                result=latest.model_copy(deep=True),
+                status_override=None,
+            )
         for field_name in _INTENT_CAREER_FIELDS:
             if field_name == "consult_transcript":
                 latest.career_state.consult_transcript = merge_consult_transcript(
@@ -656,6 +801,7 @@ async def _execute_consult_round(
                 latest: SharedState,
                 _current_resume_version: int = 0,
                 _current_resume_upload_generation: int = 0,
+                _current_status: str = "",
             ) -> SharedState:
                 # CAS2 deliberately has no rounds_used equality check. It acts
                 # on the newest locked state and accepts later consultation
@@ -914,35 +1060,49 @@ async def _normalize_resume(
     *,
     session_id: str,
     user_id: str,
-    resume_path: Path,
+    raw_text: str,
     expected_generation: int,
 ) -> None:
+    """B2 确认解析后台任务：输入为上传时已提取的文本（字节内容随
+    begin_resume_parse 事务取出，任何并发重传都影响不到本任务）。
+    单 try/finally 结构＝每任务至多一次返还的结构保证；external_started
+    在首个 LLM 外呼前置位——之前失败返还额度（用户没花到钱），之后不返。
+    """
+    external_started = False
     try:
-        result = await intake_resume(
-            resume_path,
-            session_id=session_id,
-            user_id=user_id,
-            save_to_db=False,
-        )
+        if not raw_text.strip():
+            raise ValueError("empty resume text")
+        evidence_spans = build_evidence_spans(raw_text)
+        if not evidence_spans:
+            raise ValueError("no usable evidence spans")
+        external_started = True
+        resume_state = await normalize_resume_text(raw_text, evidence_spans)
         digest = hashlib.sha256(
-            result.raw_text.encode("utf-8", errors="ignore")
+            raw_text.encode("utf-8", errors="ignore")
         ).hexdigest()
         await save_normalized_resume(
             session_id=session_id,
-            resume_state=result.state.resume_state,
+            resume_state=resume_state,
             content_hash=digest,
             expected_generation=expected_generation,
         )
     except Exception:
         try:
+            if not external_started:
+                await refund_parse_count(session_id=session_id)
             await mark_resume_error(
                 session_id=session_id,
                 expected_generation=expected_generation,
             )
-        except KeyError:
-            pass
+        except Exception:
+            logger.exception("resume error bookkeeping failed for %s", session_id)
     finally:
-        resume_path.unlink(missing_ok=True)
+        try:
+            await clear_resume_upload_content(
+                session_id=session_id, generation=expected_generation
+            )
+        except Exception:
+            logger.exception("resume upload cleanup failed for %s", session_id)
 
 
 def _education_preview(item: dict) -> ResumeEducationPreview:

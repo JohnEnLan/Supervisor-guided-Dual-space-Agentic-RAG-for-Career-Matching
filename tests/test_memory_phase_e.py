@@ -506,9 +506,10 @@ async def test_mutate_state_atomically_locks_and_updates_state_without_status(
     def add_goal(state):
         state.career_state.current_goal.append("atomic goal")
 
-    def add_goal_with_result(state, resume_version, resume_upload_generation):
+    def add_goal_with_result(state, resume_version, resume_upload_generation, status):
         assert resume_version == 0
         assert resume_upload_generation == 0
+        assert status == "pending"
         add_goal(state)
         return {"canonical_goal": state.career_state.current_goal[-1]}
 
@@ -567,7 +568,7 @@ async def test_mutate_state_atomically_can_update_status_in_same_transaction(
 
     await state_store.mutate_state_atomically(
         session_id="s1",
-        mutator=lambda state, _version, _generation: (
+        mutator=lambda state, _version, _generation, _status: (
             state.career_state.current_goal.append("new")
         ),
         status="intent_consulted",
@@ -607,6 +608,7 @@ async def test_save_normalized_resume_updates_state_and_version_under_one_lock(
             if "FOR UPDATE" in sql:
                 return {
                     "state": persisted.model_dump_json(),
+                    "status": "resume_queued",
                     "resume_upload_generation": 4,
                 }
             written = json.loads(args[0])
