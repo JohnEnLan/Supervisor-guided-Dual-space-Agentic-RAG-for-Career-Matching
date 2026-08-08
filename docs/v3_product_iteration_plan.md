@@ -117,6 +117,10 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
   由任务内计数器分配 1..99；终态固定 `seq=100`（保留段）——每代仅一个
   任务（begin CAS 保证）且终态至多一次（本 CAS 保证），PK 冲突按构造
   不可达；万一发生则事务回滚整体 no-op。
+  **跨批归属（B2 对侧抽查后澄清）**：`resume_intake_progress` 表属
+  migration 0010（B3），故 `terminal_event` 参数与事件 INSERT **随 B3
+  一并落地**；B2 只落 generation+status 双谓词 CAS（防重复落库），
+  此为方案的批次归属勘误而非实现缺口。
 - **返还**：`_normalize_resume` 单 try/finally 内维护 `external_started`
   （进度阶段 normalizing/ocr 置位）；失败且未置位 →
   `UPDATE session_state SET resume_parse_count =
@@ -143,7 +147,11 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
     判定：行锁内 `locked.generation != loaded_generation ∨ locked.status ∈
     {'resume_uploaded', 'resume_queued'}`（全名，与状态机字面一致）→
     status_override=None 只追加 transcript（降级路径跳过
-    `_merge_feature_a_resume_state`）。双 flag 配置各测。
+    `_merge_feature_a_resume_state`）。
+    **双 flag 语义（B2 对侧抽查后澄清）**：flag-on 的 generation 失配由
+    Feature A 既有契约**优先**处理（409 resume_changed、transcript 不落，
+    五轮评审确认保持）；transcript-only 降级实际覆盖 flag-off 路径
+    （原先无保护的那条）。两条路径各自有测试钉死。
   - **match-brief**：generation 比对提出 flag 门控（无条件生效，失配→409
     resume_changed）；**version 比对维持 flag 门控不变**（防打破
     test_api_v1.py:198 既有 fixture 基线；如该批顺手补 fake 实参亦可，

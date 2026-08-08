@@ -13,6 +13,7 @@ const VALID_OUTCOMES = ["rejected", "passed_screen", "interview", "offer"] as co
 type FlowState = {
   loggedIn: boolean;
   uploaded: boolean;
+  parsed: boolean;
   confirmed: boolean;
   round: number;
   briefed: boolean;
@@ -28,6 +29,8 @@ function createFlowState(overrides: Partial<FlowState> = {}): FlowState {
   return {
     loggedIn: false,
     uploaded: false,
+    // B2：既有场景里 uploaded=true 语义是"档案已就绪"，默认同步视为已解析
+    parsed: overrides.parsed ?? overrides.uploaded ?? false,
     confirmed: false,
     round: 0,
     briefed: false,
@@ -69,13 +72,24 @@ function installV2Api(page: Page, state: FlowState) {
       return json(apiFixtures.session(`sess-e2e-${state.createdSessions}`));
     }
     if (path.endsWith("/resume") && method === "POST") {
+      // B2 两步确认制：上传返回 200 待确认解析，不再 202 自动入队
       state.uploaded = true;
+      state.parsed = false;
+      return json(apiFixtures.resumeUploaded());
+    }
+    if (path.endsWith("/resume-upload") && method === "GET") {
+      if (state.uploaded && !state.parsed) return json(apiFixtures.resumeUploaded());
+      return json({ detail: "no pending resume upload" }, 404);
+    }
+    if (path.endsWith("/resume/parse") && method === "POST") {
+      state.parsed = true;
       return json(apiFixtures.resumeAccepted(), 202);
     }
     if (path.endsWith("/resume-preview")) {
-      // 生产真实契约：从未上传 = resume_missing（审计二轮抓出 fixture 漂移
-      // 用了不存在的 "processing"，掩盖了新会话被判处理中的回归）
+      // 生产真实契约：从未上传 = resume_missing；已上传未确认解析 =
+      // resume_unparsed（B2）；确认解析后即视为 ready（mock 跳过归一化耗时）
       if (!state.uploaded) return json({ detail: "resume_missing" }, 409);
+      if (!state.parsed) return json({ detail: "resume_unparsed" }, 409);
       return json(apiFixtures.resumePreview(state.confirmed));
     }
     if (path.endsWith("/resume-confirm")) {
@@ -175,18 +189,22 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await emptyGuide.getByRole("button", { name: "开始新的咨询" }).click();
   await expect(page.getByRole("heading", { name: "职业规划服务群" })).toBeVisible();
 
+  // B2 两步确认制：📎 选文件 → 用户气泡「确认上传」→ 预览卡「确认解析」
   await page.setInputFiles('input[type="file"]', {
     name: "resume.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("Python engineer resume"),
   });
+  await page.getByRole("button", { name: "确认上传" }).click();
+  await expect(page.getByText(/解析会调用 AI 整理档案/)).toBeVisible();
+  await page.getByRole("button", { name: "确认解析" }).click();
   await page.getByRole("button", { name: "查看完整档案" }).click();
   const resumeProfile = page.getByRole("region", { name: "完整简历档案" });
   for (const heading of ["教育经历", "工作经历", "项目经历", "技能", "档案质量提示", "原文证据"]) {
     await expect(resumeProfile.getByRole("heading", { name: heading })).toBeVisible();
   }
   await expect(resumeProfile.getByText("Career RAG")).toBeVisible();
-  await expect(page.getByText("重新上传", { exact: true })).toBeVisible();
+  await expect(page.getByText(/📎 重新上传/)).toBeVisible();
   await page.getByRole("button", { name: "确认简历档案" }).click();
 
   const input = page.getByPlaceholder(/告诉小意你的想法/);

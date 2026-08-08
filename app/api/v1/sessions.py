@@ -187,7 +187,8 @@ def _upload_response(
         filename=filename,
         pages=pages,
         chars=chars,
-        text_preview=_redact_contact_text(extracted_text[:_TEXT_PREVIEW_CHARS]),
+        # 先对全文脱敏再截断：600 字边界穿过电话/邮箱时不得泄漏半截 token
+        text_preview=_redact_contact_text(extracted_text)[:_TEXT_PREVIEW_CHARS],
         parses_used=parses_used,
         parses_limit=settings.resume_parse_limit,
         ocr_suggested=ocr_suggested,
@@ -200,7 +201,9 @@ def _upload_response(
     responses={
         413: {"description": "resume file exceeds upload size limit"},
         415: {"model": ResumeUploadRejectedResponse},
-        422: {"model": ResumeUploadRejectedResponse},
+        # 422 = anyOf(稳定 detail 契约, FastAPI 默认校验数组形态)——multipart
+        # 缺失/非法走后者，与 resume-confirm 的加性契约模式一致。
+        422: {"model": ResumeUploadRejectedResponse | RequestValidationErrorResponse},
     },
     dependencies=[Depends(require_owned_session)],
 )
@@ -215,7 +218,11 @@ async def upload_resume(
             extract_resume_text_from_bytes, content, suffix
         )
     except Exception:
-        # 损坏/不可解析：不入库、不占 generation、不扣额度
+        # 损坏/不可解析：不入库、不占 generation、不扣额度。
+        # 完整堆栈落日志——解析器自身的程序性缺陷不允许被 422 静默吞没。
+        logger.warning(
+            "resume extraction failed for %s (%s)", session_id, suffix, exc_info=True
+        )
         raise HTTPException(status_code=422, detail="unreadable_file") from None
     chars = len(extracted_text)
     ocr_suggested = chars < _OCR_SUGGEST_MIN_CHARS
@@ -294,6 +301,8 @@ async def parse_resume(
         session_id=session_id,
         user_id=str(started["owner_user_id"] or session_id),
         raw_text=str(started["extracted_text"] or ""),
+        suffix=str(started["suffix"] or ""),
+        content=bytes(started["content"] or b""),
         expected_generation=request.generation,
     )
     return ResumeAcceptedResponse(session_id=session_id)
@@ -1061,13 +1070,17 @@ async def _normalize_resume(
     session_id: str,
     user_id: str,
     raw_text: str,
+    suffix: str = "",
+    content: bytes = b"",
     expected_generation: int,
 ) -> None:
-    """B2 确认解析后台任务：输入为上传时已提取的文本（字节内容随
-    begin_resume_parse 事务取出，任何并发重传都影响不到本任务）。
+    """B2 确认解析后台任务：输入为上传时已提取的文本与原始字节（字节随
+    begin_resume_parse 事务取出并入内存，任何并发重传都影响不到本任务；
+    B2 只消费 raw_text，suffix/content 为 B4 视觉 OCR 兜底预留的输入契约）。
     单 try/finally 结构＝每任务至多一次返还的结构保证；external_started
     在首个 LLM 外呼前置位——之前失败返还额度（用户没花到钱），之后不返。
     """
+    del suffix, content  # B4 起用于低文本 OCR 路由；B2 契约先行贯通
     external_started = False
     try:
         if not raw_text.strip():

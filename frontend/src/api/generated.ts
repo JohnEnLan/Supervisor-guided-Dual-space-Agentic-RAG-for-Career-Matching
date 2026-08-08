@@ -1691,7 +1691,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ResumeUploadRejectedResponse"];
+                    "application/json": components["schemas"]["ResumeUploadRejectedResponse"] | components["schemas"]["RequestValidationErrorResponse"];
                 };
             };
         };

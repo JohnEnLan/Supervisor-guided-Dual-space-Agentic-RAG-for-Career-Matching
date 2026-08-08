@@ -501,6 +501,9 @@ def test_parse_confirm_begins_cas_and_passes_extracted_text_to_task(
             "session_id": "session-1",
             "user_id": "user-1",
             "raw_text": "Python data analysis",
+            # B4 输入契约先行贯通：原始字节与后缀随任务传递（B2 不消费）
+            "suffix": ".txt",
+            "content": b"Python data analysis",
             "expected_generation": 6,
         }
     ]
@@ -1075,3 +1078,210 @@ async def test_confirm_checks_expected_version_while_row_is_locked(monkeypatch) 
 
     assert conflict.value.detail == "resume_changed"
     assert connection.updated is False
+
+
+# ===================== B2 对侧抽查补测：begin/refund/守卫 =====================
+
+
+class _ParseConn:
+    """begin_resume_parse 假连接：可配置会话行与上传行，记录执行的 SQL。"""
+
+    def __init__(self, *, row, upload_row):
+        self.row = row
+        self.upload_row = upload_row
+        self.calls = []
+
+    def transaction(self):
+        return _Transaction()
+
+    async def fetchrow(self, sql, *args):
+        self.calls.append(("fetchrow", sql, args))
+        if "FOR UPDATE" in sql:
+            return self.row
+        if "FROM resume_uploads" in sql:
+            return self.upload_row
+        raise AssertionError(sql)
+
+    async def execute(self, sql, *args):
+        self.calls.append(("execute", sql, args))
+        return "UPDATE 1"
+
+
+def _parse_row(**overrides):
+    row = {
+        "status": "resume_uploaded",
+        "resume_upload_generation": 3,
+        "resume_parse_count": 0,
+        "owner_user_id": "user-1",
+    }
+    row.update(overrides)
+    return row
+
+
+def _upload_row(**overrides):
+    row = {
+        "filename": "resume.pdf",
+        "suffix": ".pdf",
+        "content": b"bytes",
+        "extracted_text": "text",
+        "pages": 1,
+        "chars": 4,
+        "ocr_suggested": False,
+    }
+    row.update(overrides)
+    return row
+
+
+async def _begin(monkeypatch, conn, *, generation=3, max_parses=3):
+    from app.db import state_store
+
+    async def fake_get_pool():
+        return _Pool(conn)
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+    return await state_store.begin_resume_parse(
+        session_id="session-1", generation=generation, max_parses=max_parses
+    )
+
+
+@pytest.mark.asyncio
+async def test_begin_parse_classification_priority_limit_beats_everything(
+    monkeypatch,
+) -> None:
+    """分类优先级写死：额度满时即使 generation 也不匹配，仍报 parse_limit。"""
+    from app.db.state_store import ResumeLifecycleConflict
+
+    conn = _ParseConn(
+        row=_parse_row(resume_parse_count=3, resume_upload_generation=99),
+        upload_row=_upload_row(),
+    )
+    with pytest.raises(ResumeLifecycleConflict) as excinfo:
+        await _begin(monkeypatch, conn, generation=3)
+    assert excinfo.value.detail == "resume_parse_limit"
+    # 分类失败绝不扣费
+    assert not [c for c in conn.calls if c[0] == "execute"]
+
+
+@pytest.mark.asyncio
+async def test_begin_parse_generation_mismatch_beats_status(monkeypatch) -> None:
+    from app.db.state_store import ResumeLifecycleConflict
+
+    conn = _ParseConn(
+        row=_parse_row(resume_upload_generation=4, status="resume_queued"),
+        upload_row=_upload_row(),
+    )
+    with pytest.raises(ResumeLifecycleConflict) as excinfo:
+        await _begin(monkeypatch, conn, generation=3)
+    assert excinfo.value.detail == "resume_changed"
+
+
+@pytest.mark.asyncio
+async def test_begin_parse_double_click_second_sees_processing(monkeypatch) -> None:
+    """双击单扣：首个请求置 queued 后，第二个请求命中 resume_processing。"""
+    from app.db.state_store import ResumeLifecycleConflict
+
+    conn = _ParseConn(row=_parse_row(), upload_row=_upload_row())
+    started = await _begin(monkeypatch, conn)
+    assert started["extracted_text"] == "text"
+    assert started["content"] == b"bytes"
+    update_sqls = [c[1] for c in conn.calls if c[0] == "execute"]
+    assert any("resume_parse_count = resume_parse_count + 1" in sql for sql in update_sqls)
+
+    conn2 = _ParseConn(
+        row=_parse_row(status="resume_queued", resume_parse_count=1),
+        upload_row=_upload_row(),
+    )
+    with pytest.raises(ResumeLifecycleConflict) as excinfo:
+        await _begin(monkeypatch, conn2)
+    assert excinfo.value.detail == "resume_processing"
+
+
+@pytest.mark.asyncio
+async def test_begin_parse_other_status_reports_unparsed(monkeypatch) -> None:
+    from app.db.state_store import ResumeLifecycleConflict
+
+    conn = _ParseConn(row=_parse_row(status="resume_ready"), upload_row=_upload_row())
+    with pytest.raises(ResumeLifecycleConflict) as excinfo:
+        await _begin(monkeypatch, conn)
+    assert excinfo.value.detail == "resume_unparsed"
+
+
+@pytest.mark.asyncio
+async def test_begin_parse_missing_upload_row_rolls_back_as_changed(
+    monkeypatch,
+) -> None:
+    """事务内取不到字节（行缺失或 content 已清）→ resume_changed，整体回滚。"""
+    from app.db.state_store import ResumeLifecycleConflict
+
+    for upload_row in (None, _upload_row(content=None)):
+        conn = _ParseConn(row=_parse_row(), upload_row=upload_row)
+        with pytest.raises(ResumeLifecycleConflict) as excinfo:
+            await _begin(monkeypatch, conn)
+        assert excinfo.value.detail == "resume_changed"
+
+
+@pytest.mark.asyncio
+async def test_refund_parse_count_is_generationless_with_floor(monkeypatch) -> None:
+    """返还语句：无 generation 谓词（重传竞态下也确定返还）+ GREATEST 下限。"""
+    from app.db import state_store
+
+    calls = []
+
+    class Conn:
+        async def execute(self, sql, *args):
+            calls.append((sql, args))
+            return "UPDATE 1"
+
+    async def fake_get_pool():
+        return _Pool(Conn())
+
+    monkeypatch.setattr(state_store, "get_pool", fake_get_pool)
+    await state_store.refund_parse_count(session_id="session-1")
+
+    sql = calls[0][0]
+    assert "GREATEST(resume_parse_count - 1, 0)" in sql
+    assert "resume_upload_generation" not in sql
+    assert calls[0][1] == ("session-1",)
+
+
+@pytest.mark.parametrize("flag", [True, False])
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [("resume_uploaded", "resume_unparsed"), ("resume_queued", "resume_processing")],
+)
+def test_consult_and_finalize_block_new_states_regardless_of_flag(
+    monkeypatch, flag, status, detail
+) -> None:
+    """B2 无条件生命周期保护：新状态在任一 flag 配置下都不得进 LLM 路径。"""
+    from app.api.v1 import sessions
+    from app.db.state_store import ConsultContext
+    from app.state.schema import SharedState
+
+    async def context(_session_id):
+        return ConsultContext(
+            state=SharedState(session_id="session-1", user_id="user-1"),
+            status=status,
+            resume_version=1,
+            confirmed_resume_version=1,
+            resume_upload_generation=2,
+        )
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("blocked lifecycle state must not reach the LLM")
+
+    monkeypatch.setattr(sessions.settings, "resume_clarify_enabled", flag)
+    monkeypatch.setattr(sessions, "load_consult_context", context)
+    monkeypatch.setattr(sessions, "run_consult_round", forbidden, raising=False)
+    monkeypatch.setattr(sessions, "build_brief_draft", forbidden, raising=False)
+
+    with TestClient(_api_app()) as client:
+        consult = client.post(
+            "/api/v1/sessions/session-1/consult",
+            json={"mode": "targeted", "message": "继续", "expected_round": 0},
+        )
+        finalize = client.post("/api/v1/sessions/session-1/consult/finalize")
+
+    assert consult.status_code == 409
+    assert consult.json()["detail"] == detail
+    assert finalize.status_code == 409
+    assert finalize.json()["detail"] == detail

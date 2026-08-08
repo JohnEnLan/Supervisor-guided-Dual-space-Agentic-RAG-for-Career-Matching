@@ -490,13 +490,17 @@ async def confirm_resume(
 # B2 MutationOutcome 协议：mutator 可在行锁内基于 locked 事实动态决定本次
 # 落库是否写 status 列。status_override 三态：KEEP_STATUS（默认，沿用调用方
 # 传入的 status）/ None（本次不写 status 列，只落 state）/ str（覆写）。
-KEEP_STATUS: Any = object()
+class _KeepStatus:
+    """哨兵类型：与 None（合法覆写值）可区分的"沿用调用方 status"。"""
+
+
+KEEP_STATUS = _KeepStatus()
 
 
 @dataclass(frozen=True)
 class MutationOutcome:
     result: Any
-    status_override: Any = KEEP_STATUS
+    status_override: str | None | _KeepStatus = KEEP_STATUS
 
 
 async def mutate_state_atomically(

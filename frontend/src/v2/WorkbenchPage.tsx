@@ -562,38 +562,46 @@ export function WorkbenchPage() {
     return true;
   };
 
+  // 在途 mutation 的回调必须校验"发起时的会话"：A 会话请求完成于切到 B 之后
+  // 时，不得清 B 的 pendingFile 或刷新 B 的查询（对侧抽查 M6）。
   const upload = useMutation({
-    mutationFn: (file: File) => api.uploadResume(sessionId, file),
-    onSuccess: () => {
+    mutationFn: ({ file, forSession }: { file: File; forSession: string }) =>
+      api.uploadResume(forSession, file),
+    onSuccess: (_data, variables) => {
+      if (variables.forSession !== sessionId) return;
       // 上传成功＝进入待确认解析态；清旧恢复提示，刷新待解析卡与 preview
       // （preview 将返回 409 resume_unparsed，由确认卡驱动后续）。
       setPendingFile(null);
       setResumeRecovery(null);
-      void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
-      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
+    },
+  });
+  const newSession = useMutation({
+    mutationFn: () => api.createSession({}),
+    onSuccess: (session) => {
+      void queryClient.invalidateQueries({ queryKey: ["me-sessions"] });
+      navigate(`/app/sessions/${session.session_id}`);
     },
   });
   const parseResume = useMutation({
-    mutationFn: () => {
-      const generation = pendingUpload.data?.generation;
-      if (generation === undefined) {
-        throw new Error("no pending resume upload");
-      }
+    mutationFn: ({ generation, forSession }: { generation: number; forSession: string }) =>
       // 必须回传预览所得 generation：旧标签页拿旧代确认 → 后端 409 resume_changed
-      return api.parseResume(sessionId, { generation });
+      api.parseResume(forSession, { generation }),
+    onSuccess: (_data, variables) => {
+      if (variables.forSession !== sessionId) return;
+      void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
-      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
-    },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (variables.forSession !== sessionId) return;
       if (
         error instanceof ApiError &&
         error.status === 409 &&
         (error.message === "resume_changed" || error.message === "resume_unparsed")
       ) {
-        void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
-        void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+        void queryClient.invalidateQueries({ queryKey: ["resume-upload", variables.forSession] });
+        void queryClient.invalidateQueries({ queryKey: ["resume-preview", variables.forSession] });
       }
     },
   });
@@ -741,10 +749,16 @@ export function WorkbenchPage() {
       ? preview.error.message
       : null;
   const uploadPending = pendingUpload.isSuccess;
+  // 刷新后限额态直接由 GET 数据推导（不等一次必败请求）；409 作即时信号
   const parseLimitReached =
-    parseResume.error instanceof ApiError &&
-    parseResume.error.status === 409 &&
-    parseResume.error.message === "resume_parse_limit";
+    (pendingUpload.data !== undefined &&
+      pendingUpload.data.parses_used >= pendingUpload.data.parses_limit) ||
+    (parseResume.error instanceof ApiError &&
+      parseResume.error.status === 409 &&
+      parseResume.error.message === "resume_parse_limit");
+  const pendingUploadLoadError =
+    pendingUpload.isError &&
+    !(pendingUpload.error instanceof ApiError && pendingUpload.error.status === 404);
   const resumeProcessing =
     parseResume.isPending || previewDetail === "resume_processing";
   const resumeError =
@@ -899,17 +913,18 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
 
-        {pendingFile && !uploadPending ? (
+        {pendingFile ? (
           <Bubble persona="user" tone="card">
             <p>
               {pendingFile.name}（{Math.max(1, Math.round(pendingFile.size / 1024))} KB）
+              {uploadPending ? "——确认后将替换当前待解析的上传" : null}
             </p>
             <div className="v2-pending-actions">
               <button
                 type="button"
                 className="v2-btn primary"
                 disabled={upload.isPending}
-                onClick={() => upload.mutate(pendingFile)}
+                onClick={() => upload.mutate({ file: pendingFile, forSession: sessionId })}
               >
                 {upload.isPending ? "上传中…" : "确认上传"}
               </button>
@@ -931,7 +946,7 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
 
-        {uploadPending && !resumeProcessing ? (
+        {uploadPending && !resumeProcessing && !pendingFile ? (
           <Bubble persona="intent_consultant" tone="card">
             <p>
               收到「{pendingUpload.data?.filename}」：共 {pendingUpload.data?.pages} 页、
@@ -952,20 +967,58 @@ export function WorkbenchPage() {
             <button
               type="button"
               className="v2-btn primary"
-              disabled={parseResume.isPending || parseLimitReached}
-              onClick={() => parseResume.mutate()}
+              disabled={
+                parseResume.isPending ||
+                parseLimitReached ||
+                pendingUpload.data === undefined
+              }
+              onClick={() => {
+                const generation = pendingUpload.data?.generation;
+                if (generation === undefined) return;
+                parseResume.mutate({ generation, forSession: sessionId });
+              }}
             >
               {parseResume.isPending ? "已提交…" : "确认解析"}
             </button>
             {parseLimitReached ? (
-              <p className="v2-error">
-                本会话解析次数已用完（{pendingUpload.data?.parses_limit ?? 3}/
-                {pendingUpload.data?.parses_limit ?? 3}）。请在左侧「开始新的咨询」
-                新建会话继续；会话额度也用完时请联系管理员重置。
-              </p>
+              <>
+                <p className="v2-error">
+                  本会话解析次数已用完（{pendingUpload.data?.parses_limit ?? 3}/
+                  {pendingUpload.data?.parses_limit ?? 3}）。会话额度也用完时请联系管理员重置。
+                </p>
+                <button
+                  type="button"
+                  className="v2-btn ghost"
+                  disabled={newSession.isPending}
+                  onClick={() => newSession.mutate()}
+                >
+                  {newSession.isPending ? "创建中…" : "新建会话继续"}
+                </button>
+                {newSession.isError ? (
+                  <p className="v2-error">
+                    {newSession.error instanceof ApiError && newSession.error.status === 402
+                      ? "会话额度已用完，请联系管理员。"
+                      : "新建会话失败，请重试。"}
+                  </p>
+                ) : null}
+              </>
             ) : parseResume.isError ? (
               <p className="v2-error">确认解析失败，请重试。</p>
             ) : null}
+          </Bubble>
+        ) : null}
+
+        {pendingUploadLoadError && !pendingFile ? (
+          <Bubble persona="intent_consultant" tone="card">
+            <p className="v2-error">待解析上传状态加载失败，请重试</p>
+            <button
+              type="button"
+              className="v2-btn ghost"
+              disabled={pendingUpload.isFetching}
+              onClick={() => void pendingUpload.refetch()}
+            >
+              {pendingUpload.isFetching ? "重试中…" : "重试加载"}
+            </button>
           </Bubble>
         ) : null}
 
@@ -1191,7 +1244,11 @@ export function WorkbenchPage() {
             探索方向
           </button>
         </div>
-        <label className="v2-btn ghost v2-attach" aria-label="上传简历">
+        <label
+          className="v2-btn ghost v2-attach"
+          aria-label="上传简历"
+          title="支持 PDF/DOCX/TXT；图片识别即将开放"
+        >
           <Paperclip size={17} />
           <input
             type="file"

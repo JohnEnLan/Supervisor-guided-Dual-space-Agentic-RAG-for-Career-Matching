@@ -337,7 +337,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResumeUploadRejectedResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ResumeUploadRejectedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Upload Resume Api V1 Sessions  Session Id  Resume Post"
                 }
               }
             },
