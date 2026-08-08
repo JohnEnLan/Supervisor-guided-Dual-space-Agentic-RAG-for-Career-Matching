@@ -420,6 +420,61 @@ class RunExplainResponse(PublicDTO):
     recovery_events: list[RecoveryEventResponse] = Field(default_factory=list)
 
 
+class AdminTokensByDayRow(PublicDTO):
+    date: str
+    total_tokens: int
+
+
+class AdminTokensByModelRow(PublicDTO):
+    model: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int
+
+
+class AdminOverviewResponse(PublicDTO):
+    users_total: int
+    logins_today: int
+    logins_7d: int
+    logins_30d: int
+    sessions_total: int
+    consult_turns_total: int
+    runs_total: int
+    tokens_by_day: list[AdminTokensByDayRow]
+    tokens_by_model: list[AdminTokensByModelRow]
+
+
+class AdminUserRow(PublicDTO):
+    user_id: str
+    email: str | None
+    created_at: datetime
+    last_login_at: datetime | None
+    session_count: int
+    resume_name: str | None
+    resume_phone: str | None
+    resume_school: str | None
+    resume_degree: str | None
+
+
+class AdminUsersPageResponse(PublicDTO):
+    items: list[AdminUserRow]
+    page: int
+    page_size: int = 20
+    has_more: bool
+
+
+class AdminUserResumeResponse(PublicDTO):
+    user_id: str
+    session_id: str | None
+    resume_state: dict[str, Any] | None
+
+
+class AdminResetParseCountResponse(PublicDTO):
+    session_id: str
+    resume_parse_count: int
+    status: str
+
+
 class StageLatencyResponse(PublicDTO):
     stage: str
     p50_ms: int | None = None

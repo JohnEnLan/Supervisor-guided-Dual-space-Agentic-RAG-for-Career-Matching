@@ -30,12 +30,16 @@ def _dependency_calls(dependant) -> set[object]:
     return calls
 
 
-def _api_routes(routes):
+def _api_routes(routes, prefix=""):
     for route in routes:
         if isinstance(route, APIRoute):
-            yield route
+            yield route, f"{prefix}{route.path}"
         elif hasattr(route, "original_router"):
-            yield from _api_routes(route.original_router.routes)
+            nested_prefix = f"{prefix}{route.include_context.prefix}"
+            yield from _api_routes(
+                route.original_router.routes,
+                nested_prefix,
+            )
 
 
 def test_every_v1_resource_id_route_has_the_matching_ownership_dependency() -> None:
@@ -45,7 +49,9 @@ def test_every_v1_resource_id_route_has_the_matching_ownership_dependency() -> N
     app = FastAPI()
     app.include_router(router)
     checked = []
-    for route in _api_routes(app.routes):
+    for route, path in _api_routes(app.routes):
+        if path.startswith("/api/v1/admin/"):
+            continue
         path_parameters = set(route.param_convertors)
         expected = None
         if "session_id" in path_parameters:
@@ -54,12 +60,29 @@ def test_every_v1_resource_id_route_has_the_matching_ownership_dependency() -> N
             expected = require_owned_run
         if expected is None:
             continue
-        checked.append(route.path)
-        assert expected in _dependency_calls(route.dependant), route.path
+        checked.append(path)
+        assert expected in _dependency_calls(route.dependant), path
 
     # B2 新增 GET /resume-upload 与 POST /resume/parse（13→15）；
     # B3 新增 GET /resume-progress（15→16）
+    # B5 admin paths are checked separately below and do not change this 16.
     assert len(checked) == 16
+
+
+def test_every_admin_route_has_admin_dependency() -> None:
+    from app.api.auth.deps import require_admin
+    from app.api.v1.router import router
+
+    app = FastAPI()
+    app.include_router(router)
+    checked = []
+    for route, path in _api_routes(app.routes):
+        if not path.startswith("/api/v1/admin/"):
+            continue
+        checked.append(path)
+        assert require_admin in _dependency_calls(route.dependant), path
+
+    assert len(checked) == 5
 
 
 class _Acquire:

@@ -33,6 +33,11 @@ PUBLIC_PATHS = {
     "/api/v1/runs/{run_id}/reaction",
     "/api/v1/monitoring/overview",
     "/api/v1/monitoring/runs",
+    "/api/v1/admin/overview",
+    "/api/v1/admin/users",
+    "/api/v1/admin/users/{user_id}/resume",
+    "/api/v1/admin/runs/{run_id}/explain",
+    "/api/v1/admin/sessions/{session_id}/reset-parse-count",
 }
 
 

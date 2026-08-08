@@ -1,6 +1,321 @@
 {
   "components": {
     "schemas": {
+      "AdminOverviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "consult_turns_total": {
+            "title": "Consult Turns Total",
+            "type": "integer"
+          },
+          "logins_30d": {
+            "title": "Logins 30D",
+            "type": "integer"
+          },
+          "logins_7d": {
+            "title": "Logins 7D",
+            "type": "integer"
+          },
+          "logins_today": {
+            "title": "Logins Today",
+            "type": "integer"
+          },
+          "runs_total": {
+            "title": "Runs Total",
+            "type": "integer"
+          },
+          "sessions_total": {
+            "title": "Sessions Total",
+            "type": "integer"
+          },
+          "tokens_by_day": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTokensByDayRow"
+            },
+            "title": "Tokens By Day",
+            "type": "array"
+          },
+          "tokens_by_model": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTokensByModelRow"
+            },
+            "title": "Tokens By Model",
+            "type": "array"
+          },
+          "users_total": {
+            "title": "Users Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "users_total",
+          "logins_today",
+          "logins_7d",
+          "logins_30d",
+          "sessions_total",
+          "consult_turns_total",
+          "runs_total",
+          "tokens_by_day",
+          "tokens_by_model"
+        ],
+        "title": "AdminOverviewResponse",
+        "type": "object"
+      },
+      "AdminResetParseCountResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "resume_parse_count": {
+            "title": "Resume Parse Count",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "resume_parse_count",
+          "status"
+        ],
+        "title": "AdminResetParseCountResponse",
+        "type": "object"
+      },
+      "AdminTokensByDayRow": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "total_tokens"
+        ],
+        "title": "AdminTokensByDayRow",
+        "type": "object"
+      },
+      "AdminTokensByModelRow": {
+        "additionalProperties": false,
+        "properties": {
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "title": "AdminTokensByModelRow",
+        "type": "object"
+      },
+      "AdminUserResumeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "resume_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume State"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "session_id",
+          "resume_state"
+        ],
+        "title": "AdminUserResumeResponse",
+        "type": "object"
+      },
+      "AdminUserRow": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "resume_degree": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Degree"
+          },
+          "resume_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Name"
+          },
+          "resume_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Phone"
+          },
+          "resume_school": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume School"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "created_at",
+          "last_login_at",
+          "session_count",
+          "resume_name",
+          "resume_phone",
+          "resume_school",
+          "resume_degree"
+        ],
+        "title": "AdminUserRow",
+        "type": "object"
+      },
+      "AdminUsersPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "default": 20,
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "has_more"
+        ],
+        "title": "AdminUsersPageResponse",
+        "type": "object"
+      },
       "Body_upload_resume_api_v1_sessions__session_id__resume_post": {
         "properties": {
           "file": {
@@ -2547,6 +2862,182 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/overview": {
+      "get": {
+        "operationId": "admin_overview_api_v1_admin_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Overview"
+      }
+    },
+    "/api/v1/admin/runs/{run_id}/explain": {
+      "get": {
+        "operationId": "admin_run_explain_api_v1_admin_runs__run_id__explain_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunExplainResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Run Explain"
+      }
+    },
+    "/api/v1/admin/sessions/{session_id}/reset-parse-count": {
+      "post": {
+        "operationId": "admin_reset_parse_count_api_v1_admin_sessions__session_id__reset_parse_count_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResetParseCountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Reset Parse Count"
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "operationId": "admin_users_api_v1_admin_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUsersPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Users"
+      }
+    },
+    "/api/v1/admin/users/{user_id}/resume": {
+      "get": {
+        "operationId": "admin_user_resume_api_v1_admin_users__user_id__resume_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResumeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin User Resume"
+      }
+    },
     "/api/v1/auth/logout": {
       "post": {
         "operationId": "logout_api_v1_auth_logout_post",
