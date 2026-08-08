@@ -50,7 +50,12 @@ async function installMobileApi(page: Page) {
 test("375px journey keeps navigation, consultation, and results usable", async ({ page }) => {
   await installMobileApi(page);
 
-  await page.goto("/");
+  // 本剧本聚焦移动端工作台可用性：预置已读介绍标记并直达登录页
+  // （首访 /welcome→/→/login 链路由 full-flow 剧本覆盖）
+  await page.addInitScript(() => {
+    localStorage.setItem("career_rag_intro_seen_v1", "1");
+  });
+  await page.goto("/login");
   await page.getByLabel("邮箱地址").fill("student@example.com");
   await page.getByRole("button", { name: "获取验证码" }).click();
   await page.getByLabel("验证码").fill("123456");

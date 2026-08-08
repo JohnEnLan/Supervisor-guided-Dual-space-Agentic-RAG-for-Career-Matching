@@ -204,7 +204,8 @@
 .v2-resume-evidence li { padding: 8px 10px; border-radius: 8px; background: var(--v2-surface); }
 .v2-resume-evidence p { margin: 3px 0 0; }
 .v2-resume-empty { color: var(--v2-muted); }
-.v2-composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 14px clamp(16px, 4vw, 48px) 18px; border-top: 1px solid var(--v2-line); background: var(--v2-surface); }
+/* B1 R8：composer 行内元素垂直居中（原 end 对齐在单行态下按钮下坠） */
+.v2-composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 14px clamp(16px, 4vw, 48px) 18px; border-top: 1px solid var(--v2-line); background: var(--v2-surface); }
 .v2-consult-slots { grid-column: 1 / -1; display: grid; gap: 8px; }
 .v2-slot-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .v2-slot-chip { min-height: 30px; padding: 4px 10px; border: 1px solid var(--v2-line); border-radius: 999px; background: var(--v2-canvas); color: var(--v2-muted); cursor: pointer; font: 600 0.76rem/1.3 var(--v2-sans); }

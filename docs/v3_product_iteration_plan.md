@@ -219,11 +219,15 @@ awaiting_resume → resume_uploaded → resume_queued → resume_ready / resume_
 ## 2. B1 前端体验包（纯前端）
 
 1. **R7 首访流**：`/` 在 `!hasSeenIntro()` 时 `<Navigate to="/welcome">`
-   （CSR 同步判断）。/welcome 顶部「跳过介绍」与底部 CTA 均执行
-   `markIntroSeen()` 后**回读 `hasSeenIntro()`**——true → `navigate("/")`；
-   false（localStorage 不可写）→ `navigate("/login")` 直达；introSeen.ts
-   增模块级内存旗标兜底。首页「进入应用」→ 已登录 `/app` 否则 `/login`；
-   「了解它如何工作」入口保留。更新 HomePage/WelcomePage/router 测试。
+   （CSR 同步判断）。/welcome 顶部「跳过介绍」与底部 CTA 均
+   `markIntroSeen()` + `navigate("/", {replace})`（replace 防返回键重看）。
+   **勘误（B1 三方审查）**：introSeen 的模块级内存旗标使 markIntroSeen 后
+   hasSeenIntro 恒真——写失败场景由内存旗标保证本会话不成环，原"回读
+   失败 → /login"分支不可达、予以移除。**已登录例外（B1 审查裁定）**：
+   已登录且无标记的存量用户在 /welcome 自动补写标记后直达 /app（闪屏至多
+   一次，此后首页可达）；已登录且有标记者显式访问 /welcome（首页「了解它
+   如何工作」）正常观看。首页「进入应用」→ 已登录 `/app` 否则 `/login`。
+   更新 HomePage/WelcomePage/router 测试与两条 e2e 剧本入口。
 2. **R5 逐条出现**：`useStaggeredReveal` hook——仅对**本次轮询新增**消息
    按序 `animation-delay = i*450ms`（历史消息不重播）；PM 与小意两条欢迎语
    先 PM、600ms 后小意；`prefers-reduced-motion` 全部即时。

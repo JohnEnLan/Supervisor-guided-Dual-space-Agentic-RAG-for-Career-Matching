@@ -90,25 +90,39 @@ export function statusInterval(
   return data.retry_after_ms;
 }
 
-// B1 R5：到场编排——只对"本次轮询新增"的消息按批内顺序附加动画延迟，
-// 历史消息（首帧基线）不重播。reduced-motion 由 theme.css 全局禁动画兜底
-// （animation 被禁后 animation-delay 无效，内容即时可见）。
+// B1 R5：到场编排——只对"首批数据之后新增"的消息按批内顺序附加动画延迟。
+// 基线在该 resetKey 下 keys **首次非空**时建立（评审 M1：resetKey 变化帧
+// 几乎总是无数据帧，若在该帧建基线，异步到达的全量历史会被误判为新增而
+// 重播）。批内延迟封顶 3 档（1350ms < 1500ms 轮询间隔，后批不会先于前批
+// 可见）。reduced-motion 由 theme.css 全局禁动画兜底。
+const STAGGER_STEP_MS = 450;
+const STAGGER_MAX_STEPS = 3;
+
 export function useStaggeredReveal(
   keys: string[],
   resetKey: string,
 ): (key: string) => React.CSSProperties | undefined {
   const primedFor = useRef<string | null>(null);
-  const seen = useRef<Set<string>>(new Set());
+  const seen = useRef<Set<string> | null>(null);
   const delays = useRef<Map<string, number>>(new Map());
   if (primedFor.current !== resetKey) {
     primedFor.current = resetKey;
-    seen.current = new Set(keys);
+    seen.current = null; // 尚未见到首批数据
     delays.current = new Map();
   }
-  const fresh = keys.filter((key) => !seen.current.has(key));
+  if (seen.current === null) {
+    if (keys.length === 0) {
+      return () => undefined;
+    }
+    // 首批非空 keys＝历史基线：整批即时到场，不编排
+    seen.current = new Set(keys);
+    return () => undefined;
+  }
+  const tracked = seen.current;
+  const fresh = keys.filter((key) => !tracked.has(key));
   fresh.forEach((key, index) => {
-    seen.current.add(key);
-    delays.current.set(key, index * 450);
+    tracked.add(key);
+    delays.current.set(key, Math.min(index, STAGGER_MAX_STEPS) * STAGGER_STEP_MS);
   });
   return (key) => {
     const delay = delays.current.get(key);

@@ -12,6 +12,7 @@ import {
   conversationInterval,
   resumePreviewInterval,
   statusInterval,
+  useStaggeredReveal,
 } from "./WorkbenchPage";
 import { WorkbenchPage } from "./WorkbenchPage";
 import workbenchSource from "./WorkbenchPage.tsx?raw";
@@ -1581,3 +1582,53 @@ describe("resume lifecycle regressions (audit round 3)", () => {
   });
 });
 
+
+describe("useStaggeredReveal (B1 R5)", () => {
+  function HookProbe({ keys, resetKey }: { keys: string[]; resetKey: string }) {
+    const style = useStaggeredReveal(keys, resetKey);
+    return (
+      <ul>
+        {keys.map((key) => (
+          <li key={key} data-testid={key} style={style(key)} />
+        ))}
+      </ul>
+    );
+  }
+
+  function delayOf(key: string): string {
+    return screen.getByTestId(key).style.animationDelay;
+  }
+
+  it("treats the first non-empty batch as history baseline (no replay after async load)", () => {
+    // 冷加载时序：resetKey 变化帧无数据 → 首批全量历史异步到达（评审 M1）
+    const { rerender } = render(<HookProbe keys={[]} resetKey="s1:r1" />);
+    rerender(<HookProbe keys={["a", "b", "c"]} resetKey="s1:r1" />);
+    for (const key of ["a", "b", "c"]) expect(delayOf(key)).toBe("");
+  });
+
+  it("staggers only messages added after the baseline, capped at 3 steps", () => {
+    const { rerender } = render(<HookProbe keys={["a"]} resetKey="s1:r1" />);
+    rerender(
+      <HookProbe keys={["a", "b", "c", "d", "e", "f", "g"]} resetKey="s1:r1" />,
+    );
+    expect(delayOf("a")).toBe("");
+    expect(delayOf("b")).toBe("");
+    expect(delayOf("c")).toBe("450ms");
+    expect(delayOf("d")).toBe("900ms");
+    expect(delayOf("e")).toBe("1350ms");
+    // 封顶：1350ms < 1500ms 轮询间隔，后批不会先于前批可见
+    expect(delayOf("f")).toBe("1350ms");
+    expect(delayOf("g")).toBe("1350ms");
+  });
+
+  it("does not replay on re-render and resets baseline on resetKey change", () => {
+    const { rerender } = render(<HookProbe keys={["a"]} resetKey="s1:r1" />);
+    rerender(<HookProbe keys={["a", "b"]} resetKey="s1:r1" />);
+    expect(delayOf("b")).toBe("");
+    rerender(<HookProbe keys={["a", "b"]} resetKey="s1:r1" />);
+    expect(delayOf("b")).toBe("");
+    // 切 run：首个非空批次成为新基线，不编排
+    rerender(<HookProbe keys={["x", "y"]} resetKey="s1:r2" />);
+    for (const key of ["x", "y"]) expect(delayOf(key)).toBe("");
+  });
+});

@@ -34,10 +34,15 @@ export function WelcomePage() {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 已登录用户不看介绍，直接进工作台
+  // B1 评审 M2：已登录但从未拿到"已读介绍"标记的用户（介绍页上线前的
+  // 存量用户）——补写标记后直达工作台，闪屏至多发生一次、首页从此可达。
+  // 已登录且已有标记者若显式访问（首页「了解它如何工作」）则正常观看。
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   useEffect(() => {
-    if (me.data) navigate("/app", { replace: true });
+    if (me.data && !hasSeenIntro()) {
+      markIntroSeen();
+      navigate("/app", { replace: true });
+    }
   }, [me.data, navigate]);
 
   // 滚动渐显；环境不支持 IntersectionObserver 时全部直接可见
@@ -63,11 +68,13 @@ export function WelcomePage() {
     return () => observer.disconnect();
   }, []);
 
-  // B1 R7：介绍页看完/跳过 → 首页（P1）。写后回读：localStorage 写失败的
-  // 浏览器直达 /login，绝不把用户困在 `/`↔`/welcome` 循环里。
+  // B1 R7：介绍页看完/跳过 → 首页（P1，replace 防返回键重看介绍）。
+  // localStorage 写失败由 introSeen 的内存旗标兜底（本次会话内 HomeGate
+  // 恒放行），不存在被困路径——原方案的 /login 回退分支因此不可达，已按
+  // 评审裁定移除（方案 §2.1 已同步勘误）。
   const exitIntro = () => {
     markIntroSeen();
-    navigate(hasSeenIntro() ? "/" : "/login");
+    navigate("/", { replace: true });
   };
 
   return (

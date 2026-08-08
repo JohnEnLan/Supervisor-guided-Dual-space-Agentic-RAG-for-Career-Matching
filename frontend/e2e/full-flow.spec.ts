@@ -178,8 +178,13 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   const state = createFlowState();
   await installV2Api(page, state);
 
+  // B1 R7：真实首访路径 —— / 重定向 /welcome，跳过后落首页，再进登录
   await page.goto("/");
+  await expect(page).toHaveURL(/\/welcome$/);
+  await page.getByRole("button", { name: "跳过介绍 →" }).click();
   await expect(page.getByRole("heading", { name: /交给一支为你服务的团队/ })).toBeVisible();
+  await page.getByRole("button", { name: "进入应用" }).first().click();
+  await expect(page).toHaveURL(/\/login$/);
   await page.getByLabel("邮箱地址").fill("student@example.com");
   await page.getByRole("button", { name: "获取验证码" }).click();
   await page.getByLabel("验证码").fill("123456");
