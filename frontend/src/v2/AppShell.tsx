@@ -44,13 +44,13 @@ export function AppShell() {
     onUnauthorized(() => {
       clearUserScopedStorage(me.data?.user_id);
       queryClient.clear();
-      navigate("/", { replace: true });
+      navigate("/login", { replace: true });
     });
     return () => onUnauthorized(null);
   }, [me.data?.user_id, navigate, queryClient]);
 
   useEffect(() => {
-    if (me.isError) navigate("/", { replace: true });
+    if (me.isError) navigate("/login", { replace: true });
   }, [me.isError, navigate]);
 
   // 与 WorkbenchPage FocusModal 等价：打开即入焦、Tab 循环、Escape 关闭、关闭后还焦。
@@ -127,7 +127,7 @@ export function AppShell() {
     onSettled: () => {
       clearUserScopedStorage(me.data?.user_id);
       queryClient.clear();
-      navigate("/", { replace: true });
+      navigate("/login", { replace: true });
     },
   });
 

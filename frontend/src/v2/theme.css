@@ -51,6 +51,8 @@
 .v2-error { color: #a43b3b; font-size: 0.86rem; margin: 8px 0 0; }
 .v2-notice { color: var(--v2-ok); font-size: 0.86rem; margin: 8px 0 0; }
 .v2-footnote { text-align: center; color: var(--v2-muted); font-size: 0.8rem; padding: 18px; }
+.v2-back-home { color: var(--v2-muted); text-decoration: none; font-size: 0.9rem; }
+.v2-back-home:hover { color: var(--v2-ink); }
 
 /* App shell */
 .v2-shell { min-height: 100vh; display: grid; grid-template-columns: 268px minmax(0, 1fr); background: var(--v2-canvas); color: var(--v2-ink); font-family: var(--v2-sans); }

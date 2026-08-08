@@ -3,8 +3,10 @@ import { Navigate, createBrowserRouter, useOutletContext } from "react-router-do
 import { EvaluationRunPage } from "../features/evaluation/EvaluationRunPage";
 import { MonitoringPage } from "../features/monitoring/MonitoringPage";
 import { AppShell, type AppShellOutletContext } from "../v2/AppShell";
+import { HomePage } from "../v2/HomePage";
 import { LandingPage } from "../v2/LandingPage";
 import { ProfilePage } from "../v2/ProfilePage";
+import { WelcomePage } from "../v2/WelcomePage";
 import { WorkbenchPage } from "../v2/WorkbenchPage";
 import { RouteError } from "./App";
 
@@ -34,6 +36,16 @@ function EmptyWorkbench() {
 export const router = createBrowserRouter([
   {
     path: "/",
+    element: <HomePage />,
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/welcome",
+    element: <WelcomePage />,
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/login",
     element: <LandingPage />,
     errorElement: <RouteError />,
   },

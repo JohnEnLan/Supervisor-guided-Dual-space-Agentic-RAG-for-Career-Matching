@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import { api } from "../api/queries";
@@ -66,7 +66,9 @@ export function LandingPage() {
     <div className="v2-landing">
       <nav className="v2-topnav">
         <span className="v2-wordmark">Career RAG</span>
-        <span className="v2-footnote">毕业设计演示系统</span>
+        <Link className="v2-back-home" to="/">
+          ← 返回首页
+        </Link>
       </nav>
       <main className="v2-hero">
         <section>
