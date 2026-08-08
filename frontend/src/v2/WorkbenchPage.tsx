@@ -47,9 +47,15 @@ export function resumePreviewInterval(error: unknown): number | false {
   return resumeRecoveryState(error) === "processing" ? 2500 : false;
 }
 
-function uploadErrorText(error: unknown): string {
+function supportedFormatsLabel(imageUploadEnabled: boolean): string {
+  return imageUploadEnabled ? "PDF/DOCX/TXT/图片" : "PDF/DOCX/TXT";
+}
+
+function uploadErrorText(error: unknown, imageUploadEnabled: boolean): string {
   if (error instanceof ApiError) {
-    if (error.status === 415) return "暂不支持该文件格式（当前支持 PDF/DOCX/TXT）。";
+    if (error.status === 415) {
+      return `暂不支持该文件格式（当前支持 ${supportedFormatsLabel(imageUploadEnabled)}）。`;
+    }
     if (error.status === 422) return "文件无法解析，请确认未加密、未损坏后重试。";
     if (error.status === 413) return "文件超过 10MB 上限，请压缩后重试。";
   }
@@ -618,6 +624,8 @@ export function WorkbenchPage() {
   const runId = searchParams.get("run");
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
+  const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities });
+  const imageUploadEnabled = capabilities.data?.resume_image_upload_enabled === true;
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<"targeted" | "explore">("targeted");
   const [briefDraft, setBriefDraft] = useState<ConsultFinalize | null>(null);
@@ -1183,7 +1191,8 @@ export function WorkbenchPage() {
         <Bubble persona="pm">
           <p>
             欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，
-            我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（PDF/DOCX/TXT）。
+            我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（
+            {supportedFormatsLabel(imageUploadEnabled)}）。
           </p>
         </Bubble>
 
@@ -1193,7 +1202,9 @@ export function WorkbenchPage() {
           <Bubble persona="intent_consultant" tone="card" style={{ animationDelay: "600ms" }}>
             <p>
               把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——
-              用下方输入框左侧的 📎 就能发。上传是免费预览，确认解析后才开始整理。
+              用下方输入框左侧的 📎 就能发
+              {imageUploadEnabled ? `（${supportedFormatsLabel(imageUploadEnabled)}）` : ""}。
+              上传是免费预览，确认解析后才开始整理。
             </p>
           </Bubble>
         ) : null}
@@ -1226,7 +1237,7 @@ export function WorkbenchPage() {
               </button>
             </div>
             {upload.isError ? (
-              <p className="v2-error">{uploadErrorText(upload.error)}</p>
+              <p className="v2-error">{uploadErrorText(upload.error, imageUploadEnabled)}</p>
             ) : null}
           </Bubble>
         ) : null}
@@ -1237,7 +1248,9 @@ export function WorkbenchPage() {
               收到「{pendingUpload.data?.filename}」：共 {pendingUpload.data?.pages} 页、
               约 {pendingUpload.data?.chars} 字。
               {pendingUpload.data?.ocr_suggested
-                ? "文字较少，可能是扫描件/图片——图片识别即将开放，建议先换文字版试试。"
+                ? imageUploadEnabled
+                  ? "检测到扫描件/图片，确认解析后小意会用视觉识别读取（约几分钱）。"
+                  : "文字较少，可能是扫描件/图片——图片识别即将开放，建议先换文字版试试。"
                 : null}
             </p>
             {pendingUpload.data?.text_preview ? (
@@ -1564,12 +1577,20 @@ export function WorkbenchPage() {
         <label
           className="v2-btn ghost v2-attach"
           aria-label="上传简历"
-          title="支持 PDF/DOCX/TXT；图片识别即将开放"
+          title={
+            imageUploadEnabled
+              ? `支持 ${supportedFormatsLabel(imageUploadEnabled)}（PNG/JPG/WEBP）`
+              : "支持 PDF/DOCX/TXT；图片识别即将开放"
+          }
         >
           <Paperclip size={17} />
           <input
             type="file"
-            accept=".pdf,.docx,.txt"
+            accept={
+              imageUploadEnabled
+                ? ".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                : ".pdf,.docx,.txt"
+            }
             hidden
             disabled={Boolean(runId) || upload.isPending}
             onChange={(event) => {

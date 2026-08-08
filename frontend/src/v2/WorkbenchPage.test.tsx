@@ -34,6 +34,9 @@ function LocationProbe() {
 }
 
 function mockWorkbenchApi() {
+  vi.spyOn(api, "capabilities").mockResolvedValue(
+    apiFixtures.capabilities({ resume_image_upload_enabled: false }),
+  );
   // B2：默认无待解析上传（404）——确认解析卡只在显式 mock 时出现
   vi.spyOn(api, "pendingResumeUpload").mockRejectedValue(
     new ApiError(404, "no pending resume upload"),
@@ -474,6 +477,101 @@ describe("resume confirmation profile", () => {
     await waitFor(() =>
       expect(api.uploadResume).toHaveBeenCalledWith("sess-1", replacement),
     );
+  });
+
+  it("enables image accept, title, OCR guidance, and 415 copy only when capability is true", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    vi.mocked(api.capabilities).mockResolvedValue(
+      apiFixtures.capabilities({ resume_image_upload_enabled: true }),
+    );
+    vi.mocked(api.resumePreview).mockRejectedValue(new ApiError(409, "resume_unparsed"));
+    vi.mocked(api.pendingResumeUpload).mockResolvedValue(
+      apiFixtures.resumeUploaded({ ocr_suggested: true }),
+    );
+    vi.spyOn(api, "uploadResume").mockRejectedValue(new ApiError(415, "unsupported_media_type"));
+    renderWorkbench();
+
+    const attach = screen.getByLabelText("上传简历");
+    const input = attach.querySelector('input[type="file"]') as HTMLInputElement;
+    await waitFor(() =>
+      expect(attach).toHaveAttribute("title", "支持 PDF/DOCX/TXT/图片（PNG/JPG/WEBP）"),
+    );
+    expect(input.accept).toContain(".png");
+    expect(input.accept).toContain("image/webp");
+    expect(
+      await screen.findByText(
+        // 方案钉死文案：成本提示（分钱），不是时间提示
+        "检测到扫描件/图片，确认解析后小意会用视觉识别读取（约几分钱）。",
+        { exact: false },
+      ),
+    ).toBeVisible();
+
+    await user.upload(input, new File(["resume"], "resume.txt", { type: "text/plain" }));
+    await user.click(await screen.findByRole("button", { name: "确认上传" }));
+    expect(
+      await screen.findByText("暂不支持该文件格式（当前支持 PDF/DOCX/TXT/图片）。"),
+    ).toBeVisible();
+  });
+
+  it("shows image formats in the PM welcome and Xiaoyi guide when capability is true", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.capabilities).mockResolvedValue(
+      apiFixtures.capabilities({ resume_image_upload_enabled: true }),
+    );
+    vi.mocked(api.resumePreview).mockRejectedValue(new ApiError(409, "resume_missing"));
+    renderWorkbench();
+
+    await waitFor(() =>
+      expect(screen.getByText(/先点下方输入框左侧/)).toHaveTextContent(
+        "把简历发进群（PDF/DOCX/TXT/图片）",
+      ),
+    );
+    expect(await screen.findByText(/用下方输入框左侧/)).toHaveTextContent(
+      "（PDF/DOCX/TXT/图片）",
+    );
+  });
+
+  it.each([
+    ["false", false],
+    ["missing", undefined],
+  ])("keeps image upload closed and legacy copy when capability is %s", async (_label, value) => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    const capabilities = apiFixtures.capabilities({ resume_image_upload_enabled: false });
+    if (value === undefined) {
+      delete (capabilities as Partial<typeof capabilities>).resume_image_upload_enabled;
+    }
+    vi.mocked(api.capabilities).mockResolvedValue(capabilities);
+    vi.mocked(api.resumePreview).mockRejectedValue(new ApiError(409, "resume_unparsed"));
+    vi.mocked(api.pendingResumeUpload).mockResolvedValue(
+      apiFixtures.resumeUploaded({ ocr_suggested: true }),
+    );
+    vi.spyOn(api, "uploadResume").mockRejectedValue(new ApiError(415, "unsupported_media_type"));
+    renderWorkbench();
+
+    const attach = screen.getByLabelText("上传简历");
+    const input = attach.querySelector('input[type="file"]') as HTMLInputElement;
+    await waitFor(() =>
+      expect(attach).toHaveAttribute("title", "支持 PDF/DOCX/TXT；图片识别即将开放"),
+    );
+    expect(input.accept).toBe(".pdf,.docx,.txt");
+    expect(input.accept).not.toMatch(/\.png|image\/webp/);
+    expect(
+      await screen.findByText(
+        "文字较少，可能是扫描件/图片——图片识别即将开放，建议先换文字版试试。",
+        { exact: false },
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(/先点下方输入框左侧/)).toHaveTextContent(
+      "把简历发进群（PDF/DOCX/TXT）",
+    );
+
+    await user.upload(input, new File(["resume"], "resume.txt", { type: "text/plain" }));
+    await user.click(await screen.findByRole("button", { name: "确认上传" }));
+    expect(
+      await screen.findByText("暂不支持该文件格式（当前支持 PDF/DOCX/TXT）。"),
+    ).toBeVisible();
   });
 
   it("confirms the exact resume version shown in the preview", async () => {
