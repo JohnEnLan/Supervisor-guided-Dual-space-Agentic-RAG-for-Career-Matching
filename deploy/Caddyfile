@@ -6,9 +6,12 @@ zhangen.cn, www.zhangen.cn {
 		reverse_proxy 127.0.0.1:8000
 	}
 
-	# 前端静态文件（SPA 回退到 index.html）
+	# 前端静态文件（B2 起：versioned release + symlink 原子切换；
+	# index.html 不缓存，部署后新访客即刻拿到新入口，hashed assets 不受影响）
 	handle {
-		root * /opt/career-rag/frontend-dist
+		root * /opt/career-rag/frontend-current
+		@index path /index.html /
+		header @index Cache-Control "no-store"
 		try_files {path} /index.html
 		file_server
 	}

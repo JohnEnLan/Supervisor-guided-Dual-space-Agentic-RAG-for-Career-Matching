@@ -7,6 +7,8 @@ export type Capabilities = Schemas["CapabilitiesResponse"];
 export type SessionCreateRequest = Schemas["SessionCreateRequest"];
 export type Session = Schemas["SessionResponse"];
 export type ResumeAccepted = Schemas["ResumeAcceptedResponse"];
+export type ResumeUploaded = Schemas["ResumeUploadedResponse"];
+export type ResumeParseRequest = Schemas["ResumeParseRequest"];
 export type ResumePreview = Schemas["ResumePreviewResponse"];
 export type ResumeConfirmRequest = Schemas["ResumeConfirmRequest"];
 export type ResumeConfirm = Schemas["ResumeConfirmResponse"];
@@ -45,8 +47,12 @@ export const api = {
   capabilities: (): Promise<Capabilities> => apiRequest("/capabilities"),
   createSession: (body: SessionCreateRequest): Promise<Session> =>
     jsonRequest("/sessions", "POST", body),
-  uploadResume: (sessionId: string, file: File): Promise<ResumeAccepted> =>
+  uploadResume: (sessionId: string, file: File): Promise<ResumeUploaded> =>
     uploadRequest(`/sessions/${id(sessionId)}/resume`, file),
+  pendingResumeUpload: (sessionId: string): Promise<ResumeUploaded> =>
+    apiRequest(`/sessions/${id(sessionId)}/resume-upload`),
+  parseResume: (sessionId: string, body: ResumeParseRequest): Promise<ResumeAccepted> =>
+    jsonRequest(`/sessions/${id(sessionId)}/resume/parse`, "POST", body),
   resumePreview: (sessionId: string): Promise<ResumePreview> =>
     apiRequest(`/sessions/${id(sessionId)}/resume-preview`),
   confirmResume: (sessionId: string, body: ResumeConfirmRequest): Promise<ResumeConfirm> =>

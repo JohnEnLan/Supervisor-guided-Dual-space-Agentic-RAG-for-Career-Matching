@@ -15,6 +15,7 @@ type OtpAccepted = Schemas["OtpRequestAccepted"];
 type ReactionResponse = Schemas["ReactionResponse"];
 type RecentRuns = Schemas["RecentRunsResponse"];
 type ResumeAccepted = Schemas["ResumeAcceptedResponse"];
+type ResumeUploaded = Schemas["ResumeUploadedResponse"];
 type ResumeConfirm = Schemas["ResumeConfirmResponse"];
 type ResumePreview = Schemas["ResumePreviewResponse"];
 type RunConversation = Schemas["RunConversationResponse"];
@@ -142,6 +143,21 @@ export const apiFixtures = {
 
   resumeAccepted: () =>
     ({ session_id: "sess-e2e-1", status: "resume_queued" }) satisfies ResumeAccepted,
+
+  resumeUploaded: (overrides: Partial<ResumeUploaded> = {}) =>
+    ({
+      session_id: "sess-e2e-1",
+      status: "resume_uploaded",
+      generation: 1,
+      filename: "resume.pdf",
+      pages: 2,
+      chars: 1800,
+      text_preview: "张三 数据分析实习……",
+      parses_used: 0,
+      parses_limit: 3,
+      ocr_suggested: false,
+      ...overrides,
+    }) satisfies ResumeUploaded,
 
   resumePreview: (confirmed: boolean) =>
     ({

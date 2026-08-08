@@ -30,6 +30,10 @@ function LocationProbe() {
 }
 
 function mockWorkbenchApi() {
+  // B2：默认无待解析上传（404）——确认解析卡只在显式 mock 时出现
+  vi.spyOn(api, "pendingResumeUpload").mockRejectedValue(
+    new ApiError(404, "no pending resume upload"),
+  );
   vi.spyOn(api, "resumePreview").mockResolvedValue({
     session_id: "sess-1",
     resume_version: 1,
@@ -437,20 +441,24 @@ describe("resume confirmation profile", () => {
     }
   });
 
-  it("keeps a working re-upload entry before resume confirmation", async () => {
+  it("routes re-upload through the composer paperclip with an explicit confirm", async () => {
+    // B2：三处旧上传入口收敛到 composer 📎；选文件≠上传，确认后才发请求
     const user = userEvent.setup();
     mockUnconfirmedFullResume();
-    vi.spyOn(api, "uploadResume").mockResolvedValue({
-      session_id: "sess-1",
-      status: "resume_queued",
-    });
+    vi.spyOn(api, "uploadResume").mockResolvedValue(apiFixtures.resumeUploaded());
     renderWorkbench();
 
-    const input = await screen.findByLabelText("重新上传简历");
+    await screen.findByRole("button", { name: "查看完整档案" });
+    const attach = screen.getByLabelText("上传简历");
+    const input = attach.querySelector("input[type=file]") as HTMLInputElement;
     const replacement = new File(["updated resume"], "updated-resume.txt", { type: "text/plain" });
     await user.upload(input, replacement);
 
-    expect(api.uploadResume).toHaveBeenCalledWith("sess-1", replacement);
+    expect(api.uploadResume).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "确认上传" }));
+    await waitFor(() =>
+      expect(api.uploadResume).toHaveBeenCalledWith("sess-1", replacement),
+    );
   });
 
   it("confirms the exact resume version shown in the preview", async () => {
@@ -719,8 +727,12 @@ describe("resume-generation conflict recovery", () => {
 
     renderWorkbench();
 
-    expect(await screen.findByText("旧档案已作废，请重传")).toBeVisible();
-    expect(screen.getByText("重新上传简历")).toBeVisible();
+    expect(
+      await screen.findByText("这份文件我没能整理成功，旧档案已作废。"),
+    ).toBeVisible();
+    // B2：重传入口收敛到 composer 📎，错误气泡只做引导
+    expect(screen.getByText(/重新发一份给我/)).toBeVisible();
+    expect(screen.getByLabelText("上传简历")).toBeVisible();
   });
 
   it("uses lifecycle recovery for confirm and clears it after a successful retry", async () => {
@@ -1478,55 +1490,63 @@ describe("resume lifecycle regressions (audit round 3)", () => {
     return router;
   }
 
-  it("resets upload state on session switch so a fresh session shows the upload entry", async () => {
+  it("resets pending upload state on session switch so a fresh session shows the entry", async () => {
+    // B2 泄漏形态升级：A 会话选中的待上传文件/限额 409 不得带进 B 会话
     const user = userEvent.setup();
     mockWorkbenchApi();
-    let sess1Uploaded = false;
-    vi.mocked(api.resumePreview).mockImplementation(async (sessionId: string) => {
-      if (sessionId === "sess-1" && sess1Uploaded) return READY_PREVIEW;
+    vi.mocked(api.resumePreview).mockImplementation(async () => {
       throw new ApiError(409, "resume_missing");
-    });
-    vi.spyOn(api, "uploadResume").mockImplementation(async () => {
-      sess1Uploaded = true;
-      return { session_id: "sess-1", status: "resume_queued" };
     });
     const router = renderWithRouter("/app/sessions/sess-1");
 
-    expect(await screen.findByText("选择简历文件")).toBeVisible();
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(await screen.findByText(/就能发/)).toBeVisible();
+    const attach = screen.getByLabelText("上传简历");
+    const fileInput = attach.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(fileInput, new File(["resume"], "r.txt", { type: "text/plain" }));
-    await screen.findByRole("button", { name: "确认简历档案" });
+    expect(await screen.findByRole("button", { name: "确认上传" })).toBeVisible();
 
     await act(async () => {
       await router.navigate("/app/sessions/sess-2");
     });
 
-    // 泄漏形态：A 的 upload.isSuccess 把 B 的 resume_missing 桥接成"处理中"，
-    // 上传入口消失且不轮询——切会话必须 upload.reset()
-    expect(await screen.findByText("选择简历文件")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "确认上传" })).not.toBeInTheDocument();
+    expect(await screen.findByText(/就能发/)).toBeVisible();
     expect(screen.queryByText(/正在归一化你的简历/)).not.toBeInTheDocument();
   });
 
-  it("recovers from resume_error through re-upload to a ready profile", async () => {
+  it("recovers from resume_error through re-upload and confirm-parse to a ready profile", async () => {
     const user = userEvent.setup();
     mockWorkbenchApi();
-    let phase: "error" | "ready" = "error";
+    let phase: "error" | "unparsed" | "ready" = "error";
     vi.mocked(api.resumePreview).mockImplementation(async () => {
       if (phase === "error") throw new ApiError(409, "resume_error");
+      if (phase === "unparsed") throw new ApiError(409, "resume_unparsed");
       return READY_PREVIEW;
     });
+    vi.mocked(api.pendingResumeUpload).mockImplementation(async () => {
+      if (phase === "unparsed") return apiFixtures.resumeUploaded();
+      throw new ApiError(404, "no pending resume upload");
+    });
     vi.spyOn(api, "uploadResume").mockImplementation(async () => {
+      phase = "unparsed";
+      return apiFixtures.resumeUploaded();
+    });
+    vi.spyOn(api, "parseResume").mockImplementation(async () => {
       phase = "ready";
       return { session_id: "sess-1", status: "resume_queued" };
     });
     renderWithRouter("/app/sessions/sess-1");
 
-    expect(await screen.findByText("旧档案已作废，请重传")).toBeVisible();
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(await screen.findByText(/旧档案已作废/)).toBeVisible();
+    const attach = screen.getByLabelText("上传简历");
+    const fileInput = attach.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(fileInput, new File(["resume"], "r2.txt", { type: "text/plain" }));
+    await user.click(await screen.findByRole("button", { name: "确认上传" }));
+
+    await user.click(await screen.findByRole("button", { name: "确认解析" }));
 
     await screen.findByRole("button", { name: "确认简历档案" });
-    expect(screen.queryByText("旧档案已作废，请重传")).not.toBeInTheDocument();
+    expect(screen.queryByText(/旧档案已作废/)).not.toBeInTheDocument();
   });
 });
 

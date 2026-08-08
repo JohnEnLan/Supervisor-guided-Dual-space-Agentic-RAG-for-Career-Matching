@@ -54,6 +54,14 @@
 .v2-back-home { color: var(--v2-muted); text-decoration: none; font-size: 0.9rem; }
 .v2-back-home:hover { color: var(--v2-ink); }
 
+/* B2 上传确认流 */
+.v2-attach { width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; cursor: pointer; flex: none; align-self: center; }
+.v2-pending-actions { display: flex; gap: 10px; margin-top: 10px; }
+.v2-pending-actions .v2-btn { width: auto; }
+.v2-upload-preview { margin: 10px 0 0; padding: 10px 12px; background: var(--v2-surface-warm); border-left: 3px solid var(--v2-accent); border-radius: 8px; font-size: 0.86rem; color: var(--v2-muted); line-height: 1.6; max-height: 130px; overflow: hidden; }
+.v2-parse-quota { color: var(--v2-muted); font-size: 0.85rem; margin: 10px 0; }
+.v2-resume-reupload-hint { color: var(--v2-muted); font-size: 0.82rem; }
+
 /* App shell */
 .v2-shell { min-height: 100vh; display: grid; grid-template-columns: 268px minmax(0, 1fr); background: var(--v2-canvas); color: var(--v2-ink); font-family: var(--v2-sans); }
 .v2-mobile-nav, .v2-drawer-backdrop, .v2-sidebar-close { display: none; }

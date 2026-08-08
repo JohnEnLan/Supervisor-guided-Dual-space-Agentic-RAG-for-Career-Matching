@@ -1,19 +1,13 @@
-import { ChevronDown, Paperclip } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useId, useState } from "react";
 
 import type { ResumePreview } from "../api/queries";
 
 type ResumeProfileAccordionProps = {
   preview: ResumePreview;
-  reuploading: boolean;
-  onReupload: (file: File) => void;
 };
 
-export function ResumeProfileAccordion({
-  preview,
-  reuploading,
-  onReupload,
-}: ResumeProfileAccordionProps) {
+export function ResumeProfileAccordion({ preview }: ResumeProfileAccordionProps) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const education = preview.education ?? [];
@@ -36,22 +30,9 @@ export function ResumeProfileAccordion({
           查看完整档案
           <ChevronDown size={16} aria-hidden="true" />
         </button>
-        <label className="v2-resume-reupload">
-          <Paperclip size={15} aria-hidden="true" />
-          {reuploading ? "重新上传中…" : "重新上传"}
-          <input
-            type="file"
-            accept=".pdf,.docx,.txt"
-            aria-label="重新上传简历"
-            disabled={reuploading}
-            hidden
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              if (file) onReupload(file);
-              event.currentTarget.value = "";
-            }}
-          />
-        </label>
+        <span className="v2-resume-reupload-hint">
+          需要换文件？用下方输入框左侧的 📎 重新上传
+        </span>
       </div>
 
       {open ? (

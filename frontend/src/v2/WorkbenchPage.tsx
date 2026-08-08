@@ -45,6 +45,15 @@ export function resumePreviewInterval(error: unknown): number | false {
   return resumeRecoveryState(error) === "processing" ? 2500 : false;
 }
 
+function uploadErrorText(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 415) return "暂不支持该文件格式（当前支持 PDF/DOCX/TXT）。";
+    if (error.status === 422) return "文件无法解析，请确认未加密、未损坏后重试。";
+    if (error.status === 413) return "文件超过 10MB 上限，请压缩后重试。";
+  }
+  return "上传失败，请重试。";
+}
+
 export const PERSONAS: Record<string, { short: string; name: string; role: string }> = {
   intent_consultant: { short: "意", name: "需求顾问·小意", role: "需求对接" },
   job_scout: { short: "检", name: "岗位顾问·小检", role: "岗位筛选" },
@@ -499,6 +508,8 @@ export function WorkbenchPage() {
   const [briefDraft, setBriefDraft] = useState<ConsultFinalize | null>(null);
   const [brief, setBrief] = useState<MatchBriefResponse | null>(null);
   const [resumeRecovery, setResumeRecovery] = useState<ResumeRecoveryState | null>(null);
+  // B2 上传确认流：composer 选中、尚未确认上传的文件
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   // 单一 modal 状态：retry/refine→quota 的 402 切换保持同一 FocusModal 实例，
   // 避免旧实例卸载时的焦点归还 microtask 把焦点抢回背景（互审第 2 轮阻断）
   const [retryModal, setRetryModal] = useState<"retry" | "refine" | "quota" | null>(null);
@@ -518,6 +529,13 @@ export function WorkbenchPage() {
     enabled: Boolean(sessionId),
     retry: false,
     refetchInterval: (query) => resumePreviewInterval(query.state.error),
+  });
+  // B2：待确认解析的上传（刷新/切会话后由此恢复「确认解析」卡；404=无）
+  const pendingUpload = useQuery({
+    queryKey: ["resume-upload", sessionId],
+    queryFn: () => api.pendingResumeUpload(sessionId),
+    enabled: Boolean(sessionId),
+    retry: false,
   });
   const status = useQuery({
     queryKey: ["v2-run-status", runId],
@@ -547,10 +565,36 @@ export function WorkbenchPage() {
   const upload = useMutation({
     mutationFn: (file: File) => api.uploadResume(sessionId, file),
     onSuccess: () => {
-      // 重传成功即清除旧的恢复提示（如 resume_error），由新一轮 preview
-      // detail 重新驱动生命周期（审计二轮卡死路径修复）。
+      // 上传成功＝进入待确认解析态；清旧恢复提示，刷新待解析卡与 preview
+      // （preview 将返回 409 resume_unparsed，由确认卡驱动后续）。
+      setPendingFile(null);
       setResumeRecovery(null);
+      void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
       void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+    },
+  });
+  const parseResume = useMutation({
+    mutationFn: () => {
+      const generation = pendingUpload.data?.generation;
+      if (generation === undefined) {
+        throw new Error("no pending resume upload");
+      }
+      // 必须回传预览所得 generation：旧标签页拿旧代确认 → 后端 409 resume_changed
+      return api.parseResume(sessionId, { generation });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+    },
+    onError: (error) => {
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        (error.message === "resume_changed" || error.message === "resume_unparsed")
+      ) {
+        void queryClient.invalidateQueries({ queryKey: ["resume-upload", sessionId] });
+        void queryClient.invalidateQueries({ queryKey: ["resume-preview", sessionId] });
+      }
     },
   });
   const confirmResume = useMutation({
@@ -668,12 +712,13 @@ export function WorkbenchPage() {
     setBrief(null);
     setResumeRecovery(null);
     setRetryModal(null);
+    setPendingFile(null);
     executeAttempted.current = false;
-    // upload.isSuccess 是实例级状态：不重置会把 A 会话的上传成功带进从未
-    // 上传的 B 会话，使 resume_missing 被桥接成"处理中"而丢失上传入口
-    // （审计三轮阻断修复）。
+    // mutation 实例级状态必须随会话切换重置：不重置会把 A 会话的
+    // 上传成功/限额 409 带进 B 会话（审计三轮阻断修复；B2 扩展到 parse）。
     upload.reset();
-  }, [sessionId, upload.reset]);
+    parseResume.reset();
+  }, [sessionId, upload.reset, parseResume.reset]);
 
   useEffect(() => {
     if (!runId || !me.data?.user_id || !(status.error instanceof ApiError)) return;
@@ -687,19 +732,21 @@ export function WorkbenchPage() {
   }, [me.data?.user_id, queryClient, runId, sessionId, setSearchParams, status.error]);
 
   const resumeReady = preview.isSuccess;
-  // 三态纯按后端稳定 detail 分流（审计二轮阻断修复）：resume_missing=从未
-  // 上传（走上传入口分支）；resume_processing=归一化中；resume_error=归一化
-  // 失败（停轮询、提示重传）。upload.isSuccess 只在 invalidate→refetch 的
-  // 缓存空窗内把 resume_missing 桥接为处理中，不再压住后续 ready/error。
+  // 生命周期按后端稳定 detail 分流（审计二轮阻断修复；B2 扩展）：
+  // resume_missing=从未上传；resume_unparsed=已上传待确认解析（确认卡由
+  // pendingUpload 数据驱动）；resume_processing=归一化中；resume_error=失败。
   const preview409 = preview.error instanceof ApiError && preview.error.status === 409;
   const previewDetail =
     preview.error instanceof ApiError && preview.error.status === 409
       ? preview.error.message
       : null;
+  const uploadPending = pendingUpload.isSuccess;
+  const parseLimitReached =
+    parseResume.error instanceof ApiError &&
+    parseResume.error.status === 409 &&
+    parseResume.error.message === "resume_parse_limit";
   const resumeProcessing =
-    upload.isPending ||
-    previewDetail === "resume_processing" ||
-    (previewDetail === "resume_missing" && upload.isSuccess);
+    parseResume.isPending || previewDetail === "resume_processing";
   const resumeError =
     !resumeProcessing && (previewDetail === "resume_error" || resumeRecovery === "error");
   const previewLoadError = preview.isError && !preview409;
@@ -838,27 +885,87 @@ export function WorkbenchPage() {
         <Bubble persona="pm">
           <p>
             欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，
-            我会在每个环节前后做质量把关。先请上传你的简历（PDF/DOCX/TXT）。
+            我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（PDF/DOCX/TXT）。
           </p>
         </Bubble>
 
-        {!resumeReady && !resumeProcessing && !resumeError && !previewLoadError ? (
+        {!resumeReady && !resumeProcessing && !resumeError && !previewLoadError &&
+        !uploadPending && !pendingFile ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p>把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）。</p>
-            <label className="v2-btn ghost v2-upload">
-              <Paperclip size={16} />
-              {upload.isPending ? "上传中…" : "选择简历文件"}
-              <input
-                type="file"
-                accept=".pdf,.docx,.txt"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) upload.mutate(file);
+            <p>
+              把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——
+              用下方输入框左侧的 📎 就能发。上传是免费预览，确认解析后才开始整理。
+            </p>
+          </Bubble>
+        ) : null}
+
+        {pendingFile && !uploadPending ? (
+          <Bubble persona="user" tone="card">
+            <p>
+              {pendingFile.name}（{Math.max(1, Math.round(pendingFile.size / 1024))} KB）
+            </p>
+            <div className="v2-pending-actions">
+              <button
+                type="button"
+                className="v2-btn primary"
+                disabled={upload.isPending}
+                onClick={() => upload.mutate(pendingFile)}
+              >
+                {upload.isPending ? "上传中…" : "确认上传"}
+              </button>
+              <button
+                type="button"
+                className="v2-btn ghost"
+                disabled={upload.isPending}
+                onClick={() => {
+                  setPendingFile(null);
+                  upload.reset();
                 }}
-              />
-            </label>
-            {upload.isError ? <p className="v2-error">上传失败，请重试。</p> : null}
+              >
+                取消
+              </button>
+            </div>
+            {upload.isError ? (
+              <p className="v2-error">{uploadErrorText(upload.error)}</p>
+            ) : null}
+          </Bubble>
+        ) : null}
+
+        {uploadPending && !resumeProcessing ? (
+          <Bubble persona="intent_consultant" tone="card">
+            <p>
+              收到「{pendingUpload.data?.filename}」：共 {pendingUpload.data?.pages} 页、
+              约 {pendingUpload.data?.chars} 字。
+              {pendingUpload.data?.ocr_suggested
+                ? "文字较少，可能是扫描件/图片——图片识别即将开放，建议先换文字版试试。"
+                : null}
+            </p>
+            {pendingUpload.data?.text_preview ? (
+              <blockquote className="v2-upload-preview">
+                {pendingUpload.data.text_preview}
+              </blockquote>
+            ) : null}
+            <p className="v2-parse-quota">
+              解析会调用 AI 整理档案（本会话已用 {pendingUpload.data?.parses_used ?? 0}/
+              {pendingUpload.data?.parses_limit ?? 3} 次）。
+            </p>
+            <button
+              type="button"
+              className="v2-btn primary"
+              disabled={parseResume.isPending || parseLimitReached}
+              onClick={() => parseResume.mutate()}
+            >
+              {parseResume.isPending ? "已提交…" : "确认解析"}
+            </button>
+            {parseLimitReached ? (
+              <p className="v2-error">
+                本会话解析次数已用完（{pendingUpload.data?.parses_limit ?? 3}/
+                {pendingUpload.data?.parses_limit ?? 3}）。请在左侧「开始新的咨询」
+                新建会话继续；会话额度也用完时请联系管理员重置。
+              </p>
+            ) : parseResume.isError ? (
+              <p className="v2-error">确认解析失败，请重试。</p>
+            ) : null}
           </Bubble>
         ) : null}
 
@@ -876,23 +983,10 @@ export function WorkbenchPage() {
           </Bubble>
         ) : null}
 
-        {resumeError ? (
+        {resumeError && !pendingFile && !uploadPending ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p className="v2-error">旧档案已作废，请重传</p>
-            <label className="v2-btn ghost v2-upload">
-              <Paperclip size={16} />
-              {upload.isPending ? "上传中…" : "重新上传简历"}
-              <input
-                type="file"
-                accept=".pdf,.docx,.txt"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) upload.mutate(file);
-                }}
-              />
-            </label>
-            {upload.isError ? <p className="v2-error">上传失败，请重试。</p> : null}
+            <p className="v2-error">这份文件我没能整理成功，旧档案已作废。</p>
+            <p>请点下方输入框左侧的 📎 重新发一份给我（换个格式或文字版更稳）。</p>
           </Bubble>
         ) : null}
 
@@ -912,11 +1006,7 @@ export function WorkbenchPage() {
               {preview.data?.experience?.length ?? 0} 段经历、{preview.data?.skills?.length ?? 0}{" "}
               项技能。请确认无误后我们开始聊方向。
             </p>
-            <ResumeProfileAccordion
-              preview={preview.data}
-              reuploading={upload.isPending}
-              onReupload={(file) => upload.mutate(file)}
-            />
+            <ResumeProfileAccordion preview={preview.data} />
             <button
               type="button"
               className="v2-btn primary"
@@ -1101,6 +1191,24 @@ export function WorkbenchPage() {
             探索方向
           </button>
         </div>
+        <label className="v2-btn ghost v2-attach" aria-label="上传简历">
+          <Paperclip size={17} />
+          <input
+            type="file"
+            accept=".pdf,.docx,.txt"
+            hidden
+            disabled={Boolean(runId) || upload.isPending}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                setPendingFile(file);
+                upload.reset();
+                parseResume.reset();
+              }
+              event.target.value = "";
+            }}
+          />
+        </label>
         <textarea
           ref={messageInputRef}
           value={message}
@@ -1109,7 +1217,7 @@ export function WorkbenchPage() {
               ? "告诉小意你的想法…（回车发送，Shift+回车换行）"
               : runId
                 ? "任务执行中，可在上方查看团队进展"
-                : "请先上传并确认简历"
+                : "先用左侧 📎 上传简历，确认档案后开聊"
           }
           disabled={inputDisabled}
           maxLength={2000}
