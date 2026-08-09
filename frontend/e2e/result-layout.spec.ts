@@ -23,6 +23,21 @@ const CANONICAL_TIERS = [
   ["bridge_role", "Bridge Role"],
 ] as const;
 
+function contrastRatio(foreground: string, background: string) {
+  const channels = (color: string) => {
+    const match = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+    if (!match) throw new Error(`Expected an opaque rgb() color, received ${color}`);
+    return match.slice(1).map(Number);
+  };
+  const luminance = (color: string) =>
+    channels(color)
+      .map((channel) => channel / 255)
+      .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+      .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 async function installResultTable(page: Page, width: number) {
   await page.setViewportSize({ width: width + 40, height: 900 });
   await page.setContent(`
@@ -68,7 +83,7 @@ async function installTierTable(
           <td>${index + 1}</td>
           <td data-testid="tier-cell"><span class="v2-tier ${tier}" data-testid="tier-badge">${label}</span></td>
           <td data-testid="job-cell"><button class="v2-result-row-trigger">Role ${index + 1}</button></td>
-          <td>Example 路 Birmingham</td>
+          <td>Example · Birmingham</td>
           <td>Demo</td>
         </tr>`,
     )
@@ -127,6 +142,14 @@ for (const width of [320, 375, 650, 1280]) {
       expect(badge.left).toBeGreaterThanOrEqual(cell.left - 0.5);
       expect(badge.right).toBeLessThanOrEqual(cell.right + 0.5);
       expect(cell.right).toBeLessThanOrEqual(jobCell.left + 0.5);
+      const computedColors = await page.getByTestId("tier-badge").nth(index).evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { foreground: style.color, background: style.backgroundColor };
+      });
+      expect.soft(
+        contrastRatio(computedColors.foreground, computedColors.background),
+        `${CANONICAL_TIERS[index][1]} badge contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
 
     const documentWidth = await page.evaluate(() => ({
@@ -159,6 +182,11 @@ test("an unbroken localized tier remains inside its cell", async ({ page }) => {
   expect(badge!.x).toBeGreaterThanOrEqual(cell!.x - 0.5);
   expect(badge!.x + badge!.width).toBeLessThanOrEqual(cell!.x + cell!.width + 0.5);
   expect(badge!.x + badge!.width).toBeLessThanOrEqual(jobCell!.x + 0.5);
+  const badgeWidth = await page.getByTestId("tier-badge").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(badgeWidth.scrollWidth).toBeLessThanOrEqual(badgeWidth.clientWidth);
 });
 
 test("desktop sidebar wordmark shares the session-label left grid", async ({ page }) => {
