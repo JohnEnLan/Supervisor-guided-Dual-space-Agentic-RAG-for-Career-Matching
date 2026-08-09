@@ -1439,9 +1439,23 @@ describe("last run recovery", () => {
 
   it.each([403, 404])("removes a stored run rejected with %s and returns to consultation", async (statusCode) => {
     mockWorkbenchApi();
-    vi.mocked(api.runStatus).mockRejectedValue(new ApiError(statusCode, "run unavailable"));
+    let rejectRunStatus!: (reason: unknown) => void;
+    vi.mocked(api.runStatus).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRunStatus = reject;
+        }),
+    );
     localStorage.setItem("last_run:user-1:sess-1", "run-stale");
     renderWorkbench();
+
+    await waitFor(() => {
+      expect(api.runStatus).toHaveBeenCalledWith("run-stale");
+      expect(screen.getByLabelText("current location")).toHaveTextContent("?run=run-stale");
+    });
+    await act(async () => {
+      rejectRunStatus(new ApiError(statusCode, "run unavailable"));
+    });
 
     await waitFor(() => {
       expect(localStorage.getItem("last_run:user-1:sess-1")).toBeNull();
