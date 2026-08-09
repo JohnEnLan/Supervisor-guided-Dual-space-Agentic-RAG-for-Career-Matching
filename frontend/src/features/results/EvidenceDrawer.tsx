@@ -2,6 +2,7 @@ import { ChevronDown, FileCheck2 } from "lucide-react";
 import { useId, useState } from "react";
 
 import type { EvidenceItem, SkillGap } from "../../api/queries";
+import { useLanguage } from "../../i18n";
 
 type EvidenceDrawerProps = {
   title: string;
@@ -12,11 +13,12 @@ type EvidenceDrawerProps = {
 };
 
 export function EvidenceDrawer({ title, evidence, resumeEvidence, agentMatchReasons = [], skillGaps = [] }: EvidenceDrawerProps) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const panelId = useId();
 
   return (
-    <section className="v2-evidence-accordion" aria-label={`${title} 的匹配证据`}>
+    <section className="v2-evidence-accordion" aria-label={t("{title} 的匹配证据", { title })}>
       <button
         className="v2-evidence-trigger"
         type="button"
@@ -25,26 +27,26 @@ export function EvidenceDrawer({ title, evidence, resumeEvidence, agentMatchReas
         onClick={() => setOpen((current) => !current)}
       >
         <FileCheck2 size={17} />
-        查看证据
+        {t("查看证据")}
         <ChevronDown className="v2-evidence-chevron" size={16} aria-hidden="true" />
       </button>
       {open ? (
         <div className="v2-evidence-panel" id={panelId}>
           <section>
-            <h3>Agent 匹配理由</h3>
+            <h3>{t("Agent 匹配理由")}</h3>
             {agentMatchReasons.length ? (
               <ul>{agentMatchReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             ) : (
-              <p>没有额外的 Agent 匹配理由。当前 API 未投影独立的确定性 must-have 命中，因此不会把自由文本解释标记为规则命中。</p>
+              <p>{t("没有额外的 Agent 匹配理由。当前 API 未投影独立的确定性 must-have 命中，因此不会把自由文本解释标记为规则命中。")}</p>
             )}
           </section>
           <section>
-            <h3>岗位原文证据</h3>
+            <h3>{t("岗位原文证据")}</h3>
             {evidence.length ? (
               <ul className="v2-evidence-list">
                 {evidence.map((item) => (
                   <li key={item.evidence_span_id}>
-                    <span className="v2-evidence-source">出自 JD 原文</span>
+                    <span className="v2-evidence-source">{t("出自 JD 原文")}</span>
                     <code>{item.evidence_span_id}</code>
                     <p>{item.content}</p>
                     {item.field ? <small>{item.field}</small> : null}
@@ -52,11 +54,11 @@ export function EvidenceDrawer({ title, evidence, resumeEvidence, agentMatchReas
                 ))}
               </ul>
             ) : (
-              <p>没有可公开的 JD 证据；该岗位不应进入推荐。</p>
+              <p>{t("没有可公开的 JD 证据；该岗位不应进入推荐。")}</p>
             )}
           </section>
           <section>
-            <h3>简历事实证据</h3>
+            <h3>{t("简历事实证据")}</h3>
             {resumeEvidence.length ? (
               <ul className="v2-evidence-list">
                 {resumeEvidence.map((item) => (
@@ -67,15 +69,15 @@ export function EvidenceDrawer({ title, evidence, resumeEvidence, agentMatchReas
                 ))}
               </ul>
             ) : (
-              <p>当前解释没有额外展示简历片段。</p>
+              <p>{t("当前解释没有额外展示简历片段。")}</p>
             )}
           </section>
           <section>
-            <h3>相关技能缺口</h3>
+            <h3>{t("相关技能缺口")}</h3>
             {skillGaps.length ? (
-              <ul>{skillGaps.map((gap) => <li key={`${gap.skill}-${gap.gap}`}><strong>{gap.skill}</strong>：{gap.gap}</li>)}</ul>
+              <ul>{skillGaps.map((gap) => <li key={`${gap.skill}-${gap.gap}`}><strong>{gap.skill}</strong>{t("：{gap}", { gap: gap.gap })}</li>)}</ul>
             ) : (
-              <p>没有投影额外技能缺口。</p>
+              <p>{t("没有投影额外技能缺口。")}</p>
             )}
           </section>
         </div>

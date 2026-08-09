@@ -8,11 +8,19 @@ import { api } from "../api/queries";
 import { RouteError } from "../app/App";
 import { AppProviders } from "../app/providers";
 import { router as appRouter } from "../app/router";
+import { ExplainUnavailable } from "../features/evaluation/EvaluationRunPage";
+import { ReactionForm } from "../features/feedback/ReactionForm";
+import { MonitoringUnavailable } from "../features/monitoring/MonitoringPage";
+import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
+import { AdminPage } from "../v2/AdminPage";
 import { AppShell } from "../v2/AppShell";
 import { HomePage } from "../v2/HomePage";
 import { LandingPage } from "../v2/LandingPage";
+import { ProfilePage } from "../v2/ProfilePage";
+import { ResumeProfileAccordion } from "../v2/ResumeProfileAccordion";
 import themeSource from "../v2/theme.css?raw";
 import { WelcomePage } from "../v2/WelcomePage";
+import { WorkbenchPage } from "../v2/WorkbenchPage";
 import {
   LANGUAGE_STORAGE_KEY,
   LanguageProvider,
@@ -422,5 +430,283 @@ describe("routed fallback copy", () => {
     expect(await screen.findByRole("heading", { name: "Something went wrong" })).toBeVisible();
     expect(screen.getByText("dynamic route detail")).toBeVisible();
     expect(screen.getByRole("link", { name: "Return to homepage" })).toBeVisible();
+  });
+});
+
+function renderEnglishWorkbench(
+  confirmed: boolean,
+  transcript: Awaited<ReturnType<typeof api.consultState>>["transcript"] = [],
+  clarificationProgress?: Awaited<ReturnType<typeof api.consultState>>["clarification_progress"],
+) {
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+  vi.spyOn(api, "me").mockResolvedValue({
+    user_id: "user-1",
+    status: "active",
+    is_admin: false,
+    display_name: "测试用户",
+    created_at: "2026-08-06T10:00:00Z",
+  });
+  vi.spyOn(api, "capabilities").mockResolvedValue({
+    api_version: "v1",
+    dual_space_enabled: true,
+    resume_image_upload_enabled: false,
+    execution_durability: "process_local",
+    explain_enabled: false,
+    monitoring_enabled: false,
+    otp_channels: ["email"],
+  });
+  vi.spyOn(api, "pendingResumeUpload").mockRejectedValue(
+    new ApiError(404, "no pending resume upload"),
+  );
+  vi.spyOn(api, "resumePreview").mockResolvedValue({
+    session_id: "sess-1",
+    resume_version: 1,
+    confirmed,
+    education: [{
+      institution: "伯明翰大学",
+      degree: "MSc",
+      field: "Computer Science",
+      dates: "2025–2026",
+      details: [],
+      evidence_span_ids: [],
+    }],
+    experience: [],
+    projects: [],
+    skills: ["Python"],
+    resume_quality_issues: [],
+    evidence: [],
+  });
+  vi.spyOn(api, "consultState").mockResolvedValue({
+    transcript,
+    profile_draft: {
+      current_goal: ["backend engineer"],
+      hard_constraints: { locations: ["Shanghai"], need_visa_sponsor: false },
+      soft_preferences: {},
+      avoid_roles: [],
+    },
+    round: 2,
+    phase: "deepen",
+    completeness: 1,
+    can_finalize: true,
+    clarification_progress: clarificationProgress,
+  });
+  const router = createMemoryRouter(
+    [{ path: "/app/sessions/:sessionId", element: <WorkbenchPage /> }],
+    { initialEntries: ["/app/sessions/sess-1"] },
+  );
+  render(
+    <AppProviders>
+      <RouterProvider router={router} />
+    </AppProviders>,
+  );
+}
+
+describe("L2 business-page language switching", () => {
+  it("translates Workbench chrome and profile-summary templates without translating profile data", async () => {
+    renderEnglishWorkbench(false);
+
+    expect(await screen.findByRole("heading", { name: "Career Planning Service Room" })).toBeVisible();
+    expect(screen.getByText("🎓 Education: 伯明翰大学 · MSc")).toBeVisible();
+    expect(screen.queryByText("职业规划服务群")).not.toBeInTheDocument();
+  });
+
+  it("rebuilds Workbench consult-slot and milestone templates while preserving dynamic values", async () => {
+    renderEnglishWorkbench(true, [], {
+      answered: 1,
+      skipped: 1,
+      total: 4,
+      questions_used: 2,
+    });
+
+    expect(await screen.findByText("Goal: backend engineer")).toBeVisible();
+    expect(screen.getByText("Location: Shanghai")).toBeVisible();
+    expect(screen.getByText("Visa: No sponsorship needed")).toBeVisible();
+    expect(
+      screen.getByText("Resume follow-up: 1 answered, 1 skipped, 2 remaining"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Xiaoyi has collected the required details: goal backend engineer, location Shanghai, visa no sponsorship needed. You can add more preferences or ask me to arrange the match.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("keeps Workbench transcript and Supervisor-generated content out of translation", async () => {
+    renderEnglishWorkbench(true, [{
+      round: 1,
+      phase: "deepen",
+      user_message: "无",
+        assistant_reply: "顾问动态回复",
+        next_question: "动态追问",
+        supervisor_notes: [{
+          coach_attempt_id: "note-1",
+          kind: "coach",
+          trigger: "stagnation",
+          text: "Supervisor 动态提示",
+          verdict: "advise",
+        }],
+      }]);
+
+    expect(await screen.findByText("无")).toBeVisible();
+    expect(screen.getByText(/顾问动态回复/)).toHaveTextContent("动态追问");
+    expect(screen.getByText("Supervisor 动态提示")).toBeVisible();
+  });
+
+  it("translates ResumeProfileAccordion chrome while preserving resume fields", async () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    const user = userEvent.setup();
+    render(
+      <AppProviders>
+        <ResumeProfileAccordion
+          preview={{
+            session_id: "sess-1",
+            resume_version: 1,
+            confirmed: false,
+            education: [],
+            experience: [{
+              organization: "动态公司字段",
+              title: "Data Analyst",
+              location: "London",
+              dates: "2025",
+              responsibilities: [],
+              achievements: [],
+              technologies: [],
+              evidence_span_ids: [],
+            }],
+            projects: [],
+            skills: [],
+            resume_quality_issues: [],
+            evidence: [],
+          }}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "View full profile" }));
+    expect(screen.getByRole("heading", { name: "Work Experience" })).toBeVisible();
+    expect(screen.getByText("动态公司字段")).toBeVisible();
+    expect(screen.queryByText("工作经历")).not.toBeInTheDocument();
+  });
+
+  it("translates EvidenceDrawer chrome while preserving job evidence", async () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    const user = userEvent.setup();
+    render(
+      <AppProviders>
+        <EvidenceDrawer
+          title="数据分析师"
+          evidence={[{ evidence_span_id: "jd-1", content: "岗位要求中文原文" }]}
+          resumeEvidence={[]}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "View evidence" }));
+    expect(screen.getByRole("heading", { name: "Source Job Evidence" })).toBeVisible();
+    expect(screen.getByText("岗位要求中文原文")).toBeVisible();
+    expect(screen.queryByText("岗位原文证据")).not.toBeInTheDocument();
+  });
+
+  it("translates ReactionForm controls", () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    render(
+      <AppProviders>
+        <ReactionForm runId="run-1" jobId="job-1" />
+      </AppProviders>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Tell us how your application went" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rejected" })).toBeVisible();
+    expect(screen.queryByText("被拒")).not.toBeInTheDocument();
+  });
+
+  it("translates ProfilePage chrome while preserving account data", async () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    vi.spyOn(api, "me").mockResolvedValue({
+      user_id: "user-1",
+      status: "active",
+      is_admin: false,
+      display_name: "测试用户",
+      created_at: "2026-08-06T10:00:00Z",
+    });
+    vi.spyOn(api, "meProfile").mockResolvedValue({
+      profile: {},
+      updated_at: "2026-08-06T10:00:00Z",
+    });
+
+    render(
+      <AppProviders>
+        <ProfilePage />
+      </AppProviders>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "My Profile" })).toBeVisible();
+    expect(screen.getByText(/测试用户/)).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "我的档案" })).not.toBeInTheDocument();
+  });
+
+  it("translates EvaluationRunPage capability-off copy", () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    render(
+      <AppProviders>
+        <ExplainUnavailable />
+      </AppProviders>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Evaluation Details Are Disabled" })).toBeVisible();
+    expect(screen.queryByText("评估解释未开启")).not.toBeInTheDocument();
+  });
+
+  it("translates MonitoringPage capability-off copy", () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    render(
+      <AppProviders>
+        <MonitoringUnavailable />
+      </AppProviders>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Run Monitoring Is Disabled" })).toBeVisible();
+    expect(screen.queryByText("运行监控未开启")).not.toBeInTheDocument();
+  });
+
+  it("translates AdminPage and its dashboard", async () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    vi.spyOn(api, "me").mockResolvedValue({
+      user_id: "admin-1",
+      status: "active",
+      is_admin: true,
+      display_name: "测试管理员",
+      created_at: "2026-08-06T10:00:00Z",
+    });
+    vi.spyOn(api, "adminOverview").mockResolvedValue({
+      users_total: 1,
+      logins_today: 1,
+      logins_7d: 1,
+      logins_30d: 1,
+      sessions_total: 1,
+      consult_turns_total: 1,
+      runs_total: 1,
+      tokens_by_day: [],
+      tokens_by_model: [],
+    });
+    const router = createMemoryRouter(
+      [
+        { path: "/admin", element: <AdminPage /> },
+        { path: "/app", element: <p>app</p> },
+        { path: "/login", element: <p>login</p> },
+      ],
+      { initialEntries: ["/admin"] },
+    );
+
+    render(
+      <AppProviders>
+        <RouterProvider router={router} />
+      </AppProviders>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Admin Console" })).toBeVisible();
+    expect(screen.getByText("Read-only overview")).toBeVisible();
+    expect(screen.getByText("测试管理员")).toBeVisible();
+    expect(screen.queryByText("管理控制台")).not.toBeInTheDocument();
   });
 });

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Coins, TrendingUp } from "lucide-react";
 
 import { api, type AdminOverview } from "../../api/queries";
+import { useLanguage } from "../../i18n";
 import type { GuardedAdminRequest } from "./types";
 
 type TokenRow = AdminOverview["tokens_by_model"][number];
@@ -58,6 +59,7 @@ function priceMode(row: TokenRow): string {
 }
 
 function DashboardData({ overview }: { overview: AdminOverview }) {
+  const { t } = useLanguage();
   const metrics = [
     ["用户", overview.users_total],
     ["今日登录", overview.logins_today],
@@ -73,34 +75,34 @@ function DashboardData({ overview }: { overview: AdminOverview }) {
       <div className="v2-admin-metrics">
         {metrics.map(([label, value]) => (
           <article key={label}>
-            <span>{label}</span>
+            <span>{t(label)}</span>
             <strong>{value.toLocaleString("zh-CN")}</strong>
           </article>
         ))}
       </div>
       <div className="v2-admin-dashboard-grid">
         <section className="v2-admin-panel">
-          <h3><TrendingUp size={18} />每日 Token</h3>
+          <h3><TrendingUp size={18} />{t("每日 Token")}</h3>
           <div className="v2-admin-table-scroll">
             <table>
-              <thead><tr><th>UTC 日期</th><th>总 Token</th></tr></thead>
+              <thead><tr><th>{t("UTC 日期")}</th><th>{t("总 Token")}</th></tr></thead>
               <tbody>
                 {overview.tokens_by_day.length ? overview.tokens_by_day.map((row) => (
                   <tr key={row.date}><td>{row.date}</td><td>{row.total_tokens.toLocaleString("zh-CN")}</td></tr>
-                )) : <tr><td colSpan={2}>暂无用量</td></tr>}
+                )) : <tr><td colSpan={2}>{t("暂无用量")}</td></tr>}
               </tbody>
             </table>
           </div>
         </section>
         <section className="v2-admin-panel v2-admin-cost-panel">
           <header>
-            <h3><Coins size={18} />模型用量与成本</h3>
-            <span>{PRICE_VERSION}</span>
+            <h3><Coins size={18} />{t("模型用量与成本")}</h3>
+            <span>{t(PRICE_VERSION)}</span>
           </header>
-          <p className="v2-admin-price-note">DeepSeek 输入按缓存未命中价估算；不同币种不跨行合计。</p>
+          <p className="v2-admin-price-note">{t("DeepSeek 输入按缓存未命中价估算；不同币种不跨行合计。")}</p>
           <div className="v2-admin-table-scroll">
             <table>
-              <thead><tr><th>模型</th><th>Prompt</th><th>Completion</th><th>Total</th><th>计价</th><th>估算成本</th></tr></thead>
+              <thead><tr><th>{t("模型")}</th><th>Prompt</th><th>Completion</th><th>Total</th><th>{t("计价")}</th><th>{t("估算成本")}</th></tr></thead>
               <tbody>
                 {overview.tokens_by_model.length ? overview.tokens_by_model.map((row) => (
                   <tr key={row.model}>
@@ -108,10 +110,10 @@ function DashboardData({ overview }: { overview: AdminOverview }) {
                     <td>{tokens(row.prompt_tokens)}</td>
                     <td>{tokens(row.completion_tokens)}</td>
                     <td>{row.total_tokens.toLocaleString("zh-CN")}</td>
-                    <td>{priceMode(row)}</td>
-                    <td>{estimatedCost(row) ?? "无法估算"}</td>
+                    <td>{t(priceMode(row))}</td>
+                    <td>{estimatedCost(row) ?? t("无法估算")}</td>
                   </tr>
-                )) : <tr><td colSpan={6}>暂无模型用量</td></tr>}
+                )) : <tr><td colSpan={6}>{t("暂无模型用量")}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -122,6 +124,7 @@ function DashboardData({ overview }: { overview: AdminOverview }) {
 }
 
 export function AdminDashboard({ request }: { request: GuardedAdminRequest }) {
+  const { t } = useLanguage();
   const overview = useQuery({
     queryKey: ["admin", "overview"],
     queryFn: () => request(api.adminOverview),
@@ -132,15 +135,15 @@ export function AdminDashboard({ request }: { request: GuardedAdminRequest }) {
     <section aria-labelledby="admin-dashboard-title">
       <header className="v2-admin-section-heading">
         <div><p>OPERATIONS LEDGER</p><h2 id="admin-dashboard-title">Dashboard</h2></div>
-        <span>只读概览</span>
+        <span>{t("只读概览")}</span>
       </header>
       {overview.isPending ? (
-        <section className="v2-admin-loading" role="status" aria-label="正在汇总管理数据">
-          <Activity className="spin" size={20} /><span>正在汇总管理数据</span>
+        <section className="v2-admin-loading" role="status" aria-label={t("正在汇总管理数据")}>
+          <Activity className="spin" size={20} /><span>{t("正在汇总管理数据")}</span>
         </section>
       ) : null}
       {overview.isError ? (
-        <section className="v2-admin-error" role="alert"><AlertTriangle size={20} /><span>管理概览暂时不可用。</span></section>
+        <section className="v2-admin-error" role="alert"><AlertTriangle size={20} /><span>{t("管理概览暂时不可用。")}</span></section>
       ) : null}
       {overview.data ? <DashboardData overview={overview.data} /> : null}
     </section>

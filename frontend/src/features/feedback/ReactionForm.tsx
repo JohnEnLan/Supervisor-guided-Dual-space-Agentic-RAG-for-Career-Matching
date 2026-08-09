@@ -3,6 +3,7 @@ import { CheckCircle2, Send } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import { api } from "../../api/queries";
+import { useLanguage } from "../../i18n";
 
 const OUTCOMES = [
   { label: "被拒", value: "rejected" },
@@ -12,10 +13,12 @@ const OUTCOMES = [
 ] as const;
 
 export function ReactionNotice() {
-  return <p className="feedback-note">反馈会先保存在私有记录中，不会自动发布为匿名案例。</p>;
+  const { t } = useLanguage();
+  return <p className="feedback-note">{t("反馈会先保存在私有记录中，不会自动发布为匿名案例。")}</p>;
 }
 
 export function ReactionForm({ runId, jobId }: { runId: string; jobId: string }) {
+  const { t } = useLanguage();
   const [outcome, setOutcome] = useState<string | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const notesId = useId();
@@ -46,13 +49,13 @@ export function ReactionForm({ runId, jobId }: { runId: string; jobId: string })
     return (
       <div className="feedback-success">
         <CheckCircle2 />
-        <span>已记录 ✓</span>
+        <span>{t("已记录 ✓")}</span>
       </div>
     );
   return (
     <form className="reaction-form" onSubmit={submit}>
-      <h3>投递后回来告诉我们进展</h3>
-      <div className="reaction-outcomes" aria-label="申请进展">
+      <h3>{t("投递后回来告诉我们进展")}</h3>
+      <div className="reaction-outcomes" aria-label={t("申请进展")}>
         {OUTCOMES.map((item) => (
           <button
             key={item.value}
@@ -61,7 +64,7 @@ export function ReactionForm({ runId, jobId }: { runId: string; jobId: string })
             aria-pressed={outcome === item.value}
             onClick={() => setOutcome(item.value)}
           >
-            {item.label}
+            {t(item.label)}
           </button>
         ))}
       </div>
@@ -72,19 +75,19 @@ export function ReactionForm({ runId, jobId }: { runId: string; jobId: string })
         aria-controls={notesOpen ? notesId : undefined}
         onClick={() => setNotesOpen((open) => !open)}
       >
-        {notesOpen ? "收起备注" : "添加备注"}
+        {notesOpen ? t("收起备注") : t("添加备注")}
       </button>
       {notesOpen ? (
         <label className="reaction-notes" id={notesId}>
-          备注（可选）
+          {t("备注（可选）")}
           <textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
         </label>
       ) : null}
       <ReactionNotice />
-      {reaction.isError ? <p className="inline-error">进展暂时未保存，请重试。</p> : null}
+      {reaction.isError ? <p className="inline-error">{t("进展暂时未保存，请重试。")}</p> : null}
       <button className="secondary" disabled={!outcome || reaction.isPending}>
         <Send size={17} />
-        {reaction.isPending ? "正在提交…" : "提交进展"}
+        {reaction.isPending ? t("正在提交…") : t("提交进展")}
       </button>
     </form>
   );

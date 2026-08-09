@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import { api, type Me } from "../api/queries";
+import { useLanguage } from "../i18n";
 import { AdminDashboard } from "./admin/AdminDashboard";
 import { AdminOperations } from "./admin/AdminOperations";
 import type { GuardedAdminRequest } from "./admin/types";
@@ -19,6 +20,7 @@ function activeSection(value: string | null): AdminSection {
 }
 
 function AdminWorkspace({ me }: { me: Me }) {
+  const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const section = activeSection(searchParams.get("tab"));
   const queryClient = useQueryClient();
@@ -54,23 +56,23 @@ function AdminWorkspace({ me }: { me: Me }) {
       <header className="v2-admin-header">
         <div>
           <p className="v2-admin-kicker"><ShieldCheck size={15} /> Restricted operations</p>
-          <h1>管理控制台</h1>
-          <p>用量、用户与运行证据的受限管理入口。</p>
+          <h1>{t("管理控制台")}</h1>
+          <p>{t("用量、用户与运行证据的受限管理入口。")}</p>
         </div>
         <div className="v2-admin-identity">
-          <span>{me.display_name || "管理员"}</span>
-          <Link to="/app"><ArrowLeft size={15} />返回工作台</Link>
+          <span>{me.display_name || t("管理员")}</span>
+          <Link to="/app"><ArrowLeft size={15} />{t("返回工作台")}</Link>
         </div>
       </header>
-      <nav className="v2-admin-tabs" aria-label="管理控制台栏目">
+      <nav className="v2-admin-tabs" aria-label={t("管理控制台栏目")}>
         <button type="button" aria-current={section === "dashboard" ? "page" : undefined} onClick={() => selectSection("dashboard")}>
           <LayoutDashboard size={17} />Dashboard
         </button>
         <button type="button" aria-current={section === "users" ? "page" : undefined} onClick={() => selectSection("users")}>
-          <UsersRound size={17} />用户
+          <UsersRound size={17} />{t("用户")}
         </button>
         <button type="button" aria-current={section === "evaluation" || section === "monitoring" ? "page" : undefined} onClick={() => selectSection("evaluation")}>
-          <Activity size={17} />评估与监控
+          <Activity size={17} />{t("评估与监控")}
         </button>
       </nav>
       <main className="v2-admin-main">
@@ -94,6 +96,7 @@ function AdminWorkspace({ me }: { me: Me }) {
 }
 
 function FreshAdminWorkspace({ me }: { me: Me }) {
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [cacheEvicted, setCacheEvicted] = useState(false);
 
@@ -104,9 +107,9 @@ function FreshAdminWorkspace({ me }: { me: Me }) {
 
   if (!cacheEvicted) {
     return (
-      <main className="v2-admin-gate" role="status" aria-label="正在准备管理工作区">
+      <main className="v2-admin-gate" role="status" aria-label={t("正在准备管理工作区")}>
         <ShieldCheck size={22} />
-        <span>正在准备管理工作区</span>
+        <span>{t("正在准备管理工作区")}</span>
       </main>
     );
   }
@@ -114,6 +117,7 @@ function FreshAdminWorkspace({ me }: { me: Me }) {
 }
 
 export function AdminPage() {
+  const { t } = useLanguage();
   const me = useQuery({
     queryKey: ["me"],
     queryFn: api.me,
@@ -125,9 +129,9 @@ export function AdminPage() {
 
   if (me.isPending || me.isFetching) {
     return (
-      <main className="v2-admin-gate" role="status" aria-label="正在验证管理权限">
+      <main className="v2-admin-gate" role="status" aria-label={t("正在验证管理权限")}>
         <ShieldCheck size={22} />
-        <span>正在验证管理权限</span>
+        <span>{t("正在验证管理权限")}</span>
       </main>
     );
   }

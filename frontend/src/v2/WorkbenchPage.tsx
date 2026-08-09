@@ -19,7 +19,8 @@ import {
 } from "../api/queries";
 import { EvidenceDrawer } from "../features/results/EvidenceDrawer";
 import { ReactionForm } from "../features/feedback/ReactionForm";
-import { deriveConsultSlots } from "./consultSlots";
+import { useLanguage, type Translate } from "../i18n";
+import { deriveConsultSlots, type ConsultSlotState } from "./consultSlots";
 import { FocusModal } from "./FocusModal";
 import { readLastRun, removeLastRun, writeLastRun, writeSessionTitle } from "./localRunStorage";
 import { ResumeProfileAccordion } from "./ResumeProfileAccordion";
@@ -139,6 +140,71 @@ export function buildProfileSummaryLines(preview: ResumePreview | undefined): st
   return lines;
 }
 
+function translatedProfileSummaryLines(
+  preview: ResumePreview | undefined,
+  t: Translate,
+): string[] {
+  if (!preview) return [];
+  const lines: string[] = [];
+  const education = preview.education ?? [];
+  if (education.length) {
+    const first = education[0];
+    const label = [first.institution, first.degree].filter(Boolean).join(" · ");
+    lines.push(
+      education.length > 1
+        ? t("🎓 教育：{label}（等 {count} 段）", { label, count: education.length })
+        : t("🎓 教育：{label}", { label }),
+    );
+  }
+  for (const item of preview.experience ?? []) {
+    const label = [item.organization, item.title].filter(Boolean).join(" · ");
+    if (label) lines.push(t("💼 经历：{label}", { label }));
+  }
+  for (const item of preview.projects ?? []) {
+    if (item.name) lines.push(t("🧩 项目：{name}", { name: item.name }));
+  }
+  const skills = preview.skills ?? [];
+  if (skills.length) {
+    const visibleSkills = skills.slice(0, 6).join("、");
+    lines.push(
+      skills.length > 6
+        ? t("🛠️ 技能：{skills}（共 {count} 项）", {
+            skills: visibleSkills,
+            count: skills.length,
+          })
+        : t("🛠️ 技能：{skills}", { skills: visibleSkills }),
+    );
+  }
+  lines.push(t("完整档案就在下方，点开可逐条核对原文出处 →"));
+  return lines;
+}
+
+function translatedConsultSlotLabel(slot: ConsultSlotState, t: Translate): string {
+  if (slot.id === "goal") {
+    return slot.complete
+      ? t("目标：{value}", { value: slot.label.replace(/^目标：/, "") })
+      : t("目标：待补充");
+  }
+  if (slot.id === "location") {
+    if (!slot.complete) return t("地点：待补充");
+    const value = slot.label.replace(/^地点：/, "");
+    return t("地点：{value}", { value: value === "远程" ? t("远程") : value });
+  }
+  if (slot.id === "visa") {
+    if (!slot.complete) return t("签证：待补充");
+    const value = slot.label.replace(/^签证：/, "");
+    return t("签证：{value}", { value: t(value) });
+  }
+  const progress = /^简历补充：已回答 (\d+)，已跳过 (\d+)，待补充 (\d+)$/.exec(slot.label);
+  return progress
+    ? t("简历补充：已回答 {answered}，已跳过 {skipped}，待补充 {remaining}", {
+        answered: progress[1],
+        skipped: progress[2],
+        remaining: progress[3],
+      })
+    : slot.label;
+}
+
 // B1 R5：到场编排——只对"首批数据之后新增"的消息按批内顺序附加动画延迟。
 // 基线在该 resetKey 下 keys **首次非空**时建立（评审 M1：resetKey 变化帧
 // 几乎总是无数据帧，若在该帧建基线，异步到达的全量历史会被误判为新增而
@@ -225,6 +291,7 @@ function Bubble({
   metadata?: { kind: "stage" | "round"; text: string };
   style?: React.CSSProperties;
 }) {
+  const { t } = useLanguage();
   const meta = PERSONAS[persona] ?? PERSONAS.pm;
   const mine = persona === "user";
   return (
@@ -238,14 +305,14 @@ function Bubble({
     >
       {!mine && !grouped ? (
         <span className="v2-avatar" aria-hidden="true">
-          {meta.short}
+          {t(meta.short)}
         </span>
       ) : null}
       <div className={tone === "card" ? "v2-bubble card" : "v2-bubble"}>
         {!mine && !grouped ? (
           <header>
-            <strong>{meta.name}</strong>
-            {meta.role ? <span>{meta.role}</span> : null}
+            <strong>{t(meta.name)}</strong>
+            {meta.role ? <span>{t(meta.role)}</span> : null}
           </header>
         ) : null}
         {children}
@@ -275,14 +342,15 @@ function ServiceProgressCard({
   hasRecovery: boolean;
   sticky: boolean;
 }) {
+  const { t } = useLanguage();
   const progress = deriveServiceProgress(status, hasRecovery);
   return (
     <Bubble persona="pm" tone="card" sticky={sticky}>
-      <section className="v2-service-progress" aria-label="服务进度">
+      <section className="v2-service-progress" aria-label={t("服务进度")}>
         <div className="v2-progress-heading">
-          <strong>服务进度</strong>
-          <span role="status" aria-label="服务运行状态">
-            {progress.summary}
+          <strong>{t("服务进度")}</strong>
+          <span role="status" aria-label={t("服务运行状态")}>
+            {t(progress.summary)}
           </span>
         </div>
         <ol className="v2-progress-list">
@@ -298,9 +366,9 @@ function ServiceProgressCard({
                 {progressMarker(item)}
               </span>
               <span className="v2-progress-copy">
-                <strong>{item.label}</strong>
-                <small>{item.detail}</small>
-                {item.recovery ? <small className="v2-progress-recovery">↻ 质量把关：受控重检</small> : null}
+                <strong>{t(item.label)}</strong>
+                <small>{t(item.detail)}</small>
+                {item.recovery ? <small className="v2-progress-recovery">{t("↻ 质量把关：受控重检")}</small> : null}
               </span>
             </li>
           ))}
@@ -319,26 +387,38 @@ function FinalizeAction({
   pending: boolean;
   onFinalize: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="v2-finalize-action">
       <button
         type="button"
         className="v2-btn primary"
-        aria-label="生成确认单"
+        aria-label={t("生成确认单")}
         disabled={disabled}
         onClick={onFinalize}
       >
         <Sparkles size={16} />
-        {pending ? "生成中…" : "生成确认单"}
+        {pending ? t("生成中…") : t("生成确认单")}
       </button>
     </div>
   );
 }
 
-function finalizationMilestoneText(profile: ConsultState["profile_draft"]): string {
+function finalizationMilestoneText(
+  profile: ConsultState["profile_draft"],
+  t: Translate,
+): string {
   const [goal, location, visa] = deriveConsultSlots(profile);
   const value = (label: string) => label.replace(/^[^：]+：/, "");
-  return `小意已把必填信息收集齐：目标 ${value(goal.label)}、地点 ${value(location.label)}、签证${value(visa.label)}。你可以继续补充偏好，也可以让我安排匹配。`;
+  const locationValue = value(location.label);
+  return t(
+    "小意已把必填信息收集齐：目标 {goal}、地点 {location}、签证{visa}。你可以继续补充偏好，也可以让我安排匹配。",
+    {
+      goal: value(goal.label),
+      location: locationValue === "远程" ? t("远程") : locationValue,
+      visa: t(value(visa.label)).toLocaleLowerCase("en"),
+    },
+  );
 }
 
 const SQL_LOCKED_CONSTRAINT_FIELDS = new Set([
@@ -378,41 +458,42 @@ function BriefCard({
   confirming: boolean;
   confirmed: boolean;
 }) {
+  const { t } = useLanguage();
   const hard = draft.hard_constraints ?? {};
   const hardEntries = Object.entries(hard);
   const sqlLocked = hardEntries.filter(isSqlLockedConstraint);
   const directional = hardEntries.filter((entry) => !isSqlLockedConstraint(entry));
   return (
     <div className="v2-brief">
-      <p className="v2-brief-title">Match Brief 确认单</p>
-      <p className="v2-brief-guidance">确认单由你们的对话记录自动生成，请你核对无误后开始。</p>
+      <p className="v2-brief-title">{t("Match Brief 确认单")}</p>
+      <p className="v2-brief-guidance">{t("确认单由你们的对话记录自动生成，请你核对无误后开始。")}</p>
       <dl>
         <div>
-          <dt>目标</dt>
+          <dt>{t("目标")}</dt>
           <dd>{draft.career_goal}</dd>
         </div>
         <div>
-          <dt>硬条件（SQL 锁定）</dt>
-          <dd>{constraintText(sqlLocked)}</dd>
+          <dt>{t("硬条件（SQL 锁定）")}</dt>
+          <dd>{sqlLocked.length ? constraintText(sqlLocked) : t("无")}</dd>
         </div>
         <div>
-          <dt>检索方向 / 排序参考</dt>
-          <dd>{constraintText(directional)}</dd>
+          <dt>{t("检索方向 / 排序参考")}</dt>
+          <dd>{directional.length ? constraintText(directional) : t("无")}</dd>
         </div>
         <div>
-          <dt>暂不考虑</dt>
-          <dd>{draft.avoid_roles?.length ? draft.avoid_roles.join("、") : "无"}</dd>
+          <dt>{t("暂不考虑")}</dt>
+          <dd>{draft.avoid_roles?.length ? draft.avoid_roles.join("、") : t("无")}</dd>
         </div>
         <div>
-          <dt>结果数量</dt>
+          <dt>{t("结果数量")}</dt>
           <dd>{draft.result_count}</dd>
         </div>
       </dl>
       {confirmed && brief ? (
-        <p className="v2-notice">已确认，任务 {brief.run_id.slice(0, 8)} 开始执行。</p>
+        <p className="v2-notice">{t("已确认，任务 {runId} 开始执行。", { runId: brief.run_id.slice(0, 8) })}</p>
       ) : (
         <button type="button" className="v2-btn primary" disabled={confirming} onClick={onConfirm}>
-          {confirming ? "创建中…" : "确认无误，开始匹配"}
+          {confirming ? t("创建中…") : t("确认无误，开始匹配")}
         </button>
       )}
     </div>
@@ -420,6 +501,7 @@ function BriefCard({
 }
 
 function DemoDisclosure({ countryCode }: { countryCode: string | null | undefined }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const panelId = useId();
   return (
@@ -430,9 +512,9 @@ function DemoDisclosure({ countryCode }: { countryCode: string | null | undefine
         aria-controls={panelId}
         onClick={() => setOpen((current) => !current)}
       >
-        演示数据{countryCode ? ` · ${countryCode}` : ""}
+        {countryCode ? t("演示数据 · {countryCode}", { countryCode }) : t("演示数据")}
       </button>
-      {open ? <p id={panelId}>该岗位来自合成演示语料，公司与城市为演示映射。</p> : null}
+      {open ? <p id={panelId}>{t("该岗位来自合成演示语料，公司与城市为演示映射。")}</p> : null}
     </div>
   );
 }
@@ -448,6 +530,7 @@ function ResultCards({
   highlighted: boolean;
   onNewConsult: () => void;
 }) {
+  const { t } = useLanguage();
   const result = useQuery({
     queryKey: ["v2-result", runId],
     queryFn: () => api.runResult(runId),
@@ -463,11 +546,11 @@ function ResultCards({
         ref={anchorRef}
         className={`v2-results${highlighted ? " is-highlighted" : ""}`}
         role="region"
-        aria-label="匹配结果"
+        aria-label={t("匹配结果")}
         tabIndex={-1}
       >
         <p className="v2-inline-loading">
-          <LoaderCircle className="spin" size={15} /> 正在整理结果…
+          <LoaderCircle className="spin" size={15} /> {t("正在整理结果…")}
         </p>
       </div>
     );
@@ -477,10 +560,10 @@ function ResultCards({
         ref={anchorRef}
         className={`v2-results${highlighted ? " is-highlighted" : ""}`}
         role="region"
-        aria-label="匹配结果"
+        aria-label={t("匹配结果")}
         tabIndex={-1}
       >
-        <p className="v2-error">结果暂时无法读取，可稍后刷新。</p>
+        <p className="v2-error">{t("结果暂时无法读取，可稍后刷新。")}</p>
       </div>
     );
   const product = result.data.result;
@@ -514,12 +597,12 @@ function ResultCards({
       ref={anchorRef}
       className="v2-results"
       role="region"
-      aria-label="匹配结果"
+      aria-label={t("匹配结果")}
       tabIndex={-1}
     >
-      <div className="v2-capabilities" aria-label="检索能力">
-        <span>混合检索（BM25+语义双路）</span>
-        {capabilities.data?.dual_space_enabled === true ? <span>支持双空间增强</span> : null}
+      <div className="v2-capabilities" aria-label={t("检索能力")}>
+        <span>{t("混合检索（BM25+语义双路）")}</span>
+        {capabilities.data?.dual_space_enabled === true ? <span>{t("支持双空间增强")}</span> : null}
       </div>
       {(product.recommended_roles ?? []).map((role: Recommendation, index: number) => {
         const sourceUrl = safeSourceUrl(role.source_url);
@@ -533,7 +616,7 @@ function ResultCards({
                 <span className="v2-rank" data-featured={index < 3 ? "true" : "false"}>
                   {featuredRanks[index] ?? `${index + 1}.`}
                 </span>
-                <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ?? role.tier}</span>
+                <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ? t(tierLabel[role.tier]) : role.tier}</span>
               </div>
               {role.demo_synthetic ? (
                 <DemoDisclosure countryCode={role.country_code} />
@@ -544,7 +627,7 @@ function ResultCards({
               </p>
               {sourceUrl ? (
                 <a className="v2-source-link" href={sourceUrl} target="_blank" rel="noopener noreferrer">
-                  查看原岗位 ↗
+                  {t("查看原岗位 ↗")}
                 </a>
               ) : null}
             </header>
@@ -561,7 +644,7 @@ function ResultCards({
       })}
       {resumeStrategy.length ? (
         <details className="v2-extra">
-          <summary>简历修改建议（{resumeStrategy.length} 条）</summary>
+          <summary>{t("简历修改建议（{count} 条）", { count: resumeStrategy.length })}</summary>
           <ul>
             {resumeStrategy.map((item, index) => (
               <li key={index}>
@@ -573,7 +656,7 @@ function ResultCards({
       ) : null}
       {skillGaps.length ? (
         <details className="v2-extra">
-          <summary>能力缺口（{skillGaps.length} 项）</summary>
+          <summary>{t("能力缺口（{count} 项）", { count: skillGaps.length })}</summary>
           <ul>
             {skillGaps.map((gap, index) => (
               <li key={index}>
@@ -586,7 +669,7 @@ function ResultCards({
       ) : null}
       {careerPath.length ? (
         <details className="v2-extra">
-          <summary>职业路径</summary>
+          <summary>{t("职业路径")}</summary>
           <ul>
             {careerPath.map((step, index) => (
               <li key={index}>
@@ -597,20 +680,20 @@ function ResultCards({
         </details>
       ) : null}
       {warnings.length ? (
-        <p className="v2-warnings">提示：{warnings.join("、")}</p>
+        <p className="v2-warnings">{t("提示：{warnings}", { warnings: warnings.join("、") })}</p>
       ) : null}
-      <div className="v2-result-actions" role="group" aria-label="结果后续行动">
+      <div className="v2-result-actions" role="group" aria-label={t("结果后续行动")}>
         <button type="button" onClick={() => activateResultControl(".v2-evidence-trigger", true)}>
-          查看第 1 名的证据
+          {t("查看第 1 名的证据")}
         </button>
         <button
           type="button"
           onClick={() => activateResultControl('.v2-job-card .reaction-outcomes button')}
         >
-          更新申请进展
+          {t("更新申请进展")}
         </button>
         <button type="button" onClick={onNewConsult}>
-          新建咨询细化方向
+          {t("新建咨询细化方向")}
         </button>
       </div>
     </div>
@@ -618,6 +701,7 @@ function ResultCards({
 }
 
 export function WorkbenchPage() {
+  const { t } = useLanguage();
   const { sessionId = "" } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1174,17 +1258,17 @@ export function WorkbenchPage() {
     <section className="v2-workbench">
       <header className="v2-room-header">
         <div>
-          <h1>职业规划服务群</h1>
+          <h1>{t("职业规划服务群")}</h1>
           <p>
             {Object.values(PERSONAS)
               .filter((meta) => meta.role)
-              .map((meta) => meta.name)
+              .map((meta) => t(meta.name))
               .join(" · ")}
           </p>
         </div>
         {running ? (
           <span className="v2-room-status">
-            <LoaderCircle className="spin" size={14} /> 服务进行中
+            <LoaderCircle className="spin" size={14} /> {t("服务进行中")}
           </span>
         ) : null}
       </header>
@@ -1192,9 +1276,10 @@ export function WorkbenchPage() {
       <ol className="v2-timeline" ref={timelineRef} onScroll={timelineScroll.onScroll} aria-live="polite">
         <Bubble persona="pm">
           <p>
-            欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，
-            我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（
-            {supportedFormatsLabel(imageUploadEnabled)}）。
+            {t(
+              "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（{formats}）。",
+              { formats: t(supportedFormatsLabel(imageUploadEnabled)) },
+            )}
           </p>
         </Bubble>
 
@@ -1203,10 +1288,14 @@ export function WorkbenchPage() {
           // B1 R5：PM 先到场，小意 600ms 后跟进（reduced-motion 下即时）
           <Bubble persona="intent_consultant" tone="card" style={{ animationDelay: "600ms" }}>
             <p>
-              把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——
-              用下方输入框左侧的 📎 就能发
-              {imageUploadEnabled ? `（${supportedFormatsLabel(imageUploadEnabled)}）` : ""}。
-              上传是免费预览，确认解析后才开始整理。
+              {t(
+                "把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——用下方输入框左侧的 📎 就能发{formats}。上传是免费预览，确认解析后才开始整理。",
+                {
+                  formats: imageUploadEnabled
+                    ? t("（{formats}）", { formats: t(supportedFormatsLabel(imageUploadEnabled)) })
+                    : "",
+                },
+              )}
             </p>
           </Bubble>
         ) : null}
@@ -1214,8 +1303,11 @@ export function WorkbenchPage() {
         {pendingFile ? (
           <Bubble persona="user" tone="card">
             <p>
-              {pendingFile.name}（{Math.max(1, Math.round(pendingFile.size / 1024))} KB）
-              {uploadPending ? "——确认后将替换当前待解析的上传" : null}
+              {t("{filename}（{size} KB）", {
+                filename: pendingFile.name,
+                size: Math.max(1, Math.round(pendingFile.size / 1024)),
+              })}
+              {uploadPending ? t("——确认后将替换当前待解析的上传") : null}
             </p>
             <div className="v2-pending-actions">
               <button
@@ -1224,7 +1316,7 @@ export function WorkbenchPage() {
                 disabled={upload.isPending}
                 onClick={() => upload.mutate({ file: pendingFile, forSession: sessionId })}
               >
-                {upload.isPending ? "上传中…" : "确认上传"}
+                {upload.isPending ? t("上传中…") : t("确认上传")}
               </button>
               <button
                 type="button"
@@ -1235,11 +1327,17 @@ export function WorkbenchPage() {
                   upload.reset();
                 }}
               >
-                取消
+                {t("取消")}
               </button>
             </div>
             {upload.isError ? (
-              <p className="v2-error">{uploadErrorText(upload.error, imageUploadEnabled)}</p>
+              <p className="v2-error">
+                {upload.error instanceof ApiError && upload.error.status === 415
+                  ? t("暂不支持该文件格式（当前支持 {formats}）。", {
+                      formats: t(supportedFormatsLabel(imageUploadEnabled)),
+                    })
+                  : t(uploadErrorText(upload.error, imageUploadEnabled))}
+              </p>
             ) : null}
           </Bubble>
         ) : null}
@@ -1247,12 +1345,15 @@ export function WorkbenchPage() {
         {uploadPending && !resumeProcessing && !pendingFile ? (
           <Bubble persona="intent_consultant" tone="card">
             <p>
-              收到「{pendingUpload.data?.filename}」：共 {pendingUpload.data?.pages} 页、
-              约 {pendingUpload.data?.chars} 字。
+              {t("收到「{filename}」：共 {pages} 页、约 {chars} 字。", {
+                filename: pendingUpload.data?.filename ?? "",
+                pages: pendingUpload.data?.pages ?? 0,
+                chars: pendingUpload.data?.chars ?? 0,
+              })}
               {pendingUpload.data?.ocr_suggested
                 ? imageUploadEnabled
-                  ? "检测到扫描件/图片，确认解析后小意会用视觉识别读取（约几分钱）。"
-                  : "文字较少，可能是扫描件/图片——图片识别即将开放，建议先换文字版试试。"
+                  ? t("检测到扫描件/图片，确认解析后小意会用视觉识别读取（约几分钱）。")
+                  : t("文字较少，可能是扫描件/图片——图片识别即将开放，建议先换文字版试试。")
                 : null}
             </p>
             {pendingUpload.data?.text_preview ? (
@@ -1261,8 +1362,10 @@ export function WorkbenchPage() {
               </blockquote>
             ) : null}
             <p className="v2-parse-quota">
-              解析会调用 AI 整理档案（本会话已用 {pendingUpload.data?.parses_used ?? 0}/
-              {pendingUpload.data?.parses_limit ?? 3} 次）。
+              {t("解析会调用 AI 整理档案（本会话已用 {used}/{limit} 次）。", {
+                used: pendingUpload.data?.parses_used ?? 0,
+                limit: pendingUpload.data?.parses_limit ?? 3,
+              })}
             </p>
             <button
               type="button"
@@ -1278,13 +1381,14 @@ export function WorkbenchPage() {
                 parseResume.mutate({ generation, forSession: sessionId });
               }}
             >
-              {parseResume.isPending ? "已提交…" : "确认解析"}
+              {parseResume.isPending ? t("已提交…") : t("确认解析")}
             </button>
             {parseLimitReached ? (
               <>
                 <p className="v2-error">
-                  本会话解析次数已用完（{pendingUpload.data?.parses_limit ?? 3}/
-                  {pendingUpload.data?.parses_limit ?? 3}）。会话额度也用完时请联系管理员重置。
+                  {t("本会话解析次数已用完（{limit}/{limit}）。会话额度也用完时请联系管理员重置。", {
+                    limit: pendingUpload.data?.parses_limit ?? 3,
+                  })}
                 </p>
                 <button
                   type="button"
@@ -1292,13 +1396,13 @@ export function WorkbenchPage() {
                   disabled={newSession.isPending}
                   onClick={() => newSession.mutate()}
                 >
-                  {newSession.isPending ? "创建中…" : "新建会话继续"}
+                  {newSession.isPending ? t("创建中…") : t("新建会话继续")}
                 </button>
                 {newSession.isError ? (
                   <p className="v2-error">
                     {newSession.error instanceof ApiError && newSession.error.status === 402
-                      ? "会话额度已用完，请联系管理员。"
-                      : "新建会话失败，请重试。"}
+                      ? t("会话额度已用完，请联系管理员。")
+                      : t("新建会话失败，请重试。")}
                   </p>
                 ) : null}
               </>
@@ -1307,8 +1411,8 @@ export function WorkbenchPage() {
                 {parseResume.error instanceof ApiError &&
                 parseResume.error.status === 409 &&
                 parseResume.error.message === "resume_ocr_disabled"
-                  ? "图片识别功能暂时关闭，这份图片暂无法解析——请重新上传文字版简历（PDF/DOCX/TXT）。"
-                  : "确认解析失败，请重试。"}
+                  ? t("图片识别功能暂时关闭，这份图片暂无法解析——请重新上传文字版简历（PDF/DOCX/TXT）。")
+                  : t("确认解析失败，请重试。")}
               </p>
             ) : null}
           </Bubble>
@@ -1316,36 +1420,36 @@ export function WorkbenchPage() {
 
         {pendingUploadLoadError && !pendingFile ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p className="v2-error">待解析上传状态加载失败，请重试</p>
+            <p className="v2-error">{t("待解析上传状态加载失败，请重试")}</p>
             <button
               type="button"
               className="v2-btn ghost"
               disabled={pendingUpload.isFetching}
               onClick={() => void pendingUpload.refetch()}
             >
-              {pendingUpload.isFetching ? "重试中…" : "重试加载"}
+              {pendingUpload.isFetching ? t("重试中…") : t("重试加载")}
             </button>
           </Bubble>
         ) : null}
 
         {previewLoadError ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p className="v2-error">简历档案加载失败，请重试</p>
+            <p className="v2-error">{t("简历档案加载失败，请重试")}</p>
             <button
               type="button"
               className="v2-btn ghost"
               disabled={preview.isFetching}
               onClick={() => void preview.refetch()}
             >
-              {preview.isFetching ? "重试中…" : "重试加载简历档案"}
+              {preview.isFetching ? t("重试中…") : t("重试加载简历档案")}
             </button>
           </Bubble>
         ) : null}
 
         {resumeError && !pendingFile && !uploadPending ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p className="v2-error">这份文件我没能整理成功，旧档案已作废。</p>
-            <p>请点下方输入框左侧的 📎 重新发一份给我（换个格式或文字版更稳）。</p>
+            <p className="v2-error">{t("这份文件我没能整理成功，旧档案已作废。")}</p>
+            <p>{t("请点下方输入框左侧的 📎 重新发一份给我（换个格式或文字版更稳）。")}</p>
           </Bubble>
         ) : null}
 
@@ -1360,15 +1464,15 @@ export function WorkbenchPage() {
                 persona="intent_consultant"
                 style={progressStagger(`ev-${event.seq}`)}
               >
-                <p>{event.text}</p>
+                <p>{t(event.text)}</p>
               </Bubble>
             ))}
             <Bubble persona="intent_consultant">
               <p className="v2-inline-loading">
                 <LoaderCircle className="spin" size={15} />{" "}
                 {progressEvents.length
-                  ? "小意整理中，马上就好…"
-                  : "正在归一化你的简历（解析 → 切证据片段 → 结构化 → 防编造校验）…"}
+                  ? t("小意整理中，马上就好…")
+                  : t("正在归一化你的简历（解析 → 切证据片段 → 结构化 → 防编造校验）…")}
               </p>
             </Bubble>
           </Fragment>
@@ -1378,10 +1482,10 @@ export function WorkbenchPage() {
           <Bubble persona="intent_consultant" tone="card">
             {/* B3：终态事件带耗时（"用时 X.X 秒"）——亲历解析的这次挂载才展示 */}
             {watchedProcessing && doneEvent ? (
-              <p className="v2-intake-done">{doneEvent.text}</p>
+              <p className="v2-intake-done">{t(doneEvent.text)}</p>
             ) : null}
             <div className="v2-profile-summary">
-              {buildProfileSummaryLines(preview.data).map((line, index) => (
+              {translatedProfileSummaryLines(preview.data, t).map((line, index) => (
                 <p
                   key={`${index}-${line}`}
                   className={watchedProcessing ? "v2-profile-line" : undefined}
@@ -1396,28 +1500,28 @@ export function WorkbenchPage() {
               ))}
             </div>
             <ResumeProfileAccordion preview={preview.data} />
-            <p>确认无误后，我们就开始聊方向！</p>
+            <p>{t("确认无误后，我们就开始聊方向！")}</p>
             <button
               type="button"
               className="v2-btn primary"
               disabled={confirmResume.isPending}
               onClick={() => confirmResume.mutate()}
             >
-              {confirmResume.isPending ? "确认中…" : "确认简历档案"}
+              {confirmResume.isPending ? t("确认中…") : t("确认简历档案")}
             </button>
           </Bubble>
         ) : null}
 
         {resumeConfirmed && consult.isError ? (
           <Bubble persona="intent_consultant" tone="card">
-            <p className="v2-error">咨询状态加载失败，请重试</p>
+            <p className="v2-error">{t("咨询状态加载失败，请重试")}</p>
             <button
               type="button"
               className="v2-btn ghost"
               disabled={consult.isFetching}
               onClick={() => void consult.refetch()}
             >
-              {consult.isFetching ? "重试中…" : "重试加载咨询状态"}
+              {consult.isFetching ? t("重试中…") : t("重试加载咨询状态")}
             </button>
           </Bubble>
         ) : null}
@@ -1426,7 +1530,7 @@ export function WorkbenchPage() {
           <Bubble
             key={item.key}
             persona={item.persona}
-            metadata={{ kind: "round", text: `第 ${item.round} 轮` }}
+            metadata={{ kind: "round", text: t("第 {round} 轮", { round: item.round }) }}
           >
             <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
             {item.key === finalizableNoteKey && canConsult && consult.data?.can_finalize && !briefDraft ? (
@@ -1442,14 +1546,14 @@ export function WorkbenchPage() {
         {turn.isPending ? (
           <Bubble persona="intent_consultant">
             <p className="v2-inline-loading">
-              <LoaderCircle className="spin" size={15} /> 小意正在回复…
+              <LoaderCircle className="spin" size={15} /> {t("小意正在回复…")}
             </p>
           </Bubble>
         ) : null}
 
         {canConsult && consult.data?.can_finalize && !briefDraft && !finalizableNoteKey ? (
           <Bubble persona="pm" tone="card">
-            <p>{finalizationMilestoneText(consult.data.profile_draft)}</p>
+            <p>{finalizationMilestoneText(consult.data.profile_draft, t)}</p>
             <FinalizeAction
               disabled={finalize.isPending || turn.isPending}
               pending={finalize.isPending}
@@ -1468,7 +1572,7 @@ export function WorkbenchPage() {
               onConfirm={() => confirmBrief.mutate()}
             />
             {confirmBrief.isError ? (
-              <p className="v2-error">创建失败，请重试或继续补充信息。</p>
+              <p className="v2-error">{t("创建失败，请重试或继续补充信息。")}</p>
             ) : null}
           </Bubble>
         ) : null}
@@ -1485,21 +1589,21 @@ export function WorkbenchPage() {
           const previous = runMessages[index - 1];
           const startsStage = !previous || previous.stage !== item.stage;
           const grouped = !startsStage && previous.persona === item.persona;
-          const stageLabel = runMessageStageLabel(item.stage);
+          const stageLabel = t(runMessageStageLabel(item.stage));
           return (
             <Fragment key={`run-${item.seq}`}>
               {startsStage ? (
-                <li className="v2-stage-divider" role="separator" aria-label={`运行阶段：${stageLabel}`}>
+                <li className="v2-stage-divider" role="separator" aria-label={t("运行阶段：{stage}", { stage: stageLabel })}>
                   <span>{stageLabel}</span>
                 </li>
               ) : null}
               <Bubble
                 persona={item.persona}
                 grouped={grouped}
-                metadata={{ kind: "stage", text: `阶段 · ${stageLabel}` }}
+                metadata={{ kind: "stage", text: t("阶段 · {stage}", { stage: stageLabel }) }}
                 style={staggerStyle(`run-${item.seq}`)}
               >
-                <p style={{ whiteSpace: "pre-line" }}>{item.text}</p>
+                <p style={{ whiteSpace: "pre-line" }}>{t(item.text)}</p>
               </Bubble>
             </Fragment>
           );
@@ -1519,12 +1623,15 @@ export function WorkbenchPage() {
         {retryableTerminal ? (
           <Bubble persona="pm">
             <p className="v2-error">
-              {status.data?.status === "cancelled" ? "本次运行已取消" : "本次运行没有完成"}
-              {status.data?.error_code ? `（${status.data.error_code}）` : null}。当前会话不能重新生成确认单，
-              需要新建咨询后重试。
+              {t("{outcome}{errorCode}。当前会话不能重新生成确认单，需要新建咨询后重试。", {
+                outcome: status.data?.status === "cancelled" ? t("本次运行已取消") : t("本次运行没有完成"),
+                errorCode: status.data?.error_code
+                  ? t("（{errorCode}）", { errorCode: status.data.error_code })
+                  : "",
+              })}
             </p>
             <button type="button" className="v2-btn primary" onClick={() => setRetryModal("retry")}>
-              新建咨询重试
+              {t("新建咨询重试")}
             </button>
           </Bubble>
         ) : null}
@@ -1536,13 +1643,13 @@ export function WorkbenchPage() {
           className={`v2-new-message${timelineScroll.notice === "result" ? " result-ready" : ""}`}
           onClick={timelineScroll.followNotice}
         >
-          {timelineScroll.notice === "result" ? "结果已生成 ↓" : "↓ 有新消息"}
+          {timelineScroll.notice === "result" ? t("结果已生成 ↓") : t("↓ 有新消息")}
         </button>
       ) : null}
 
       <footer className="v2-composer">
         {canConsult ? (
-          <section className="v2-consult-slots" aria-label="咨询必填信息">
+          <section className="v2-consult-slots" aria-label={t("咨询必填信息")}>
             <div className="v2-slot-chips">
               {consultSlots.map((slot) => (
                 <button
@@ -1553,42 +1660,44 @@ export function WorkbenchPage() {
                   disabled={slot.complete || inputDisabled}
                   onClick={() => {
                     messageInputRef.current?.focus();
-                    if (message === "") setMessage(slot.prompt);
+                    if (message === "") setMessage(t(slot.prompt));
                   }}
                 >
                   <span aria-hidden="true">{slot.complete ? "✓" : "○"}</span>
-                  {slot.label}
+                  {translatedConsultSlotLabel(slot, t)}
                 </button>
               ))}
             </div>
             <progress
               className="v2-completeness"
-              aria-label="咨询信息完成度"
+              aria-label={t("咨询信息完成度")}
               aria-valuenow={completenessPercent}
               value={completenessPercent}
               max={100}
             />
           </section>
         ) : null}
-        <div className="v2-mode-toggle" role="tablist" aria-label="咨询模式">
+        <div className="v2-mode-toggle" role="tablist" aria-label={t("咨询模式")}>
           <button
             role="tab"
             aria-selected={mode === "targeted"}
             onClick={() => setMode("targeted")}
           >
-            目标明确
+            {t("目标明确")}
           </button>
           <button role="tab" aria-selected={mode === "explore"} onClick={() => setMode("explore")}>
-            探索方向
+            {t("探索方向")}
           </button>
         </div>
         <label
           className="v2-btn ghost v2-attach"
-          aria-label="上传简历"
+          aria-label={t("上传简历")}
           title={
             imageUploadEnabled
-              ? `支持 ${supportedFormatsLabel(imageUploadEnabled)}（PNG/JPG/WEBP）`
-              : "支持 PDF/DOCX/TXT；图片识别即将开放"
+              ? t("支持 {formats}（PNG/JPG/WEBP）", {
+                  formats: t(supportedFormatsLabel(imageUploadEnabled)),
+                })
+              : t("支持 PDF/DOCX/TXT；图片识别即将开放")
           }
         >
           <Paperclip size={17} />
@@ -1617,10 +1726,10 @@ export function WorkbenchPage() {
           value={message}
           placeholder={
             canConsult
-              ? "告诉小意你的想法…（回车发送，Shift+回车换行）"
+              ? t("告诉小意你的想法…（回车发送，Shift+回车换行）")
               : runId
-                ? "任务执行中，可在上方查看团队进展"
-                : "先用左侧 📎 上传简历，确认档案后开聊"
+                ? t("任务执行中，可在上方查看团队进展")
+                : t("先用左侧 📎 上传简历，确认档案后开聊")
           }
           disabled={inputDisabled}
           maxLength={2000}
@@ -1637,7 +1746,7 @@ export function WorkbenchPage() {
           className="v2-btn primary v2-send"
           disabled={inputDisabled || !message.trim()}
           onClick={() => turn.mutate()}
-          aria-label="发送"
+          aria-label={t("发送")}
         >
           <Send size={17} />
         </button>
@@ -1646,31 +1755,30 @@ export function WorkbenchPage() {
             className={`${resumeRecovery === "error" ? "v2-error" : "v2-notice"} v2-composer-error`}
             role="status"
           >
-            {resumeRecoveryMessage(resumeRecovery)}
+            {t(resumeRecoveryMessage(resumeRecovery))}
           </p>
         ) : turn.isError ? (
           <p className="v2-error v2-composer-error">
             {turn.error instanceof ApiError && turn.error.status === 409
-              ? "对话状态已更新，请刷新后继续。"
-              : "发送失败，请重试。"}
+              ? t("对话状态已更新，请刷新后继续。")
+              : t("发送失败，请重试。")}
           </p>
         ) : null}
       </footer>
       {retryModal ? (
         <FocusModal
-          label={retryModal === "quota" ? "额度已用完" : "新建咨询确认"}
+          label={retryModal === "quota" ? t("额度已用完") : t("新建咨询确认")}
           modeKey={retryModal}
           closeDisabled={retryModal !== "quota" && createSession.isPending}
           onClose={() => setRetryModal(null)}
         >
           {retryModal !== "quota" ? (
             <>
-              <h2>{retryModal === "refine" ? "新建咨询细化方向" : "新建咨询后重试"}</h2>
+              <h2>{retryModal === "refine" ? t("新建咨询细化方向") : t("新建咨询后重试")}</h2>
               <p>
-                新建咨询会消耗一次咨询额度。
                 {retryModal === "refine"
-                  ? "创建成功后可继续细化方向。"
-                  : "创建成功后才会离开当前终态页面。"}
+                  ? t("新建咨询会消耗一次咨询额度。创建成功后可继续细化方向。")
+                  : t("新建咨询会消耗一次咨询额度。创建成功后才会离开当前终态页面。")}
               </p>
               <div className="v2-modal-actions">
                 <button
@@ -1679,7 +1787,7 @@ export function WorkbenchPage() {
                   disabled={createSession.isPending}
                   onClick={() => createSession.mutate()}
                 >
-                  {createSession.isPending ? "创建中…" : "确认新建咨询"}
+                  {createSession.isPending ? t("创建中…") : t("确认新建咨询")}
                 </button>
                 <button
                   type="button"
@@ -1687,19 +1795,19 @@ export function WorkbenchPage() {
                   disabled={createSession.isPending}
                   onClick={() => setRetryModal(null)}
                 >
-                  保留当前页面
+                  {t("保留当前页面")}
                 </button>
               </div>
               {createSession.isError && !(createSession.error instanceof ApiError && createSession.error.status === 402) ? (
-                <p className="v2-error">新咨询暂时无法创建，请重试。</p>
+                <p className="v2-error">{t("新咨询暂时无法创建，请重试。")}</p>
               ) : null}
             </>
           ) : (
             <>
-              <h2>咨询额度已用完</h2>
-              <p>当前账户的咨询额度已用完。原终态页面已保留。</p>
+              <h2>{t("咨询额度已用完")}</h2>
+              <p>{t("当前账户的咨询额度已用完。原终态页面已保留。")}</p>
               <button type="button" className="v2-btn ghost" onClick={() => setRetryModal(null)}>
-                返回当前页面
+                {t("返回当前页面")}
               </button>
             </>
           )}
