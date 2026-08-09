@@ -241,7 +241,11 @@ describe("AdminPage users", () => {
         return Promise.resolve(jsonResponse(apiFixtures.adminUsers()));
       }
       if (path === "/api/v1/admin/users/user-e2e-0001/resume") {
-        return Promise.resolve(jsonResponse(apiFixtures.adminUserResume()));
+        // session_id（简历展示源）与 reset_session_id（重置靶）刻意不同：
+        // 回退用旧字段会 POST 到 sess-display-1 → Unexpected request 红。
+        return Promise.resolve(
+          jsonResponse(apiFixtures.adminUserResume({ session_id: "sess-display-1" })),
+        );
       }
       if (path === "/api/v1/admin/sessions/sess-e2e-1/reset-parse-count") {
         expect(init?.method).toBe("POST");

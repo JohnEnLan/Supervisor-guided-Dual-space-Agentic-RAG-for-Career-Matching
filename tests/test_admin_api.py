@@ -439,7 +439,13 @@ async def test_admin_user_resume_reset_target_prefers_active_parse_session(
     assert "reset_target.session_id AS reset_session_id" in sql
     assert "COALESCE(target.resume_parse_count, 0) > 0" in sql
     assert "target.status = 'resume_queued'" in sql
-    assert "ORDER BY target.updated_at DESC, target.session_id DESC" in sql
+    # queued 优先于 updated_at：旧 ready 会话被普通状态写入刷新
+    # updated_at 时也不得压过新卡住的 queued 会话。
+    normalized_sql = " ".join(sql.split())
+    assert (
+        "ORDER BY (target.status = 'resume_queued') DESC,"
+        " target.updated_at DESC, target.session_id DESC"
+    ) in normalized_sql
 
 
 def test_admin_overview_and_users_endpoints_return_typed_payloads(
@@ -560,6 +566,30 @@ def test_admin_user_resume_endpoint_rejects_malformed_user_id_with_404(
 
     assert response.status_code == 404
     assert store_calls == []
+
+
+def test_admin_user_resume_endpoint_normalizes_uuid_variants_for_store(
+    monkeypatch,
+) -> None:
+    """uuid.UUID 接受 urn:uuid: 等变体，但 asyncpg 编码器不收——
+    进 store 的必须是规范化字符串。"""
+    from app.api.v1 import admin
+
+    received: list[str] = []
+
+    async def load(*, user_id: str):
+        received.append(user_id)
+        return None
+
+    monkeypatch.setattr(admin, "get_admin_user_resume", load)
+    with _client(admin_dependency=lambda: None) as client:
+        response = client.get(
+            "/api/v1/admin/users/"
+            "urn:uuid:11111111-1111-1111-1111-111111111111/resume"
+        )
+
+    assert response.status_code == 404
+    assert received == ["11111111-1111-1111-1111-111111111111"]
 
 
 @pytest.mark.parametrize(

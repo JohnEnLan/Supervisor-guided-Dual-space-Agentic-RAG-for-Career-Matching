@@ -260,6 +260,55 @@ async def test_u3_late_inflight_failure_neither_rewarns_nor_extends_window(
 
 
 @pytest.mark.asyncio
+async def test_u3_late_inflight_success_does_not_unlock_armed_window(
+    monkeypatch,
+    usage_module,
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(usage_module.time, "monotonic", lambda: clock[0])
+
+    gate = asyncio.Event()
+
+    class _GatedConnection(_RecordingConnection):
+        async def execute(self, sql: str, *args):
+            self.calls.append((" ".join(sql.split()), args))
+            if len(self.calls) == 1:
+                await gate.wait()
+                return "INSERT 0 1"
+            if len(self.calls) <= 6:
+                raise RuntimeError("down")
+            return "INSERT 0 1"
+
+    connection = _GatedConnection()
+    _patch_pool(monkeypatch, usage_module, connection)
+
+    late = asyncio.create_task(
+        usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+    )
+    for _ in range(50):
+        if connection.calls:
+            break
+        await asyncio.sleep(0)
+    assert len(connection.calls) == 1
+
+    for _ in range(5):
+        await usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+
+    clock[0] = 200.0
+    gate.set()
+    await late
+    # 迟到成功与迟到失败对称：不得解锁武装中的窗口，窗口内写入仍被拒。
+    await usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+    assert len(connection.calls) == 6
+
+    clock[0] = 401.0
+    await usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+    await usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+
+    assert len(connection.calls) == 8
+
+
+@pytest.mark.asyncio
 async def test_u3_success_resets_consecutive_failure_count(
     monkeypatch,
     usage_module,

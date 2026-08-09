@@ -51,8 +51,10 @@ async def admin_users(
 )
 async def admin_user_resume(user_id: str) -> AdminUserResumeResponse:
     # 畸形 user_id 不得进入 $1::uuid 转换（避免 asyncpg 异常 → 500）。
+    # uuid.UUID 接受 urn:uuid:/花括号等变体，但 asyncpg 编码器不收，
+    # 所以必须传规范化后的字符串而非原串。
     try:
-        uuid.UUID(user_id)
+        user_id = str(uuid.UUID(user_id))
     except ValueError:
         raise HTTPException(
             status_code=404,

@@ -223,10 +223,14 @@ caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 
 - **恢复/授予管理员（唯一有效路径）**：把该邮箱加入 `.env` 的
   `ADMIN_EMAILS`（逗号追加）→ `systemctl restart career-rag` → 该用户用
-  email OTP **重新登录**（登录事务自动置 `is_admin=TRUE` 并递增
-  `token_version`，无需任何 SQL）。事后若是临时授权，记得从白名单移除
-  并再重启。**单独执行 `UPDATE users SET is_admin=TRUE` 无效**：白名单
-  不含该邮箱时请求仍 403，且下一次登录会把布尔列重算回 FALSE。
+  email OTP **重新登录**。登录事务按白名单重算 `is_admin`，且**仅在布尔
+  列实际翻转时**递增 `token_version`（首次授予 false→true 会自动换票；
+  若数据库列早已是 TRUE——例如此前只移除过白名单而未 SQL 撤权——重新
+  加回白名单并重启后，**该用户既有 email 旧票立即恢复管理员权限，重登
+  也不会 bump**；如需强制全部旧票作废，另行执行下方 SQL 的
+  `token_version + 1`）。事后若是临时授权，记得从白名单移除并再重启。
+  **单独执行 `UPDATE users SET is_admin=TRUE` 无效**：白名单不含该邮箱
+  时请求仍 403，且下一次登录会把布尔列重算回 FALSE。
 - **紧急撤权（立即生效）**：先从 `ADMIN_EMAILS` 移除并重启（持久化，
   下一请求 403），如需立刻踢掉在票会话再补一条 SQL——直接改
   `users.is_admin` 时必须在**同一条 UPDATE** 同步递增 `token_version`，

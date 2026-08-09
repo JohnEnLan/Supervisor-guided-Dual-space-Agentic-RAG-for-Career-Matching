@@ -107,7 +107,7 @@ async def record_llm_usage(
                 exc_info=True,
             )
         return
-    await _finish_success()
+    await _finish_success(is_probe=is_probe)
 
 
 async def record_product_event(kind: str, user_id: str | None) -> None:
@@ -137,7 +137,7 @@ async def record_product_event(kind: str, user_id: str | None) -> None:
                 exc_info=True,
             )
         return
-    await _finish_success()
+    await _finish_success(is_probe=is_probe)
 
 
 async def _admit_write() -> tuple[bool, bool]:
@@ -157,10 +157,14 @@ async def _admit_write() -> tuple[bool, bool]:
         return True, True
 
 
-async def _finish_success() -> None:
+async def _finish_success(*, is_probe: bool) -> None:
     global _consecutive_failures, _disabled_until, _probe_in_flight
 
     async with _breaker_lock:
+        if not is_probe and _disabled_until != 0.0:
+            # 窗口武装期间的迟到成功与迟到失败对称处理：不解锁窗口，
+            # 恢复只由到期探针裁决。
+            return
         _consecutive_failures = 0
         _disabled_until = 0.0
         _probe_in_flight = False
