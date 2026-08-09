@@ -267,7 +267,24 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
       const slogan = document.querySelector<HTMLElement>(".mk-brand-slogan")!;
       const name = document.querySelector<HTMLElement>(".mk-brand-name")!;
       const heading = document.querySelector<HTMLElement>(".mk-hero h1")!;
+      const nav = document.querySelector<HTMLElement>(".v2-topnav")!;
+      const wordmark = nav.querySelector<HTMLElement>(".v2-wordmark")!;
+      const actions = nav.querySelector<HTMLElement>(".v2-topnav-actions")!;
       const box = lockup.getBoundingClientRect();
+      const toRect = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const navBox = toRect(nav);
+      const wordmarkBox = toRect(wordmark);
+      const actionsBox = toRect(actions);
 
       return {
         slogan: Number.parseFloat(getComputedStyle(slogan).fontSize),
@@ -277,9 +294,34 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
         lockup: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+        nav: navBox,
+        wordmark: wordmarkBox,
+        actions: actionsBox,
+        horizontalSeparation: Math.max(
+          wordmarkBox.left - actionsBox.right,
+          actionsBox.left - wordmarkBox.right,
+        ),
+        verticalSeparation: Math.max(
+          wordmarkBox.top - actionsBox.bottom,
+          actionsBox.top - wordmarkBox.bottom,
+        ),
         viewport: { width: window.innerWidth, height: window.innerHeight },
       };
     });
+
+    const inside = (
+      outer: { left: number; right: number; top: number; bottom: number },
+      inner: { left: number; right: number; top: number; bottom: number },
+    ) =>
+      inner.left >= outer.left &&
+      inner.right <= outer.right &&
+      inner.top >= outer.top &&
+      inner.bottom <= outer.bottom;
+    const insideViewport = (box: { left: number; right: number; top: number; bottom: number }) =>
+      box.left >= 0 &&
+      box.right <= measurements.viewport.width &&
+      box.top >= 0 &&
+      box.bottom <= measurements.viewport.height;
 
     expect(measurements.slogan).toBeLessThan(measurements.name);
     expect(measurements.name).toBeLessThan(measurements.heading);
@@ -289,7 +331,17 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
     expect(measurements.lockup.right).toBeLessThanOrEqual(measurements.viewport.width);
     expect(measurements.lockup.top).toBeGreaterThanOrEqual(0);
     expect(measurements.lockup.bottom).toBeLessThanOrEqual(measurements.viewport.height);
+    return {
+      measurements,
+      separated: measurements.horizontalSeparation >= 4 || measurements.verticalSeparation >= 4,
+      insideNav: [measurements.wordmark, measurements.actions].every((item) =>
+        inside(measurements.nav, item),
+      ),
+      insideViewport: [measurements.wordmark, measurements.actions].every(insideViewport),
+    };
   };
+
+  const navViolations: Array<{ width: number; language: "zh" | "en"; details: unknown }> = [];
 
   for (const width of [320, 375, 650, 1280]) {
     await page.setViewportSize({ width, height: 900 });
@@ -297,7 +349,10 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
     await page.reload();
 
     await expect(page.locator(".mk-hero h1")).toBeVisible();
-    await assertBrandHierarchy();
+    const chineseNav = await assertBrandHierarchy();
+    if (!chineseNav.separated || !chineseNav.insideNav || !chineseNav.insideViewport) {
+      navViolations.push({ width, language: "zh", details: chineseNav });
+    }
     await page.screenshot({
       path: testInfo.outputPath(`home-${width}-zh.png`),
       fullPage: true,
@@ -305,12 +360,17 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
 
     await page.locator(".v2-language-toggle").click();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await assertBrandHierarchy();
+    const englishNav = await assertBrandHierarchy();
+    if (!englishNav.separated || !englishNav.insideNav || !englishNav.insideViewport) {
+      navViolations.push({ width, language: "en", details: englishNav });
+    }
     await page.screenshot({
       path: testInfo.outputPath(`home-${width}-en.png`),
       fullPage: true,
     });
   }
+
+  expect(navViolations, JSON.stringify(navViolations)).toEqual([]);
 });
 
 test("new consultation action aligns with the session rows", async ({ page }) => {

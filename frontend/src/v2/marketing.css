@@ -13,6 +13,10 @@
   .mk-brand-lockup { flex-direction: column; gap: 8px; }
   .mk-brand-branch { width: 48px; flex-basis: 1px; }
 }
+@media (max-width: 360px) {
+  .mk-page > .v2-topnav { flex-wrap: wrap; row-gap: 8px; }
+  .mk-page > .v2-topnav .v2-topnav-actions { flex-basis: 100%; justify-content: flex-end; }
+}
 .mk-hero h1 { font-family: var(--v2-serif); font-size: clamp(2.4rem, 6vw, 4rem); line-height: 1.14; font-weight: 560; margin: 0 0 20px; }
 .mk-lede { color: var(--v2-muted); font-size: 1.1rem; line-height: 1.75; max-width: 56ch; margin: 0 auto; }
 .mk-cta-row { display: flex; gap: 14px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
