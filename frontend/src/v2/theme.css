@@ -19,13 +19,19 @@
   --v2-shadow: 0 10px 34px rgb(31 30 29 / 0.07);
   --v2-serif: "Source Serif 4", Georgia, "Noto Serif SC", serif;
   --v2-sans: Aptos, "Segoe UI", "Noto Sans SC", sans-serif;
+  --v2-brand-motion: 220ms;
 }
 
 .v2-landing { min-height: 100vh; display: flex; flex-direction: column; background: var(--v2-canvas); color: var(--v2-ink); font-family: var(--v2-sans); }
 .v2-topnav { display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(20px, 5vw, 64px); }
 .v2-topnav-actions, .wl-topbar-actions { display: flex; align-items: center; gap: 10px; }
-.v2-wordmark { color: inherit; font-family: var(--v2-serif); font-size: 1.2rem; font-weight: 650; letter-spacing: 0.01em; text-decoration: none; }
-.v2-wordmark:hover { color: var(--v2-accent-hover); }
+.v2-wordmark { position: relative; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; color: inherit; font-family: var(--v2-serif); font-size: clamp(1.45rem, 1.25rem + 0.7vw, 1.8rem); font-weight: 680; line-height: 1.05; letter-spacing: 0.005em; text-decoration: none; white-space: nowrap; isolation: isolate; transition: color var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out; }
+.v2-wordmark::after { content: ""; position: absolute; right: 0; bottom: 4px; left: 0; height: 1px; pointer-events: none; background: var(--v2-accent); opacity: 0.42; transform: scaleX(0.28); transform-origin: left center; transition: opacity var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out; }
+.v2-wordmark::before { content: ""; position: absolute; right: -1px; bottom: 5px; width: 8px; height: 5px; pointer-events: none; border-radius: 100% 0 100% 0; background: var(--v2-accent); opacity: 0; transform: rotate(-30deg) scale(0.55); transform-origin: left bottom; transition: opacity var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out; }
+.v2-wordmark:hover, .v2-wordmark:focus-visible { color: var(--v2-accent-hover); }
+.v2-wordmark:hover::after, .v2-wordmark:focus-visible::after { opacity: 1; transform: scaleX(1); }
+.v2-wordmark:hover::before, .v2-wordmark:focus-visible::before { opacity: 1; transform: rotate(-30deg) scale(1); }
+.v2-wordmark:active { transform: translateY(1px); }
 .v2-wordmark:focus-visible { border-radius: 4px; outline: 2px solid var(--v2-accent); outline-offset: 4px; }
 .v2-language-toggle { min-width: 44px; min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--v2-line); border-radius: 999px; background: var(--v2-surface); color: var(--v2-ink); cursor: pointer; font: 700 0.78rem/1 var(--v2-sans); letter-spacing: 0.03em; box-shadow: 0 1px 4px rgb(31 30 29 / 0.06); }
 .v2-language-toggle:hover { border-color: var(--v2-accent); color: var(--v2-accent-hover); }
@@ -350,6 +356,10 @@
   .spin, .v2-msg, .v2-profile-line, .v2-upload-preview, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
   .v2-sidebar { transition: none; }
   .v2-message-meta { transition: none; }
+  .v2-wordmark, .v2-wordmark::before, .v2-wordmark::after { transition: none; }
+  .v2-wordmark:active { transform: none; }
+  .v2-wordmark:focus-visible::after { opacity: 1; transform: none; }
+  .v2-wordmark:focus-visible::before { opacity: 1; transform: rotate(-30deg); }
   /* B3 复审（Codex C9）：折叠箭头/档案按钮/证据箭头的 transform 过渡一并归零 */
   .v2-collapse summary::after, .v2-resume-profile-trigger svg, .v2-evidence-chevron { transition: none; }
   .v2-timeline { scroll-behavior: auto; }

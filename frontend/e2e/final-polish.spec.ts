@@ -285,3 +285,185 @@ test("mobile drawer keeps the new consultation action aligned with session rows"
   expect(Math.abs(boxes.action.x - boxes.session.x)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(boxes.action.width - boxes.session.width)).toBeLessThanOrEqual(0.5);
 });
+
+test("brand wordmark has a 44px target and branch feedback", async ({ page }) => {
+  await installUnauthorizedApi(page);
+  await page.goto("/welcome");
+
+  const brand = page.getByRole("link", { name: "枝涯" });
+  const target = await brand.boundingBox();
+  expect(target).not.toBeNull();
+  expect(target!.height).toBeGreaterThanOrEqual(44);
+
+  const idle = await brand.evaluate((element) => ({
+    line: getComputedStyle(element, "::after").transform,
+    leaf: getComputedStyle(element, "::before").opacity,
+  }));
+  await brand.hover();
+  await expect
+    .poll(() =>
+      brand.evaluate((element) => ({
+        line: getComputedStyle(element, "::after").transform,
+        leaf: getComputedStyle(element, "::before").opacity,
+      })),
+    )
+    .not.toEqual(idle);
+
+  const layoutBeforePress = await brand.evaluate((element) => {
+    const nav = element.closest("nav")!.getBoundingClientRect();
+    const actions = element.closest("nav")!.querySelector<HTMLElement>(".wl-topbar-actions")!
+      .getBoundingClientRect();
+    return { navWidth: nav.width, navHeight: nav.height, actionsLeft: actions.left };
+  });
+  await page.mouse.down();
+  expect(await brand.evaluate((element) => getComputedStyle(element).transform)).not.toBe("none");
+  const layoutDuringPress = await brand.evaluate((element) => {
+    const nav = element.closest("nav")!.getBoundingClientRect();
+    const actions = element.closest("nav")!.querySelector<HTMLElement>(".wl-topbar-actions")!
+      .getBoundingClientRect();
+    return { navWidth: nav.width, navHeight: nav.height, actionsLeft: actions.left };
+  });
+  expect(layoutDuringPress).toEqual(layoutBeforePress);
+  await page.mouse.move(0, 0);
+  await page.mouse.up();
+  await brand.evaluate((element) => (element as HTMLElement).blur());
+  await expect(page).toHaveURL(/\/welcome$/);
+  await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await expect
+    .poll(() =>
+      brand.evaluate((element) => ({
+        line: getComputedStyle(element, "::after").transform,
+        leaf: getComputedStyle(element, "::before").opacity,
+      })),
+    )
+    .toEqual(idle);
+  await page.reload();
+  await page.keyboard.press("Tab");
+  await expect(brand).toBeFocused();
+  const focus = await brand.evaluate((element) => ({
+    outlineStyle: getComputedStyle(element).outlineStyle,
+    outlineWidth: Number.parseFloat(getComputedStyle(element).outlineWidth),
+    outlineColor: getComputedStyle(element).outlineColor,
+    color: getComputedStyle(element).color,
+    backgroundColor: getComputedStyle(element.closest(".wl-page")!).backgroundColor,
+    line: getComputedStyle(element, "::after").transform,
+  }));
+  expect(focus.outlineStyle).toBe("solid");
+  expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
+  await expect
+    .poll(() => brand.evaluate((element) => getComputedStyle(element, "::after").transform))
+    .not.toBe(idle.line);
+
+  const contrast = await brand.evaluate((element) => {
+    const rgb = (value: string) =>
+      (value.match(/[\d.]+/g) ?? []).slice(0, 3).map((channel) => Number(channel) / 255);
+    const luminance = (value: string) => {
+      const linear = rgb(value).map((channel) =>
+        channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+      );
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const ratio = (foreground: string, background: string) => {
+      const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+      return (values[0] + 0.05) / (values[1] + 0.05);
+    };
+    const background = getComputedStyle(element.closest(".wl-page")!).backgroundColor;
+    return {
+      outline: ratio(getComputedStyle(element).outlineColor, background),
+      wordmark: ratio(getComputedStyle(element).color, background),
+    };
+  });
+  expect(contrast.outline).toBeGreaterThanOrEqual(3);
+  expect(contrast.wordmark).toBeGreaterThanOrEqual(4.5);
+});
+
+for (const width of [320, 375, 650]) {
+  test(`mobile wordmark remains tappable and separated at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 812 });
+    await installAuthenticatedShellApi(page);
+    await page.goto("/app");
+
+    const nav = page.locator(".v2-mobile-nav");
+    const assertSeparated = async (brandName: string) => {
+      await expect(nav.getByRole("link", { name: brandName })).toBeVisible();
+      const boxes = await nav.evaluate((element) => {
+        const box = (selector: string) => {
+          const value = element.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+          return { left: value.left, right: value.right, top: value.top, bottom: value.bottom };
+        };
+        return {
+          menu: box(".v2-mobile-nav-trigger"),
+          brand: box(".v2-wordmark"),
+          language: box(".v2-language-toggle"),
+        };
+      });
+      expect(boxes.brand.bottom - boxes.brand.top).toBeGreaterThanOrEqual(44);
+      expect(boxes.menu.right).toBeLessThanOrEqual(boxes.brand.left);
+      expect(boxes.brand.right).toBeLessThanOrEqual(boxes.language.left);
+      expect(boxes.language.right).toBeLessThanOrEqual(width);
+    };
+
+    await assertSeparated("枝涯");
+    await nav.locator(".v2-language-toggle").click();
+    await assertSeparated("Career Arbor");
+    if (width === 375) {
+      await page.screenshot({
+        path: testInfo.outputPath("mobile-app-bar-en-375.png"),
+        fullPage: true,
+      });
+    }
+  });
+}
+
+test("desktop sidebar wordmark remains inside its bounds in both languages", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await installAuthenticatedShellApi(page);
+  await page.goto("/app");
+
+  const sidebar = page.locator(".v2-sidebar");
+  const assertInsideSidebar = async (brandName: string) => {
+    const brand = sidebar.getByRole("link", { name: brandName });
+    await expect(brand).toBeVisible();
+    const [brandBox, sidebarBox] = await Promise.all([brand.boundingBox(), sidebar.boundingBox()]);
+    expect(brandBox).not.toBeNull();
+    expect(sidebarBox).not.toBeNull();
+    expect(brandBox!.height).toBeGreaterThanOrEqual(44);
+    expect(brandBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x);
+    expect(brandBox!.y).toBeGreaterThanOrEqual(sidebarBox!.y);
+    expect(brandBox!.x + brandBox!.width).toBeLessThanOrEqual(sidebarBox!.x + sidebarBox!.width);
+    expect(brandBox!.y + brandBox!.height).toBeLessThanOrEqual(sidebarBox!.y + sidebarBox!.height);
+  };
+
+  await assertInsideSidebar("枝涯");
+  await page.locator(".v2-lang-float.v2-language-toggle").click();
+  await assertInsideSidebar("Career Arbor");
+});
+
+test("reduced motion keeps the focused wordmark static and visible", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installUnauthorizedApi(page);
+  await page.goto("/welcome");
+  const brand = page.getByRole("link", { name: "枝涯" });
+  await page.keyboard.press("Tab");
+  await expect(brand).toBeFocused();
+
+  const styles = await brand.evaluate((element) => ({
+    transition: getComputedStyle(element).transitionDuration,
+    beforeTransition: getComputedStyle(element, "::before").transitionDuration,
+    afterTransition: getComputedStyle(element, "::after").transitionDuration,
+    outlineStyle: getComputedStyle(element).outlineStyle,
+    afterTransform: getComputedStyle(element, "::after").transform,
+    beforeMatrix: (getComputedStyle(element, "::before").transform.match(/[\d.-]+/g) ?? [])
+      .map(Number),
+  }));
+  expect(styles.transition).toBe("0s");
+  expect(styles.beforeTransition).toBe("0s");
+  expect(styles.afterTransition).toBe("0s");
+  expect(styles.outlineStyle).toBe("solid");
+  expect(styles.afterTransform).toBe("none");
+  expect(styles.beforeMatrix).toHaveLength(6);
+  expect(styles.beforeMatrix[0] ** 2 + styles.beforeMatrix[1] ** 2).toBeCloseTo(1, 5);
+  expect(styles.beforeMatrix[2] ** 2 + styles.beforeMatrix[3] ** 2).toBeCloseTo(1, 5);
+  expect(styles.beforeMatrix[4]).toBeCloseTo(0, 5);
+  expect(styles.beforeMatrix[5]).toBeCloseTo(0, 5);
+});
