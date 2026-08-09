@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.agents.trace import build_public_explain
@@ -48,6 +50,14 @@ async def admin_users(
     response_model=AdminUserResumeResponse,
 )
 async def admin_user_resume(user_id: str) -> AdminUserResumeResponse:
+    # 畸形 user_id 不得进入 $1::uuid 转换（避免 asyncpg 异常 → 500）。
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail="user_id not found",
+        ) from None
     stored = await get_admin_user_resume(user_id=user_id)
     if stored is None:
         raise HTTPException(status_code=404, detail="user_id not found")

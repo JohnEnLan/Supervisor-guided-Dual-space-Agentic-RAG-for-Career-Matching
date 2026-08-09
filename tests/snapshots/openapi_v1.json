@@ -150,6 +150,17 @@
       "AdminUserResumeResponse": {
         "additionalProperties": false,
         "properties": {
+          "reset_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Session Id"
+          },
           "resume_state": {
             "anyOf": [
               {
@@ -181,7 +192,8 @@
         "required": [
           "user_id",
           "session_id",
-          "resume_state"
+          "resume_state",
+          "reset_session_id"
         ],
         "title": "AdminUserResumeResponse",
         "type": "object"

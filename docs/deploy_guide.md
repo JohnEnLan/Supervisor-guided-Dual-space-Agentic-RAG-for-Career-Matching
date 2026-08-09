@@ -217,12 +217,24 @@ caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 该代曾达终态时残留的 `seq=100` 行会让新任务的终态 CAS 永久回滚、mark 兜底
 同撞 PK，会话卡死在 queued。
 
-break-glass 直接改 `users.is_admin` 时，必须在**同一条 UPDATE** 同步递增
-`token_version`，使旧票下一请求 401；不要只改布尔列：
+**break-glass（管理员通道恢复/紧急撤权）**——注意：`require_admin` 每请求
+都要求"email 登录票 + 数据库 `is_admin` + 邮箱命中 `ADMIN_EMAILS`"三者
+同时成立，且每次 email 登录事务会按白名单**重算** `is_admin`。因此：
+
+- **恢复/授予管理员（唯一有效路径）**：把该邮箱加入 `.env` 的
+  `ADMIN_EMAILS`（逗号追加）→ `systemctl restart career-rag` → 该用户用
+  email OTP **重新登录**（登录事务自动置 `is_admin=TRUE` 并递增
+  `token_version`，无需任何 SQL）。事后若是临时授权，记得从白名单移除
+  并再重启。**单独执行 `UPDATE users SET is_admin=TRUE` 无效**：白名单
+  不含该邮箱时请求仍 403，且下一次登录会把布尔列重算回 FALSE。
+- **紧急撤权（立即生效）**：先从 `ADMIN_EMAILS` 移除并重启（持久化，
+  下一请求 403），如需立刻踢掉在票会话再补一条 SQL——直接改
+  `users.is_admin` 时必须在**同一条 UPDATE** 同步递增 `token_version`，
+  使旧票下一请求 401，不要只改布尔列：
 
 ```sql
 UPDATE users
-SET is_admin = TRUE, token_version = token_version + 1
+SET is_admin = FALSE, token_version = token_version + 1
 WHERE user_id = '<<user_uuid>>'::uuid;
 
 -- 紧急吊销全部在票会话（所有账号都需重新登录）：

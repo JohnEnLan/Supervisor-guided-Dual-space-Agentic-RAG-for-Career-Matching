@@ -173,7 +173,8 @@ async def get_admin_user_resume(*, user_id: str) -> dict[str, Any] | None:
             """
             SELECT account.user_id,
                    resume.session_id,
-                   resume.state -> 'resume_state' AS resume_state
+                   resume.state -> 'resume_state' AS resume_state,
+                   reset_target.session_id AS reset_session_id
             FROM users AS account
             LEFT JOIN LATERAL (
                 SELECT session.session_id,
@@ -188,6 +189,18 @@ async def get_admin_user_resume(*, user_id: str) -> dict[str, Any] | None:
                          session.session_id ASC
                 LIMIT 1
             ) AS resume ON TRUE
+            LEFT JOIN LATERAL (
+                -- reset 靶＝reset 会产生效果的最近活跃会话：有额度可退，
+                -- 或卡在 resume_queued（含首解析 v0 的会话——resume
+                -- LATERAL 看不见它）。都没有则 NULL，前端禁用按钮。
+                SELECT target.session_id
+                FROM session_state AS target
+                WHERE target.owner_user_id = account.user_id
+                  AND (COALESCE(target.resume_parse_count, 0) > 0
+                       OR target.status = 'resume_queued')
+                ORDER BY target.updated_at DESC, target.session_id DESC
+                LIMIT 1
+            ) AS reset_target ON TRUE
             WHERE account.user_id = $1::uuid
             """,
             user_id,
@@ -200,6 +213,11 @@ async def get_admin_user_resume(*, user_id: str) -> dict[str, Any] | None:
             str(row["session_id"]) if row["session_id"] is not None else None
         ),
         "resume_state": _json_object_or_none(row["resume_state"]),
+        "reset_session_id": (
+            str(row["reset_session_id"])
+            if row["reset_session_id"] is not None
+            else None
+        ),
     }
 
 

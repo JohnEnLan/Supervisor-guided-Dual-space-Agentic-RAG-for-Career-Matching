@@ -188,6 +188,7 @@ export const apiFixtures = {
         contact: { name: "张三", phone: "13800000000", email: "student@example.com" },
         skills: ["Python", "SQL"],
       },
+      reset_session_id: "sess-e2e-1",
       ...overrides,
     }) satisfies AdminUserResume,
 

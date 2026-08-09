@@ -174,6 +174,10 @@ async def _finish_failure(*, is_probe: bool) -> bool:
             _disabled_until = time.monotonic() + _DISABLED_SECONDS
             _probe_in_flight = False
             return True
+        if _disabled_until != 0.0:
+            # 窗口开启前已获准的迟到失败：恢复与否只由探针裁决，
+            # 不重复告警、不后移 deadline。
+            return False
         _consecutive_failures += 1
         if _consecutive_failures < _FAILURE_LIMIT:
             return False

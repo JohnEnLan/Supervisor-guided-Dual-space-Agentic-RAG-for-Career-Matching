@@ -155,6 +155,7 @@ def test_admin_dto_fields_are_required_even_when_nullable() -> None:
         "user_id",
         "session_id",
         "resume_state",
+        "reset_session_id",
     }
 
 
@@ -367,7 +368,12 @@ async def test_admin_user_resume_distinguishes_no_resume_from_missing_user(
     user_id = "11111111-1111-1111-1111-111111111111"
     connection = _Connection(
         fetchrow_results=[
-            {"user_id": user_id, "session_id": None, "resume_state": None},
+            {
+                "user_id": user_id,
+                "session_id": None,
+                "resume_state": None,
+                "reset_session_id": None,
+            },
             None,
         ]
     )
@@ -382,6 +388,7 @@ async def test_admin_user_resume_distinguishes_no_resume_from_missing_user(
         "user_id": user_id,
         "session_id": None,
         "resume_state": None,
+        "reset_session_id": None,
     }
     assert missing is None
     sql = connection.calls[0][1]
@@ -389,6 +396,50 @@ async def test_admin_user_resume_distinguishes_no_resume_from_missing_user(
     assert "resume_confirmed_at DESC NULLS LAST" in sql
     assert "resume_version DESC" in sql
     assert "session_id ASC" in sql
+
+
+@pytest.mark.asyncio
+async def test_admin_user_resume_reset_target_prefers_active_parse_session(
+    monkeypatch,
+) -> None:
+    """首解析卡 queued（v0）时 resume LATERAL 无行，reset 靶仍可见；
+    旧 ready + 新 queued 时两列必须指向不同会话。"""
+    from app.db import admin_store
+
+    user_id = "11111111-1111-1111-1111-111111111111"
+    connection = _Connection(
+        fetchrow_results=[
+            {
+                "user_id": user_id,
+                "session_id": None,
+                "resume_state": None,
+                "reset_session_id": "sess-queued-v0",
+            },
+            {
+                "user_id": user_id,
+                "session_id": "sess-old-ready",
+                "resume_state": None,
+                "reset_session_id": "sess-new-queued",
+            },
+        ]
+    )
+    _install_pool(monkeypatch, admin_store, connection)
+
+    first_parse_stuck = await admin_store.get_admin_user_resume(user_id=user_id)
+    old_ready_new_queued = await admin_store.get_admin_user_resume(
+        user_id=user_id
+    )
+
+    assert first_parse_stuck["session_id"] is None
+    assert first_parse_stuck["reset_session_id"] == "sess-queued-v0"
+    assert old_ready_new_queued["session_id"] == "sess-old-ready"
+    assert old_ready_new_queued["reset_session_id"] == "sess-new-queued"
+
+    sql = connection.calls[0][1]
+    assert "reset_target.session_id AS reset_session_id" in sql
+    assert "COALESCE(target.resume_parse_count, 0) > 0" in sql
+    assert "target.status = 'resume_queued'" in sql
+    assert "ORDER BY target.updated_at DESC, target.session_id DESC" in sql
 
 
 def test_admin_overview_and_users_endpoints_return_typed_payloads(
@@ -459,6 +510,7 @@ def test_admin_overview_and_users_endpoints_return_typed_payloads(
                 "user_id": "11111111-1111-1111-1111-111111111111",
                 "session_id": None,
                 "resume_state": None,
+                "reset_session_id": None,
             },
             200,
             None,
@@ -487,7 +539,27 @@ def test_admin_user_resume_endpoint_has_200_null_and_404_states(
             "user_id": "11111111-1111-1111-1111-111111111111",
             "session_id": expected_session,
             "resume_state": None,
+            "reset_session_id": None,
         }
+
+
+def test_admin_user_resume_endpoint_rejects_malformed_user_id_with_404(
+    monkeypatch,
+) -> None:
+    from app.api.v1 import admin
+
+    store_calls: list[str] = []
+
+    async def load(*, user_id: str):
+        store_calls.append(user_id)
+        return None
+
+    monkeypatch.setattr(admin, "get_admin_user_resume", load)
+    with _client(admin_dependency=lambda: None) as client:
+        response = client.get("/api/v1/admin/users/not-a-uuid/resume")
+
+    assert response.status_code == 404
+    assert store_calls == []
 
 
 @pytest.mark.parametrize(

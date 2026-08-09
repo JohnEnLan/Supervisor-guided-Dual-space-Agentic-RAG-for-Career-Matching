@@ -584,6 +584,8 @@ export interface components {
         };
         /** AdminUserResumeResponse */
         AdminUserResumeResponse: {
+            /** Reset Session Id */
+            reset_session_id: string | null;
             /** Resume State */
             resume_state: {
                 [key: string]: unknown;

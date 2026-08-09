@@ -68,8 +68,8 @@ export function AdminUsers({ request }: { request: GuardedAdminRequest }) {
         queryFn: () => request(() => api.adminUserResume(userId)),
         staleTime: 0,
       });
-      if (!resume.session_id) throw new Error("该用户没有可重置的简历会话。");
-      return request(() => api.adminResetParseCount(resume.session_id!));
+      if (!resume.reset_session_id) throw new Error("该用户没有可重置的解析会话。");
+      return request(() => api.adminResetParseCount(resume.reset_session_id!));
     },
   });
 
@@ -110,7 +110,7 @@ export function AdminUsers({ request }: { request: GuardedAdminRequest }) {
                         type="button"
                         disabled={reset.isPending}
                         onClick={() => {
-                          if (window.confirm("确认将该用户最新简历会话的解析次数重置为 0？")) reset.mutate(row.user_id);
+                          if (window.confirm("确认将该用户当前解析会话的解析次数重置为 0？")) reset.mutate(row.user_id);
                         }}
                       ><RotateCcw size={15} />重置解析额度</button>
                     </div></td>

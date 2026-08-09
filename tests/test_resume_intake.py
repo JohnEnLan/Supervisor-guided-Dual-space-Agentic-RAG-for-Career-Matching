@@ -672,3 +672,40 @@ async def test_normalization_returns_evidence_grounded_contact(monkeypatch) -> N
         "email": "alice@example.com",
         "evidence_span_ids": ["R001", "R003"],
     }
+
+
+@pytest.mark.parametrize("malformed", [None, [], "Alice Ng", 42])
+def test_llm_payload_contact_non_object_coerced_to_empty_dict(malformed) -> None:
+    from app.normalization import resume_intake as intake
+
+    payload = intake.LLMResumePayload.model_validate({"contact": malformed})
+
+    assert payload.contact == {}
+
+
+@pytest.mark.asyncio
+async def test_normalization_survives_contact_null_from_llm(monkeypatch) -> None:
+    from app.normalization import resume_intake as intake
+
+    async def fake_chat(_system, _user, **_kwargs):
+        return json.dumps(
+            {
+                "contact": None,
+                "education": [],
+                "experience": [],
+                "projects": [],
+                "skills": [],
+                "resume_quality_issues": [],
+                "normalized_base_resume": "Acme",
+            }
+        )
+
+    monkeypatch.setattr(intake, "chat", fake_chat)
+
+    result = await intake.normalize_resume_text(
+        "ignored",
+        [intake.EvidenceSpan(span_id="R001", text="Acme")],
+    )
+
+    assert result.contact == {}
+    assert result.normalized_base_resume == "Acme"

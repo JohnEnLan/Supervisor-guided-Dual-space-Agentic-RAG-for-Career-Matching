@@ -256,7 +256,7 @@ describe("AdminPage users", () => {
     });
     queryClient.setQueryData(
       ["admin", "user-resume", "user-e2e-0001"],
-      apiFixtures.adminUserResume({ session_id: "sess-stale" }),
+      apiFixtures.adminUserResume({ session_id: "sess-stale", reset_session_id: "sess-stale" }),
     );
 
     renderAdmin({ initialEntry: "/admin?tab=users", queryClient });

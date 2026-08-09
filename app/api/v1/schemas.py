@@ -467,6 +467,9 @@ class AdminUserResumeResponse(PublicDTO):
     user_id: str
     session_id: str | None
     resume_state: dict[str, Any] | None
+    # 终审偏差备案：§5.3 三列之外的增列——reset 的正确靶点（最近活跃且
+    # reset 有效果的会话），首解析卡 queued 时与 session_id 不同。
+    reset_session_id: str | None
 
 
 class AdminResetParseCountResponse(PublicDTO):

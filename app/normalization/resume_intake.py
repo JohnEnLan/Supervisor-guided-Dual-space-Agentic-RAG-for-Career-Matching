@@ -21,7 +21,7 @@ from typing import Any, Literal
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pypdf import PdfReader
 
 from app.config import settings
@@ -124,6 +124,14 @@ class EvidenceSpan(BaseModel):
 
 class LLMResumePayload(BaseModel):
     contact: dict[str, Any] = Field(default_factory=dict)
+
+    # 形状校验唯一边界是 _validated_contact；LLM 偶发 contact=null/数组/
+    # 字符串不允许击穿整次归一化（烧解析额度）。
+    @field_validator("contact", mode="before")
+    @classmethod
+    def _coerce_contact_shape(cls, value: Any) -> Any:
+        return value if isinstance(value, dict) else {}
+
     education: list[dict[str, Any]] = Field(default_factory=list)
     experience: list[dict[str, Any]] = Field(default_factory=list)
     projects: list[dict[str, Any]] = Field(default_factory=list)

@@ -204,6 +204,62 @@ async def test_u3_failed_probe_rearms_breaker_for_a_new_window(
 
 
 @pytest.mark.asyncio
+async def test_u3_late_inflight_failure_neither_rewarns_nor_extends_window(
+    monkeypatch,
+    usage_module,
+    caplog,
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(usage_module.time, "monotonic", lambda: clock[0])
+
+    gate = asyncio.Event()
+
+    class _GatedConnection(_RecordingConnection):
+        async def execute(self, sql: str, *args):
+            self.calls.append((" ".join(sql.split()), args))
+            if len(self.calls) == 1:
+                await gate.wait()
+                raise RuntimeError("late failure")
+            if len(self.calls) <= 6:
+                raise RuntimeError("down")
+            return "INSERT 0 1"
+
+    connection = _GatedConnection()
+    _patch_pool(monkeypatch, usage_module, connection)
+
+    late = asyncio.create_task(
+        usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+    )
+    for _ in range(50):
+        if connection.calls:
+            break
+        await asyncio.sleep(0)
+    assert len(connection.calls) == 1
+
+    for _ in range(5):
+        await usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+    assert (
+        sum("usage recorder disabled" in r.message for r in caplog.records) == 1
+    )
+
+    clock[0] = 350.0
+    gate.set()
+    await late
+    # 迟到失败不得再次告警，也不得把 deadline 从 400 后移到 650。
+    assert (
+        sum("usage recorder disabled" in r.message for r in caplog.records) == 1
+    )
+
+    clock[0] = 401.0
+    await usage_module.record_llm_usage("deepseek", "fast", 1, 1, 2)
+
+    assert len(connection.calls) == 7
+    assert (
+        sum("usage recorder disabled" in r.message for r in caplog.records) == 1
+    )
+
+
+@pytest.mark.asyncio
 async def test_u3_success_resets_consecutive_failure_count(
     monkeypatch,
     usage_module,
