@@ -506,3 +506,169 @@ async def test_switch_off_field_path_metadata_preserves_baseline_verification(
 
     assert "field_path" not in captured_system_prompts[0]
     assert result.resume_quality_issues == ["medium: Acme evidence=['R001']"]
+
+
+def test_contact_validation_accepts_exact_fields_and_cleans_shared_ids() -> None:
+    from app.normalization import resume_intake as intake
+
+    result = intake._validated_contact(
+        {
+            "name": "Alice Ng",
+            "phone": "+44 20-1234",
+            "email": "Alice@example.com",
+            "evidence_span_ids": [
+                "MISSING",
+                "R001",
+                "R002",
+                "R001",
+                "R003",
+            ],
+        },
+        {"R001", "R002", "R003"},
+        {
+            "R001": "Candidate Alice Ng",
+            "R002": "Phone +44 20-1234",
+            "R003": "Email Alice@example.com",
+        },
+    )
+
+    assert result == {
+        "name": "Alice Ng",
+        "phone": "+44 20-1234",
+        "email": "Alice@example.com",
+        "evidence_span_ids": ["R001", "R002", "R003"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_name", "claim", "evidence_text_by_id", "span_ids"),
+    [
+        ("name", "alice ng", {"R001": "Alice Ng"}, ["R001"]),
+        ("name", "Alice  Ng", {"R001": "Alice Ng"}, ["R001"]),
+        ("phone", "+44 20 1234", {"R001": "+44 20-1234"}, ["R001"]),
+        (
+            "email",
+            "alice@example.com",
+            {"R001": "alice@", "R002": "example.com"},
+            ["R001", "R002"],
+        ),
+    ],
+)
+def test_contact_validation_rejects_non_exact_or_cross_span_matches(
+    field_name,
+    claim,
+    evidence_text_by_id,
+    span_ids,
+) -> None:
+    from app.normalization import resume_intake as intake
+
+    result = intake._validated_contact(
+        {
+            field_name: claim,
+            "evidence_span_ids": span_ids,
+        },
+        set(evidence_text_by_id),
+        evidence_text_by_id,
+    )
+
+    assert result == {
+        "name": "",
+        "phone": "",
+        "email": "",
+        "evidence_span_ids": [],
+    }
+
+
+def test_contact_validation_clears_only_unsupported_field_and_prunes_ids() -> None:
+    from app.normalization import resume_intake as intake
+
+    result = intake._validated_contact(
+        {
+            "name": "Alice Ng",
+            "phone": "+44 20 1234",
+            "email": "alice@example.com",
+            "evidence_span_ids": [
+                "MISSING",
+                "R002",
+                "R001",
+                "R002",
+                "R003",
+            ],
+        },
+        {"R001", "R002", "R003"},
+        {
+            "R001": "Alice Ng",
+            "R002": "alice@example.com",
+            "R003": "+44 20-1234",
+        },
+    )
+
+    assert result == {
+        "name": "Alice Ng",
+        "phone": "",
+        "email": "alice@example.com",
+        "evidence_span_ids": ["R002", "R001"],
+    }
+
+
+def test_legacy_resume_state_defaults_contact_to_empty_dict() -> None:
+    from app.normalization import resume_intake as intake
+    from app.state.schema import ResumeState
+
+    state = ResumeState.model_validate(
+        {"normalized_base_resume": "Legacy resume"}
+    )
+
+    assert state.contact == {}
+    assert intake._validated_contact({}, set(), {}) == {}
+
+
+def test_resume_preview_dto_does_not_expose_contact() -> None:
+    from app.api.v1.schemas import ResumePreviewResponse
+
+    assert "contact" not in ResumePreviewResponse.model_fields
+
+
+@pytest.mark.asyncio
+async def test_normalization_returns_evidence_grounded_contact(monkeypatch) -> None:
+    from app.normalization import resume_intake as intake
+
+    captured_system_prompts: list[str] = []
+
+    async def fake_chat(system, _user, **_kwargs):
+        captured_system_prompts.append(system)
+        return json.dumps(
+            {
+                "contact": {
+                    "name": "Alice Ng",
+                    "phone": "+44 20 1234",
+                    "email": "alice@example.com",
+                    "evidence_span_ids": ["R001", "R002", "R003"],
+                },
+                "education": [],
+                "experience": [],
+                "projects": [],
+                "skills": [],
+                "resume_quality_issues": [],
+                "normalized_base_resume": "Alice Ng",
+            }
+        )
+
+    monkeypatch.setattr(intake, "chat", fake_chat)
+
+    result = await intake.normalize_resume_text(
+        "ignored",
+        [
+            intake.EvidenceSpan(span_id="R001", text="Alice Ng"),
+            intake.EvidenceSpan(span_id="R002", text="+44 20-1234"),
+            intake.EvidenceSpan(span_id="R003", text="alice@example.com"),
+        ],
+    )
+
+    assert '"contact": {' in captured_system_prompts[0]
+    assert result.contact == {
+        "name": "Alice Ng",
+        "phone": "",
+        "email": "alice@example.com",
+        "evidence_span_ids": ["R001", "R003"],
+    }

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class ResumeState(BaseModel):
+    contact: dict = Field(default_factory=dict)
     education: list[dict] = Field(default_factory=list)
     experience: list[dict] = Field(default_factory=list)
     projects: list[dict] = Field(default_factory=list)

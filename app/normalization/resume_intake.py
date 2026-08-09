@@ -40,6 +40,12 @@ must include evidence_span_ids. Omit any fact that cannot cite a supplied span.
 
 Return this JSON shape:
 {
+  "contact": {
+    "name": string,
+    "phone": string,
+    "email": string,
+    "evidence_span_ids": [string]
+  },
   "education": [
     {
       "institution": string,
@@ -91,6 +97,8 @@ Return this JSON shape:
 }
 
 Rules:
+- Copy each non-empty contact field verbatim from one cited evidence span.
+- Use one shared evidence_span_ids list for the contact object.
 - Keep normalized_base_resume concise and query-friendly.
 - Preserve real names of schools, employers, projects, tools, and measurable outcomes.
 - Copy institutions, organizations, project names, job titles, dates, and locations
@@ -115,6 +123,7 @@ class EvidenceSpan(BaseModel):
 
 
 class LLMResumePayload(BaseModel):
+    contact: dict[str, Any] = Field(default_factory=dict)
     education: list[dict[str, Any]] = Field(default_factory=list)
     experience: list[dict[str, Any]] = Field(default_factory=list)
     projects: list[dict[str, Any]] = Field(default_factory=list)
@@ -477,6 +486,64 @@ def _validated_span_ids(values: Any, valid_ids: set[str]) -> list[str]:
     return result
 
 
+_CONTACT_FIELDS = ("name", "phone", "email")
+
+
+def _exact_substring_is_supported(
+    value: str,
+    evidence_span_ids: list[str],
+    evidence_text_by_id: dict[str, str],
+) -> bool:
+    return bool(value) and any(
+        value in evidence_text_by_id[span_id]
+        for span_id in evidence_span_ids
+        if span_id in evidence_text_by_id
+    )
+
+
+def _validated_contact(
+    value: Any,
+    valid_ids: set[str],
+    evidence_text_by_id: dict[str, str],
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        return {}
+
+    evidence_span_ids = _validated_span_ids(
+        value.get("evidence_span_ids"),
+        valid_ids,
+    )
+    contact = {
+        field_name: field_value
+        if isinstance(field_value := value.get(field_name), str)
+        and _exact_substring_is_supported(
+            field_value,
+            evidence_span_ids,
+            evidence_text_by_id,
+        )
+        else ""
+        for field_name in _CONTACT_FIELDS
+    }
+    supported_span_ids = [
+        span_id
+        for span_id in evidence_span_ids
+        if any(
+            _exact_substring_is_supported(
+                contact[field_name],
+                [span_id],
+                evidence_text_by_id,
+            )
+            for field_name in _CONTACT_FIELDS
+        )
+    ]
+    if not any(contact.values()):
+        supported_span_ids = []
+    return {
+        **contact,
+        "evidence_span_ids": supported_span_ids,
+    }
+
+
 def _validated_fact_items(
     values: Any,
     valid_ids: set[str],
@@ -675,6 +742,11 @@ async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan
         span.span_id: span.text
         for span in evidence_spans
     }
+    contact = _validated_contact(
+        parsed.contact,
+        valid_ids,
+        evidence_text_by_id,
+    )
     education = _validated_fact_items(
         parsed.education,
         valid_ids,
@@ -708,6 +780,7 @@ async def normalize_resume_text(raw_text: str, evidence_spans: list[EvidenceSpan
             max_targets=settings.resume_clarify_max,
         )
     return ResumeState(
+        contact=contact,
         education=education,
         experience=experience,
         projects=projects,
