@@ -1,7 +1,9 @@
 # 交接文档：给下一位 AI 协作者（Codex）
 
-> 更新时点：2026-08-10 终检；本轮 UI 收尾与清理已提交至 `langgraph`
-> 并推送双远端（见 git log 顶部提交），部署按 §4 流程由用户执行。
+> 更新时点：2026-08-10 本地品牌强化验收；当前 `langgraph@d423a4b`
+> 已完成前端门禁与双审。最终 `d423a4b` **尚未推送**，当前分支没有 upstream；
+> 并发任务曾意外把非最终 `a4a8e44` 推到 `origin`/`gitlab` 的 `main`/`langgraph`。
+> 本轮没有执行服务器部署，也没有核验服务器当前版本。
 > 本文回答三个问题：项目现在什么状态、改动怎么做才合规、上线怎么操作。
 > 裁决链（冲突时从高到低）：`CLAUDE_LANGGRAPH.md` §5 V2 修订案 →
 > `CLAUDE.md` / `AGENTS.md`（宪法，Codex 会自动读取 AGENTS.md）→
@@ -9,9 +11,9 @@
 
 ## 1. 一句话与现状
 
-Supervisor 监督的双空间 Agentic RAG 职业匹配系统（伯明翰 CS 硕士毕业设计），
-已部署 https://zhangen.cn （香港服务器 45.153.131.127，Ubuntu 22.04）。
-2026-08-09 UI 收尾与清理批已提交推送；线上是否为该版以部署记录为准。
+Supervisor 监督的双空间 Agentic RAG 职业匹配系统（伯明翰 CS 硕士毕业设计）。历史资料记录的
+站点为 https://zhangen.cn （香港服务器 45.153.131.127，Ubuntu 22.04）；本轮未核验服务器，
+不能从远端 Git 状态推断线上代码。最终 `d423a4b` 品牌强化版尚未推送，本轮也未执行部署。
 
 **产品品牌（B9 起）**：英文名 **Career Arbor**，中文名 **枝涯**，口号
 「循枝见路，向远而生」，定位句「枝涯 — 你的 AI 职业路径智能体 /
@@ -37,6 +39,7 @@ LangGraph 作为编排/checkpoint 例外；三个业务 Agent 仍是共享状态
 | B7 | 三缺陷热修（确认后连续性/预览滚动/宽屏列） | 2aa4037 |
 | B8 | 结果呈现十项改进（表格化/去 JSON/小策播报等） | 5eac4f3 |
 | 2026-08-09 收尾 | 顾问关系图、双语品牌主页链接、侧栏对齐、保守冗余清理 | 本地工作树，未部署 |
+| 2026-08-10 品牌强化 | wordmark 枝条反馈、主页品牌层级、P3 英文分层防溢出 | `d423a4b`，本地验收；最终版未推送，本轮未执行部署 |
 
 数据库迁移已应用至 **0011**（生产验证口径：查 `schema_migrations` 表，
 migrate 脚本永远静默）。
@@ -54,6 +57,7 @@ migrate 脚本永远静默）。
 | `docs/DEPLOY_FOR_AI.md` | **「上传服务器/部署」的确切含义与分工**——用户说"上线/部署/传服务器"时先读这个 |
 | `README.md` | **本地启动方式**（`start.ps1` / `python -m app.serve` 模块入口）——dev 服务怎么跑起来看这里 |
 | `docs/INDEX.md` | 仓库文档总地图（论文材料、validation 证据链） |
+| `docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md` | 当前前端品牌强化验收、双审与发布边界 |
 | `CLAUDE_LANGGRAPH.md` | §5 V2 修订案（裁决链最高层） |
 
 ## 3. 改动怎么做（工程约定）
@@ -64,11 +68,13 @@ migrate 脚本永远静默）。
 # 后端（venv + 短路径 basetemp，规避 Windows 260 字符与 ACL 残留）
 .venv\Scripts\python.exe -m pytest tests -p no:cacheprovider --basetemp C:\Users\WIN11\AppData\Local\Temp\crtest_XXX -q
 # 前端三门 + e2e
-cd frontend; npm test; npm run typecheck; npm run build; npx playwright test; cd ..
+cd frontend; npm test; npm run typecheck; npm run build; npm run e2e; cd ..
 ```
 
-当前本地验收基线：后端 **852** / 前端 **206** / e2e **28** 全绿，且 pyflakes、
-TypeScript 类型检查和生产构建通过。完整证据见
+当前最新前端验收基线：Vitest **207/207（16 files）**、e2e **43/43**、TypeScript
+类型检查与生产构建（1858 modules）全绿；`final-06` 的 13 张截图已逐张复核。完整证据见
+`docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`。本轮纯前端，未重跑
+后端；后端 **852 passed** 是 2026-08-09 的已知基线，见历史报告
 `docs/validation/2026-08-09-final-polish-acceptance.md`。OpenAPI 有变更时：
 `python scripts/export_openapi.py` 再 `cd frontend && npm run api:generate`，
 快照在 `tests/snapshots/openapi_v1.json`。
@@ -148,22 +154,34 @@ REL=/opt/career-rag/releases/frontend-$(date +%Y%m%d%H%M) && mkdir -p "$REL" \
    原文（风格破例）。
 4. 运维站桩：QQ SMTP 授权码答辩前轮换；R8 三档对齐截图待线上采集。
 
-## 6. 终局快照与仓库现状（2026-08-09 收尾）
+## 6. 终局快照与仓库现状（2026-08-10 品牌强化）
 
-- 当前分支为 **langgraph**，工作树基于 `79af2dd`；本轮修改未提交、未推送、未部署，
-  不应把历史线上发布状态误写成本轮状态。需要发布时仍按 §4 与 `docs/deploy_guide.md` 操作。
-- 本轮已完成：欢迎页四角色关系重排；中文品牌“枝涯”/英文“Career Arbor”统一回主页；
-  桌面与移动侧栏“新的咨询”同宽；补齐路由、布局、移动端和对比度回归测试。
-- `.superpowers`、临时输出与可恢复过程文件已移至
+- 当前分支为 **langgraph**，实现与验证 HEAD 为 `d423a4b`，且没有 upstream。只读远端核验显示，
+  并发任务曾意外把非最终 `a4a8e44` 推到 `origin/main`、`origin/langgraph`、
+  `gitlab/main`、`gitlab/langgraph`；最终 `d423a4b` 尚未推送。
+- 本轮没有执行服务器部署，也没有核验服务器当前代码；不能根据 Git 远端状态推断线上版本。
+  需要发布时按 §4、`docs/DEPLOY_FOR_AI.md` 与 `docs/deploy_guide.md` 操作。
+- 本轮已完成：全局“枝涯 / Career Arbor”放大与枝条反馈；主页品牌名/标语层级强化；
+  P3 英文分层统一为 `Now Fit / Stretch Fit / Bridge Role` 并保持在分层列内；
+  320/375/650/1280px、键盘焦点、低动态和对比度均有回归覆盖。
+- 最终前端门禁：Vitest 16 files / 207 tests、typecheck、Vite build（1858 modules）、
+  Playwright `career-arbor-20260810-011800996/final-06` 43/43 全绿；13 张截图人工检查通过。
+  后端 852 项是 2026-08-09 已知基线，本轮未重跑。
+- 冷态恢复测试曾暴露测试自身的时序竞态，已用 deferred mock 稳定化；它不是产品 bug，
+  没有改变生产恢复逻辑。
+- 实施前规格/计划与实施后代码均完成主审和独立复核，最终所有 severity 为 0，
+  Spec compliance 与 Code quality 均通过。
+- 2026-08-09 的 `.superpowers`、临时输出和过程文件归档仍是历史记录，路径为
   `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\2026-08-09_career_arbor_final_polish\`；
-  详细哈希、数量和例外见其中 `planning-final_polish_20260809\cleanup_manifest.md`。
-- 项目根 `.pytest_cache` 因 Windows ACL 拒绝读取/移动，未夺权或强删；它是本轮唯一明确保留的
-  清理例外，不得声称已移档。测试改用全新短路径 `--basetemp`，不影响 852 项验收。
-- 用户答辩 Word 材料已于 2026-08-10 原子替换到 `C:\Users\WIN11\Desktop\答辩\`；技术文档
-  15 页、PPT 指导 10 页，最终哈希与逐页审阅副本完全一致。修改前原件与原子替换备份均在
-  本轮过程档案 `word-backups/`；后续维护继续遵守“先备份、临时编辑、逐页复核、再替换”。
-- 部署包不入库：需要时 `git archive` + `npm run build` 现打（§4 命令）。
-- 清理纪律：项目过程文件先移入 `项目过程档案\`，不直接删除；依赖项不得只凭静态扫描删除。
+  不要把它误写成本轮归档。
+- 本轮并发收尾时曾意外创建
+  `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\2026-08-10_brand_emphasis\`。
+  工作区已从副本恢复，但档案副本未删除、未合并；其保留、改名或清理必须由用户决定。
+  本轮 cleanup dry-run manifest 已生成；计划归档目标 `2026-08-10_career-arbor-brand-polish`
+  的用户批准、实际移动与最终交接仍 pending。
+- 用户答辩 Word 材料的 2026-08-10 原子替换是上一任务的历史成果；本轮没有更新 Word。
+- `frontend/dist`、`app.tar.gz`、`frontend-dist.tar.gz` 继续作为部署候选保留，不因清理候选而移动。
+- 清理纪律：项目过程文件先列 dry-run 并由用户逐项批准；不直接删除，依赖项不得只凭静态扫描删除。
 
 ## 7. 工作方式约定（沿用）
 

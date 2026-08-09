@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Execution status (2026-08-10):** Tasks 1–3 and Task 4 Steps 1–6 are complete and validated at `langgraph@d423a4b`. The final browser gate is `career-arbor-20260810-011800996/final-06` (43/43), with 13/13 screenshots reviewed, and the cleanup dry-run manifest has been generated. User approval, actual archival movement, and the final handoff remain pending. A concurrent cleanup attempt accidentally created `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\2026-08-10_brand_emphasis`; the workspace was restored from its copy, but the archive copy was deliberately not deleted and awaits the user's decision.
+
 **Goal:** Strengthen the bilingual Career Arbor brand hierarchy and interaction while preventing localized P3 tier badges from entering the job-title column.
 
 **Architecture:** Keep the existing React component structure and warm editorial token system. Implement three sequential frontend slices: global wordmark interaction in `theme.css`, a HomePage-only semantic brand lockup, and display-only tier localization plus badge containment. Use Vitest for translation/semantic contracts and Playwright for computed-style, focus, motion, collision, and geometry behavior.
@@ -78,7 +80,7 @@ npx.cmd playwright test --output "test-results\$runId\baseline-01"
 - Consumes: existing `.v2-wordmark` links emitted by `BrandHomeLink`; existing authenticated and unauthorized route helpers in `final-polish.spec.ts`.
 - Produces: a shared `.v2-wordmark` contract with a 44px target, responsive type scale, branch/leaf pseudo-elements, focus feedback, and reduced-motion behavior used by HomePage, WelcomePage, LandingPage, desktop sidebar, and mobile app bar.
 
-- [ ] **Step 1: Add a failing desktop interaction test**
+- [x] **Step 1: Add a failing desktop interaction test**
 
 Append a Playwright test that uses the real `/welcome` navigation and checks target size, hover branch expansion, and keyboard focus:
 
@@ -158,7 +160,7 @@ test("brand wordmark has a 44px target and branch feedback", async ({ page }) =>
 
 Use the existing WCAG sRGB helper pattern in this repository to calculate contrast from the returned colors. Assert at least `3` for the focus outline against its adjacent background and at least `4.5` for wordmark text against that background.
 
-- [ ] **Step 2: Add failing mobile collision and reduced-motion tests**
+- [x] **Step 2: Add failing mobile collision and reduced-motion tests**
 
 Add one test per mobile width that verifies both languages in the real authenticated app bar:
 
@@ -206,7 +208,7 @@ Add a 1280px authenticated test scoped to `.v2-sidebar`. Verify both `枝涯` an
 
 Add a reduced-motion test that calls `page.emulateMedia({ reducedMotion: "reduce" })`, loads `/welcome`, focuses the brand with `Tab`, and asserts the link and both pseudo-elements have only zero-second transition durations. Assert the outline is visible, the full branch line has `transform: none`, and the leaf has no scale or translation component.
 
-- [ ] **Step 3: Run Task 1 tests and verify RED**
+- [x] **Step 3: Run Task 1 tests and verify RED**
 
 Run with `frontend` as the working directory:
 
@@ -217,7 +219,7 @@ npx.cmd playwright test e2e/final-polish.spec.ts --project=chromium --output "te
 
 Expected: the new target-size test fails because `.v2-wordmark` has no 44px minimum; branch pseudo-element and reduced-motion assertions also fail because those rules do not exist.
 
-- [ ] **Step 4: Implement the minimum wordmark CSS**
+- [x] **Step 4: Implement the minimum wordmark CSS**
 
 Replace the compact `.v2-wordmark` rules with a shared motion token and a positioned inline-flex link. Use the following contract, adjusting only the narrow-screen clamp if the 320px geometry test proves it necessary:
 
@@ -301,7 +303,7 @@ Extend the existing reduced-motion query:
 
 If the 320px test fails, add one scoped `@media (max-width: 360px)` rule that lowers only `.v2-mobile-nav .v2-wordmark` to `1.32rem`; do not reduce the 44px target or hide controls.
 
-- [ ] **Step 5: Run Task 1 tests and verify GREEN**
+- [x] **Step 5: Run Task 1 tests and verify GREEN**
 
 Run from `frontend`:
 
@@ -312,7 +314,7 @@ npx.cmd playwright test e2e/final-polish.spec.ts --project=chromium --output "te
 
 Expected: all tests in `final-polish.spec.ts` pass, including existing homepage routing and sidebar alignment tests.
 
-- [ ] **Step 6: Self-review and commit Task 1**
+- [x] **Step 6: Self-review and commit Task 1**
 
 Confirm pseudo-elements have empty content and `pointer-events:none`, the link accessible name is unchanged, and every changed line traces to the wordmark request. Commit only the two Task 1 files:
 
@@ -336,7 +338,7 @@ git commit -m "feat(v2): emphasize the Career Arbor wordmark"
 - Consumes: the Task 1 wordmark contract and existing `useLanguage().t` translator.
 - Produces: `.mk-brand-lockup`, `.mk-brand-name`, `.mk-brand-branch`, and `.mk-brand-slogan`; separate translation keys for the name and tagline; no changes to WelcomePage eyebrow behavior.
 
-- [ ] **Step 1: Add failing semantic and translation tests**
+- [x] **Step 1: Add failing semantic and translation tests**
 
 Update the Chinese and English HomePage assertions in `i18n.test.tsx` to require separate elements and exactly one primary heading:
 
@@ -358,11 +360,11 @@ expect(
 expect(document.querySelectorAll("h1")).toHaveLength(1);
 ```
 
-- [ ] **Step 2: Add a failing browser hierarchy test**
+- [x] **Step 2: Add a failing browser hierarchy test**
 
 Add a test that marks the intro as seen, opens `/`, and loops over widths 320, 375, 650, and 1280. At the start of every width iteration, set `career_rag_lang_v1` to `zh` and reload so the sequence is deterministic. For Chinese and then English, read computed font sizes for `.mk-brand-slogan`, `.mk-brand-name`, and `.mk-hero h1`; assert `slogan < name < h1`, `document.querySelectorAll("h1").length === 1`, `documentElement.scrollWidth <= clientWidth`, and the lockup box remains inside the viewport. Use the real language toggle between assertions. Accept `testInfo` in the callback and save `home-${width}-zh.png` before switching languages and `home-${width}-en.png` after switching via `testInfo.outputPath(...)` for all four widths.
 
-- [ ] **Step 3: Run Task 2 tests and verify RED**
+- [x] **Step 3: Run Task 2 tests and verify RED**
 
 Run both commands with `frontend` as the working directory:
 
@@ -374,7 +376,7 @@ npx.cmd playwright test e2e/final-polish.spec.ts --project=chromium --output "te
 
 Expected: Vitest cannot find `.mk-brand-name` and `.mk-brand-slogan`; Playwright reports the existing `0.78rem` lockup does not satisfy the desired hierarchy.
 
-- [ ] **Step 4: Split the HomePage markup and translations**
+- [x] **Step 4: Split the HomePage markup and translations**
 
 Replace the single eyebrow paragraph with:
 
@@ -395,7 +397,7 @@ Replace the old combined English entry with:
 
 Keep the combined key only if `rg` proves another production caller remains; otherwise remove the newly orphaned entry.
 
-- [ ] **Step 5: Add the HomePage-only lockup styles**
+- [x] **Step 5: Add the HomePage-only lockup styles**
 
 Leave `.mk-eyebrow` unchanged and add:
 
@@ -444,7 +446,7 @@ Leave `.mk-eyebrow` unchanged and add:
 
 Do not animate the homepage divider; Task 1 already owns the single signature motion.
 
-- [ ] **Step 6: Run Task 2 tests and verify GREEN**
+- [x] **Step 6: Run Task 2 tests and verify GREEN**
 
 Run both targeted commands again from `frontend`:
 
@@ -456,7 +458,7 @@ npx.cmd playwright test e2e/final-polish.spec.ts --project=chromium --output "te
 
 Expected: semantic, translation, hierarchy, and narrow-screen overflow tests pass; existing WelcomePage tests remain unchanged.
 
-- [ ] **Step 7: Self-review and commit Task 2**
+- [x] **Step 7: Self-review and commit Task 2**
 
 Verify there is one H1, the combined translation key has no orphaned caller, and the shared eyebrow has not changed. Commit only Task 2 files:
 
@@ -479,7 +481,7 @@ git commit -m "feat(v2): promote the homepage brand lockup"
 - Consumes: `translate(lang, key)`, existing `tierLabel` mapping in WorkbenchPage, and the fixed-layout result table.
 - Produces: display-only English taxonomy and a reusable `.v2-tier` containment contract. Internal tier keys and WorkbenchPage logic remain unchanged.
 
-- [ ] **Step 1: Add failing translation tests**
+- [x] **Step 1: Add failing translation tests**
 
 Extend `translation primitives`:
 
@@ -491,7 +493,7 @@ it("uses the canonical three-tier taxonomy in English result badges", () => {
 });
 ```
 
-- [ ] **Step 2: Add failing result-table geometry tests**
+- [x] **Step 2: Add failing result-table geometry tests**
 
 In `result-layout.spec.ts`, add a fixture containing six `.v2-tier` badges—three Chinese and three English—inside their real second-column cells. Its helper must use the requested width as the real viewport width, not the existing `width + 40` long-title helper:
 
@@ -568,7 +570,7 @@ test("an unbroken localized tier remains inside its cell", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 3: Run Task 3 tests and verify RED**
+- [x] **Step 3: Run Task 3 tests and verify RED**
 
 Run both commands with `frontend` as the working directory:
 
@@ -580,7 +582,7 @@ npx.cmd playwright test e2e/result-layout.spec.ts --project=chromium --output "t
 
 Expected: translation assertions receive `Ready to apply`, `Worth stretching for`, and `Bridge role`; canonical short-label geometry may already pass, but the unbroken localization sentinel extends outside its 104px cell and proves the CSS boundary behavior is missing.
 
-- [ ] **Step 4: Apply display-only translations**
+- [x] **Step 4: Apply display-only translations**
 
 Change only these three values in `en.ts`:
 
@@ -592,7 +594,7 @@ Change only these three values in `en.ts`:
 
 Run `rg` for the old display strings and inspect every result. Do not change backend enums, fixture keys, run summaries, or persisted data.
 
-- [ ] **Step 5: Harden the tier badge boundary**
+- [x] **Step 5: Harden the tier badge boundary**
 
 Replace the single-line `.v2-tier` declaration with:
 
@@ -619,7 +621,7 @@ Replace the single-line `.v2-tier` declaration with:
 
 Do not add `overflow:hidden`, ellipsis, or a wider tier column unless the geometry test still fails after this rule and the canonical copy are both in place.
 
-- [ ] **Step 6: Run Task 3 tests and verify GREEN**
+- [x] **Step 6: Run Task 3 tests and verify GREEN**
 
 Run both targeted commands again from `frontend`:
 
@@ -631,7 +633,7 @@ npx.cmd playwright test e2e/result-layout.spec.ts --project=chromium --output "t
 
 Expected: canonical translations and all four real viewport widths pass, including the existing long-title tests.
 
-- [ ] **Step 7: Self-review and commit Task 3**
+- [x] **Step 7: Self-review and commit Task 3**
 
 Confirm `WorkbenchPage.tsx`, backend files, API snapshots, and internal keys are untouched. Commit only Task 3 files:
 
@@ -655,16 +657,16 @@ git commit -m "fix(v2): contain localized result tiers"
 - Consumes: all three reviewed task commits.
 - Produces: final gate evidence, bilingual screenshots, broad review findings/fixes, and a non-mutating cleanup candidate manifest.
 
-- [ ] **Step 1: Run the complete frontend verification gate**
+- [x] **Step 1: Run the complete frontend verification gate**
 
 Run from `frontend`:
 
 ```powershell
-npm.cmd test -- --configLoader native
+npm.cmd test
 npm.cmd run typecheck
 npm.cmd run build
 $runId = (Get-Content -LiteralPath "..\.planning\career_arbor_brand_polish\run_id.txt" -Raw).Trim()
-npx.cmd playwright test --output "test-results\$runId\final-01"
+npm.cmd run e2e -- --output="test-results\$runId\final-01"
 ```
 
 After the four commands pass, record `final-01` in `.planning/career_arbor_brand_polish/final_output.txt` using `apply_patch`. Every later successful final attempt replaces that value with its own child name.
@@ -678,9 +680,9 @@ git diff --check "$baseSha..HEAD"
 git status --short
 ```
 
-Expected: all commands exit 0; there are no uncommitted source/test changes. `git status` may show only the explicitly untracked `.planning/` process state and the two pre-existing tarballs.
+Expected: all commands exit 0; there are no uncommitted source/test changes. `git status` may show only the explicitly untracked `.planning/` and `.superpowers/` process state plus the two pre-existing tarballs.
 
-- [ ] **Step 2: Capture and inspect bilingual visual evidence**
+- [x] **Step 2: Capture and inspect bilingual visual evidence**
 
 Read `.planning/career_arbor_brand_polish/final_output.txt` and use only the screenshots emitted by that latest passing Playwright child: HomePage in Chinese and English at 320, 375, 650, and 1280px; the English mobile app bar at 375px; and the six-label P3 result table at 320, 375, 650, and 1280px. Inspect:
 
@@ -692,19 +694,19 @@ Read `.planning/career_arbor_brand_polish/final_output.txt` and use only the scr
 
 If a visual issue appears, add a failing browser assertion before changing production CSS.
 
-- [ ] **Step 3: Run main-agent self-review**
+- [x] **Step 3: Run main-agent self-review**
 
 Review the full task range against the approved spec. Check scope, accessible semantics, contrast, motion, 320/375/650/1280 behavior, translation consistency, and test quality. Record findings in `progress.md`; fix verified defects test-first. If self-review changes source or tests, run the covering tests and create one scoped commit containing only the affected Task 1–3 files before generating the independent review package; never include `.planning/` or deployment tarballs.
 
-- [ ] **Step 4: Run independent broad code review and repair loop**
+- [x] **Step 4: Run independent broad code review and repair loop**
 
 Generate a review package from the SHA recorded in `.planning/career_arbor_brand_polish/base_sha.txt` to current HEAD. Dispatch independent reviewers for correctness, test quality, maintainability, UI/accessibility, and repository hygiene. Consolidate Critical/Important findings into one fix task, re-run covering tests, and re-review until both spec compliance and code quality are approved. Commit accepted review fixes separately with only the affected Task 1–3 source/test files; never include `.planning/` or the deployment tarballs.
 
-- [ ] **Step 5: Re-run the final gate after every accepted review fix**
+- [x] **Step 5: Re-run the final gate after every accepted review fix**
 
 Repeat Step 1 on the final code state. Use the next previously nonexistent `final-NN` output child rather than reusing `final-01`, and record the latest passing child name in `.planning/career_arbor_brand_polish/final_output.txt`. If a fix affects UI, repeat Step 2 against that latest child. Never cite an earlier passing run or its screenshots after a later code change.
 
-- [ ] **Step 6: Generate a non-mutating cleanup dry-run manifest**
+- [x] **Step 6: Generate a non-mutating cleanup dry-run manifest**
 
 Read the run ID and compare the final artifact inventory with `.planning/career_arbor_brand_polish/generated-baseline.csv`. The fixed allowlist may contain only the new `frontend/test-results/<run-id>` tree, files under `frontend/playwright-report` or `frontend/*.tsbuildinfo` whose SHA256 changed from baseline, plus this task's `.planning/career_arbor_brand_polish` process records and `.planning/.active_plan`. Recursively record absolute source path, baseline SHA256 if present, final size, modification time, final SHA256, candidate destination, file count, and total bytes. Verify every candidate is untracked with `git ls-files --error-unmatch` failing for that file.
 
@@ -724,6 +726,7 @@ Explicitly list as retained:
 - `app.tar.gz`
 - `frontend-dist.tar.gz`
 - `.env`, `.venv`, `frontend/node_modules`
+- `.superpowers/`（本轮过程状态，未获单独移动批准）
 - all tracked source, tests, docs, data, and configuration
 
 Do not copy, move, or delete anything. Present the dry-run manifest to the user for item-by-item approval as the separate cleanup gate.

@@ -4,9 +4,11 @@ Career-RAG 是一个面向毕业设计答辩的多人职业匹配 Web 系统。�
 
 这里的 **Agentic RAG**，白话说就是“先从岗位库找证据，再让分工明确的 AI 角色基于证据完成任务”；**Supervisor** 是贯穿流程的项目经理，负责检查计划、约束、证据和发布条件。
 
-历史批次 9 的代码与实测工件冻结基线为 `2474e48`；本轮 UI 收尾与清理基于
-`langgraph@79af2dd` 的未提交工作树，验收口径见
-`docs/validation/2026-08-09-final-polish-acceptance.md`。
+历史批次 9 的代码与实测工件冻结基线为 `2474e48`；当前本地前端验收基线为
+`langgraph@d423a4b`，完成了品牌强化、主页品牌层级与 P3 分层防溢出修复，验收口径见
+`docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`。并发任务曾意外把非最终
+`a4a8e44` 推到 `origin` 与 `gitlab` 的 `main`、`langgraph` 四个远端分支；最终
+`d423a4b` 尚未推送。本轮没有执行服务器部署，也没有核验服务器当前版本。
 
 ## 当前真实能力
 
@@ -123,10 +125,13 @@ npm.cmd run dev
 
 ## 测试入口
 
-2026-08-09 本轮最终实测结果为：后端 pytest **852 passed**、Vitest **206/206**、
-Playwright **28/28**；pyflakes、TypeScript 类型检查与 Vite 生产构建均通过。来源为
+2026-08-10 最新前端实测结果为：Vitest **207/207（16 files）**、Playwright
+**43/43**，TypeScript 类型检查与 Vite 生产构建均通过（1858 modules transformed）；
+13 张最终截图已逐张复核。来源为
+`docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`。本轮只改前端，未重跑
+后端；后端 pytest **852 passed** 是 2026-08-09 的已知基线，见历史报告
 `docs/validation/2026-08-09-final-polish-acceptance.md`。批次 9 的 **642 / 105 / 14 / 32**
-数字仅是历史冻结口径，见 `docs/validation/2026-08-07-batch9-acceptance.md`。
+数字仅是更早的历史冻结口径，见 `docs/validation/2026-08-07-batch9-acceptance.md`。
 
 ```powershell
 # 后端
@@ -176,6 +181,7 @@ npm.cmd run api:check
 - `docs/product_guide.md`：答辩时按用户看到的页面与状态讲产品。
 - `docs/code_guide.md`：按模块、文件和关键函数走读实现。
 - `docs/project_functionality_and_code_guide.md`：完整功能与代码详解，也是 V2 Word 文档的唯一 Markdown 源稿。
-- `docs/validation/2026-08-09-final-polish-acceptance.md`：本轮 UI、清理、交叉审查与最终门禁证据。
+- `docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`：当前品牌强化、P3 分层修复、交叉审查与前端门禁证据。
+- `docs/validation/2026-08-09-final-polish-acceptance.md`：历史 UI 收尾、清理与后端 852 项基线证据。
 - `docs/validation/2026-08-07-batch9-acceptance.md`：历史批次 9 冻结验收与四项测试计数。
 - `docs/validation/2026-08-06-cross-encoder-ablation.md`：四通道消融方法与限制。

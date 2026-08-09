@@ -22,18 +22,22 @@
 
 | 文档 | 内容 |
 |---|---|
-| [validation/2026-08-09-final-polish-acceptance.md](validation/2026-08-09-final-polish-acceptance.md) | 当前收尾验收（UI、清理、交叉审查、852/206/28 门禁） |
+| [validation/2026-08-10-career-arbor-brand-polish-acceptance.md](validation/2026-08-10-career-arbor-brand-polish-acceptance.md) | 当前前端验收（品牌强化、P3 分层防溢出、双审、207/43 门禁） |
+| [validation/2026-08-09-final-polish-acceptance.md](validation/2026-08-09-final-polish-acceptance.md) | 历史 UI 收尾与清理验收（含后端 852 项已知基线） |
 | [validation/2026-08-07-batch9-acceptance.md](validation/2026-08-07-batch9-acceptance.md) | 历史批次 9 验收（门禁计数、P1–P4 彩排、配置快照） |
 | [validation/2026-08-06-cross-encoder-ablation.md](validation/2026-08-06-cross-encoder-ablation.md) | 四通道消融（within-pool 口径） |
 | [validation/2026-08-07-global-audit-findings.md](validation/2026-08-07-global-audit-findings.md) | 三方全局审核发现与修复清单 |
 | validation/ 其余报告 | 各阶段验证记录 |
 | `../data/eval/demo_corpus_cross_v1/` | 评估数据集与排名工件 |
 
-## 过程档案（毕设工程过程证据，已收官，见 [archive/](archive/)）
+## 过程档案（2026-08-09 历史批次已收官，见 [archive/](archive/)）
 
 三方评审收敛的规范方案（前端产品化 v3.2、生产增强 v10、总执行方案 v5 等）、
 各批次实施计划与设计稿（archive/superpowers/）、历史审查报告。
-未跟踪的批次草稿区已整体外移至 `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\`。
+2026-08-09 批次的未跟踪草稿区已外移至
+`C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\`。本轮 `.planning/` 与
+`.superpowers/` 仍存在于工作区；dry-run manifest 已生成，但用户批准、实际归档与最终交接
+仍 pending，不能写成已经整体外移或收官。
 
 ## AI 协作规则（仓库根）
 
