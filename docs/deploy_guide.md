@@ -241,6 +241,10 @@ UPDATE users
 SET is_admin = FALSE, token_version = token_version + 1
 WHERE user_id = '<<user_uuid>>'::uuid;
 
+-- 仅强制该用户换票（不改 is_admin；配合上文"列已 TRUE 重新加白名单"场景）：
+UPDATE users SET token_version = token_version + 1
+WHERE user_id = '<<user_uuid>>'::uuid;
+
 -- 紧急吊销全部在票会话（所有账号都需重新登录）：
 UPDATE users SET token_version = token_version + 1;
 ```

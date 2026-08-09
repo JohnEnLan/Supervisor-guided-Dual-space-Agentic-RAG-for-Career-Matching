@@ -440,10 +440,11 @@ async def test_admin_user_resume_reset_target_prefers_active_parse_session(
     assert "COALESCE(target.resume_parse_count, 0) > 0" in sql
     assert "target.status = 'resume_queued'" in sql
     # queued 优先于 updated_at：旧 ready 会话被普通状态写入刷新
-    # updated_at 时也不得压过新卡住的 queued 会话。
+    # updated_at 时也不得压过新卡住的 queued 会话；status 列可空，
+    # NULLS LAST 防 NULL-status 行越过 queued（DESC 默认 NULLS FIRST）。
     normalized_sql = " ".join(sql.split())
     assert (
-        "ORDER BY (target.status = 'resume_queued') DESC,"
+        "ORDER BY (target.status = 'resume_queued') DESC NULLS LAST,"
         " target.updated_at DESC, target.session_id DESC"
     ) in normalized_sql
 

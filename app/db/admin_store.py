@@ -198,7 +198,7 @@ async def get_admin_user_resume(*, user_id: str) -> dict[str, Any] | None:
                 WHERE target.owner_user_id = account.user_id
                   AND (COALESCE(target.resume_parse_count, 0) > 0
                        OR target.status = 'resume_queued')
-                ORDER BY (target.status = 'resume_queued') DESC,
+                ORDER BY (target.status = 'resume_queued') DESC NULLS LAST,
                          target.updated_at DESC,
                          target.session_id DESC
                 LIMIT 1
