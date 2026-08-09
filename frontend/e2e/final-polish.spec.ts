@@ -38,7 +38,7 @@ async function wordmarkFeedback(brand: Locator) {
   return brand.evaluate((element) => {
     const branchTransform = getComputedStyle(element, "::after").transform;
     return {
-      branchScaleX: branchTransform === "none" ? 1 : new DOMMatrixReadOnly(branchTransform).a,
+      branchScaleX: branchTransform === "none" ? null : new DOMMatrixReadOnly(branchTransform).a,
       leafOpacity: Number.parseFloat(getComputedStyle(element, "::before").opacity),
     };
   });
@@ -324,9 +324,14 @@ test("brand wordmark has a 44px target and branch feedback", async ({ page }) =>
   expect(target!.height).toBeGreaterThanOrEqual(44);
 
   const idle = await wordmarkFeedback(brand);
+  expect(idle.branchScaleX).not.toBeNull();
+  expect(idle.branchScaleX!).toBeLessThan(1);
   await brand.hover();
   await expect.poll(() => wordmarkFeedback(brand).then(({ branchScaleX }) => branchScaleX)).toBe(1);
   await expect.poll(() => wordmarkFeedback(brand).then(({ leafOpacity }) => leafOpacity)).toBe(1);
+  const hover = await wordmarkFeedback(brand);
+  expect(hover.branchScaleX).toBe(1);
+  expect(hover.branchScaleX).toBeGreaterThan(idle.branchScaleX!);
 
   const layoutBeforePress = await brand.evaluate((element) => {
     const nav = element.closest("nav")!.getBoundingClientRect();
@@ -379,6 +384,9 @@ test("brand wordmark has a 44px target and branch feedback", async ({ page }) =>
   expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
   await expect.poll(() => wordmarkFeedback(brand).then(({ branchScaleX }) => branchScaleX)).toBe(1);
   await expect.poll(() => wordmarkFeedback(brand).then(({ leafOpacity }) => leafOpacity)).toBe(1);
+  const focused = await wordmarkFeedback(brand);
+  expect(focused.branchScaleX).toBe(1);
+  expect(focused.branchScaleX).toBeGreaterThan(idle.branchScaleX!);
 
   const contrast = await brand.evaluate((element) => {
     const rgb = (value: string) =>
