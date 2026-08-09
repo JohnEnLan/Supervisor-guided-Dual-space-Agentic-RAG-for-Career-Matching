@@ -3,6 +3,10 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
     "Some generated or data-dependent conversation content may remain in Chinese.",
   "中文": "Chinese",
   "进入应用": "Open the app",
+  "枝涯 Career Arbor · 循枝见路，向远而生":
+    "Career Arbor · Follow the branches, find your path.",
+  "枝涯 — 你的 AI 职业路径智能体":
+    "Career Arbor — Your AI Career-Path Agent",
   "当前语言：{current}；切换到 {target}":
     "Current language: {current}; switch to {target}",
   "群聊式顾问团队": "A collaborative advisor team",
@@ -56,7 +60,7 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
   "把关每一步产出的质量与节奏，全程督导，不放任流程跑偏。":
     "Keeps quality and pace on track at every step, with active oversight throughout the process.",
   "跳过介绍 →": "Skip introduction →",
-  "欢迎来到 CAREER RAG": "WELCOME TO CAREER RAG",
+  "欢迎来到枝涯 CAREER ARBOR": "WELCOME TO CAREER ARBOR",
   "求职不该是一个人的事": "Job searching should not be a solo journey",
   "这里有一支为你组建的顾问团队。往下滑，先认识一下他们。":
     "Meet the advisor team assembled around you. Scroll down to get to know them.",
@@ -91,7 +95,7 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
   "验证码登录，首次登录自动创建账号。":
     "Sign in with a verification code. Your account is created automatically the first time.",
   "返回首页": "Return to homepage",
-  "进入 Career RAG": "Enter Career RAG",
+  "进入枝涯": "Enter Career Arbor",
   "此介绍只在首次进入时展示": "This introduction is shown only on your first visit",
   "邮箱验证码": "Email code",
   "邮箱地址": "Email address",

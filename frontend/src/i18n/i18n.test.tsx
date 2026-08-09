@@ -30,7 +30,7 @@ import {
   useLanguage,
 } from ".";
 
-const ZH_TITLE = "Career RAG 答辩工作台";
+const ZH_TITLE = "枝涯 — 你的 AI 职业路径智能体";
 
 function LanguageProbe() {
   const { lang } = useLanguage();
@@ -228,7 +228,7 @@ describe("LanguageProvider", () => {
       screen.getByRole("button", { name: "当前语言：中文；切换到 English" }),
     );
     expect(document.documentElement.lang).toBe("en");
-    expect(document.title).toBe("Career RAG Workbench");
+    expect(document.title).toBe("Career Arbor — Your AI Career-Path Agent");
 
     await user.click(
       screen.getByRole("button", { name: "Current language: English; switch to Chinese" }),
@@ -324,6 +324,36 @@ describe("default context and toggle accessibility", () => {
     );
     expect(themeSource).toMatch(/\.v2-composer-mode\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   });
+
+  it("wraps long result titles and explanations inside the fixed table layout", () => {
+    expect(themeSource).toMatch(
+      /\.v2-result-table\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*650px;[^}]*table-layout:\s*fixed/s,
+    );
+    expect(themeSource).toMatch(
+      /\.v2-result-table td\s*\{[^}]*overflow-wrap:\s*break-word/s,
+    );
+    expect(themeSource).toMatch(
+      /\.v2-result-row-trigger h3\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*normal/s,
+    );
+    expect(themeSource).toMatch(
+      /\.v2-result-detail-row > td\s*\{[^}]*white-space:\s*normal/s,
+    );
+    expect(themeSource).toMatch(
+      /\.v2-job-card\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%/s,
+    );
+    expect(themeSource).toMatch(
+      /\.v2-job-card h3,\s*\.v2-job-why\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*normal/s,
+    );
+  });
+
+  it("aligns the desktop sidebar wordmark without changing its mobile inset", () => {
+    expect(themeSource).toMatch(
+      /\.v2-sidebar \.v2-wordmark\s*\{\s*padding:\s*6px\s+12px\s+14px;\s*\}/s,
+    );
+    expect(themeSource).toMatch(
+      /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.v2-sidebar \.v2-wordmark\s*\{\s*padding:\s*6px\s+10px;\s*\}/s,
+    );
+  });
 });
 
 describe("HomePage language switching", () => {
@@ -334,7 +364,11 @@ describe("HomePage language switching", () => {
         name: "把求职这件事，交给一支为你服务的团队",
       }),
     ).toBeVisible();
+    expect(screen.getByText("枝涯 Career Arbor · 循枝见路，向远而生")).toBeVisible();
     expect(screen.getByRole("region", { name: "功能陈列" })).toBeVisible();
+    expect(document.querySelector(".v2-footnote")).toHaveTextContent(
+      "枝涯 — 你的 AI 职业路径智能体",
+    );
   });
 
   it("switches the navigation and page content to English", async () => {
@@ -350,7 +384,13 @@ describe("HomePage language switching", () => {
         name: "Put your job search in the hands of a team built around you",
       }),
     ).toBeVisible();
+    expect(
+      screen.getByText("Career Arbor · Follow the branches, find your path."),
+    ).toBeVisible();
     expect(screen.getByRole("region", { name: "Features" })).toBeVisible();
+    expect(document.querySelector(".v2-footnote")).toHaveTextContent(
+      "Career Arbor — Your AI Career-Path Agent",
+    );
     expect(screen.queryByText("一套认真对待求职的系统")).not.toBeInTheDocument();
   });
 });
@@ -367,6 +407,8 @@ describe("WelcomePage language switching", () => {
     expect(
       screen.getByRole("heading", { name: "Job searching should not be a solo journey" }),
     ).toBeVisible();
+    expect(screen.getByText("WELCOME TO CAREER ARBOR")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Enter Career Arbor" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Skip introduction →" })).toBeVisible();
     expect(screen.queryByText("求职不该是一个人的事")).not.toBeInTheDocument();
   });

@@ -11,6 +11,13 @@
 Supervisor 监督的双空间 Agentic RAG 职业匹配系统（伯明翰 CS 硕士毕业设计），
 **已全量上线** https://zhangen.cn （香港服务器 45.153.131.127，Ubuntu 22.04）。
 
+**产品品牌（B9 起）**：英文名 **Career Arbor**，中文名 **枝涯**，口号
+「循枝见路，向远而生」，定位句「枝涯 — 你的 AI 职业路径智能体 /
+Career Arbor — Your AI Career-Path Agent」。品牌串只存在于前端
+（wordmark、document.title、index.html、i18n 词条），后端无品牌字样。
+架构定性口径（答辩/文档统一）：supervisor 多智能体 + LangGraph 图编排
+workflow（plan-and-execute，非 ReAct）+ verify 处单条有界自反回路。
+
 批次史（全部封批并部署）：
 
 | 批次 | 内容 | 封批/关键提交 |

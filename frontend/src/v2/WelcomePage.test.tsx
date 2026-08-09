@@ -41,7 +41,7 @@ describe("WelcomePage", () => {
     // B1 R7：介绍页出口 → 首页（P1），不再直达登录
     const user = userEvent.setup();
     const router = renderWelcome();
-    await user.click(screen.getByRole("button", { name: "进入 Career RAG" }));
+    await user.click(screen.getByRole("button", { name: "进入枝涯" }));
     expect(router.state.location.pathname).toBe("/");
     expect(localStorage.getItem(INTRO_SEEN_KEY)).toBe("1");
   });
@@ -61,7 +61,7 @@ describe("WelcomePage", () => {
       throw new Error("storage disabled");
     });
     const router = renderWelcome();
-    await user.click(screen.getByRole("button", { name: "进入 Career RAG" }));
+    await user.click(screen.getByRole("button", { name: "进入枝涯" }));
     const { hasSeenIntro } = await import("./introSeen");
     expect(hasSeenIntro()).toBe(true);
     expect(router.state.location.pathname).toBe("/");

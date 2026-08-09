@@ -67,7 +67,7 @@ export function LandingPage() {
   return (
     <div className="v2-landing">
       <nav className="v2-topnav">
-        <span className="v2-wordmark">Career RAG</span>
+        <span className="v2-wordmark">Career Arbor</span>
         <Link className="v2-back-home" to="/">
           {t("← 返回首页")}
         </Link>

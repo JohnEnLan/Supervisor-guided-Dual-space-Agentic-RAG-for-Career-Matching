@@ -4,8 +4,8 @@ import { apiFixtures } from "../src/test/apiFixtures";
 
 const LANGUAGE_STORAGE_KEY = "career_rag_lang_v1";
 const INTRO_STORAGE_KEY = "career_rag_intro_seen_v1";
-const EN_TITLE = "Career RAG Workbench";
-const ZH_TITLE = "Career RAG \u7b54\u8fa9\u5de5\u4f5c\u53f0";
+const EN_TITLE = "Career Arbor — Your AI Career-Path Agent";
+const ZH_TITLE = "\u679d\u6daf — \u4f60\u7684 AI \u804c\u4e1a\u8def\u5f84\u667a\u80fd\u4f53";
 const ZH_TOGGLE_ARIA = "\u5f53\u524d\u8bed\u8a00\uff1a\u4e2d\u6587\uff1b\u5207\u6362\u5230 English";
 const EN_TOGGLE_ARIA = "Current language: English; switch to Chinese";
 

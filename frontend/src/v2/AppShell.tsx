@@ -147,7 +147,7 @@ export function AppShell() {
         >
           <Menu size={20} />
         </button>
-        <span className="v2-wordmark">Career RAG</span>
+        <span className="v2-wordmark">Career Arbor</span>
         <LanguageToggle className="v2-lang-mobile" />
       </header>
       {navigationOpen ? (
@@ -168,7 +168,7 @@ export function AppShell() {
         aria-label={navigationOpen ? t("主导航") : undefined}
       >
         <div className="v2-sidebar-heading">
-          <span className="v2-wordmark">Career RAG</span>
+          <span className="v2-wordmark">Career Arbor</span>
           <button
             ref={navigationCloseRef}
             type="button"

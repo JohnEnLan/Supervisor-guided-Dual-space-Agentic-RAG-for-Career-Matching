@@ -55,7 +55,7 @@ export function HomePage() {
   return (
     <div className="mk-page">
       <nav className="v2-topnav">
-        <span className="v2-wordmark">Career RAG</span>
+        <span className="v2-wordmark">Career Arbor</span>
         <div className="v2-topnav-actions">
           <LanguageToggle />
           <button
@@ -69,7 +69,7 @@ export function HomePage() {
       </nav>
 
       <header className="mk-hero">
-        <p className="mk-eyebrow">SUPERVISOR-GUIDED AGENTIC RAG</p>
+        <p className="mk-eyebrow">{t("枝涯 Career Arbor · 循枝见路，向远而生")}</p>
         <h1>
           {t("把求职这件事，")}
           <br />
@@ -125,6 +125,7 @@ export function HomePage() {
       </section>
 
       <p className="v2-footnote">
+        {t("枝涯 — 你的 AI 职业路径智能体")} ·{" "}
         {t("毕业设计演示系统 · 演示环境 · 岗位数据含合成演示语料 · 不构成任何求职承诺")}
       </p>
     </div>

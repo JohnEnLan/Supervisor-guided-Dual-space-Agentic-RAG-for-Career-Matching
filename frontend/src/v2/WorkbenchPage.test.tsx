@@ -418,7 +418,7 @@ describe("resume confirmation profile", () => {
       ],
       projects: [
         {
-          name: "Career RAG",
+          name: "Career Arbor",
           summary: "Evidence-grounded career matching",
           dates: "2026",
           actions: ["Implemented RRF fusion"],
@@ -547,7 +547,7 @@ describe("resume confirmation profile", () => {
       "Distinction track",
       "Career Lab",
       "Reduced latency by 30%",
-      "Career RAG",
+      "Career Arbor",
       "Produced traceable recommendations",
       "SQL",
       "缺少部分经历的量化结果",

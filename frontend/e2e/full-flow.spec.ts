@@ -229,7 +229,7 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   for (const heading of ["教育经历", "工作经历", "项目经历", "技能", "档案质量提示", "原文证据"]) {
     await expect(resumeProfile.getByRole("heading", { name: heading })).toBeVisible();
   }
-  await expect(resumeProfile.getByText("Career RAG")).toBeVisible();
+  await expect(resumeProfile.getByText("Career Arbor")).toBeVisible();
   await expect(page.getByText(/📎 重新上传/)).toBeVisible();
   await page.getByRole("button", { name: "确认简历档案" }).click();
   await expect(page.getByText(/✅ 简历档案已确认/)).toBeVisible();

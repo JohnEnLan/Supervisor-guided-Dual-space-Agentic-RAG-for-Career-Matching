@@ -16,8 +16,8 @@ export type Translate = (key: string, params?: TranslationParams) => string;
 
 export const LANGUAGE_STORAGE_KEY = "career_rag_lang_v1";
 
-const ZH_DOCUMENT_TITLE = "Career RAG 答辩工作台";
-const EN_DOCUMENT_TITLE = "Career RAG Workbench";
+const ZH_DOCUMENT_TITLE = "枝涯 — 你的 AI 职业路径智能体";
+const EN_DOCUMENT_TITLE = "Career Arbor — Your AI Career-Path Agent";
 let memoryLanguage: Language = "zh";
 
 export function translate(lang: Language, zhText: string): string {

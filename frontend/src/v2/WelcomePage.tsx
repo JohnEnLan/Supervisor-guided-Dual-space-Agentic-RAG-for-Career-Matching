@@ -82,7 +82,7 @@ export function WelcomePage() {
   return (
     <div className="wl-page" ref={containerRef}>
       <nav className="wl-topbar">
-        <span className="v2-wordmark">Career RAG</span>
+        <span className="v2-wordmark">Career Arbor</span>
         <div className="wl-topbar-actions">
           <LanguageToggle />
           <button type="button" className="wl-skip" onClick={exitIntro}>
@@ -93,7 +93,7 @@ export function WelcomePage() {
 
       <section className="wl-scene wl-ivory wl-opening">
         <div className="wl-inner" data-reveal>
-          <p className="mk-eyebrow">{t("欢迎来到 CAREER RAG")}</p>
+          <p className="mk-eyebrow">{t("欢迎来到枝涯 CAREER ARBOR")}</p>
           <h1>{t("求职不该是一个人的事")}</h1>
           <p className="wl-lede">
             {t("这里有一支为你组建的顾问团队。往下滑，先认识一下他们。")}
@@ -197,7 +197,7 @@ export function WelcomePage() {
           </p>
           <div className="mk-cta-row">
             <button type="button" className="v2-btn primary mk-cta" onClick={exitIntro}>
-              {t(me.data ? "返回首页" : "进入 Career RAG")}
+              {t(me.data ? "返回首页" : "进入枝涯")}
             </button>
           </div>
           <p className="v2-footnote">{t("此介绍只在首次进入时展示")}</p>

@@ -302,7 +302,7 @@ export const apiFixtures = {
       ],
       projects: [
         {
-          name: "Career RAG",
+          name: "Career Arbor",
           summary: "Evidence-grounded career matching",
           dates: "2026",
           actions: ["Implemented RRF fusion"],
