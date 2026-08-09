@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/queries";
+import { LanguageToggle, useLanguage } from "../i18n";
 import { hasSeenIntro, markIntroSeen } from "./introSeen";
 import "./theme.css";
 import "./marketing.css";
@@ -32,6 +33,7 @@ const TEAM = [
 
 export function WelcomePage() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // B1 评审 M2：已登录但从未拿到"已读介绍"标记的用户（介绍页上线前的
@@ -81,16 +83,21 @@ export function WelcomePage() {
     <div className="wl-page" ref={containerRef}>
       <nav className="wl-topbar">
         <span className="v2-wordmark">Career RAG</span>
-        <button type="button" className="wl-skip" onClick={exitIntro}>
-          跳过介绍 →
-        </button>
+        <div className="wl-topbar-actions">
+          <LanguageToggle />
+          <button type="button" className="wl-skip" onClick={exitIntro}>
+            {t("跳过介绍 →")}
+          </button>
+        </div>
       </nav>
 
       <section className="wl-scene wl-ivory wl-opening">
         <div className="wl-inner" data-reveal>
-          <p className="mk-eyebrow">欢迎来到 CAREER RAG</p>
-          <h1>求职不该是一个人的事</h1>
-          <p className="wl-lede">这里有一支为你组建的顾问团队。往下滑，先认识一下他们。</p>
+          <p className="mk-eyebrow">{t("欢迎来到 CAREER RAG")}</p>
+          <h1>{t("求职不该是一个人的事")}</h1>
+          <p className="wl-lede">
+            {t("这里有一支为你组建的顾问团队。往下滑，先认识一下他们。")}
+          </p>
         </div>
         <div className="wl-scroll-cue" aria-hidden>
           ↓
@@ -100,11 +107,13 @@ export function WelcomePage() {
       <section className="wl-scene wl-dark">
         <div className="wl-inner">
           <p className="wl-chapter" data-reveal>
-            01 · 你的团队
+            {t("01 · 你的团队")}
           </p>
-          <h2 data-reveal>四位顾问，一间群聊</h2>
+          <h2 data-reveal>{t("四位顾问，一间群聊")}</h2>
           <p className="wl-lede" data-reveal>
-            不是一个黑盒 AI，而是四个分工明确的角色围绕你协作——他们的每句话都在群里，看得见。
+            {t(
+              "不是一个黑盒 AI，而是四个分工明确的角色围绕你协作——他们的每句话都在群里，看得见。",
+            )}
           </p>
           <div className="wl-team-grid">
             {TEAM.map((member, index) => (
@@ -115,8 +124,8 @@ export function WelcomePage() {
                 data-reveal
                 style={{ transitionDelay: `${index * 90}ms` }}
               >
-                <h3>{member.name}</h3>
-                <p>{member.duty}</p>
+                <h3>{t(member.name)}</h3>
+                <p>{t(member.duty)}</p>
               </article>
             ))}
           </div>
@@ -126,16 +135,19 @@ export function WelcomePage() {
       <section className="wl-scene wl-ivory">
         <div className="wl-inner">
           <p className="wl-chapter" data-reveal>
-            02 · 证据先行
+            {t("02 · 证据先行")}
           </p>
-          <h2 data-reveal>每一句建议，都指得回你的真实经历</h2>
+          <h2 data-reveal>{t("每一句建议，都指得回你的真实经历")}</h2>
           <p className="wl-lede" data-reveal>
-            简历会被整理成结构化档案，同时逐句保留原文证据。顾问引用你的经历时标注出处，
-            缺关键信息时会先向你确认——不编造、不脑补。
+            {t(
+              "简历会被整理成结构化档案，同时逐句保留原文证据。顾问引用你的经历时标注出处， 缺关键信息时会先向你确认——不编造、不脑补。",
+            )}
           </p>
           <figure className="wl-evidence" data-reveal>
-            <blockquote>C001 · 「独立完成部门数据看板搭建，支撑三个业务组的日常决策」</blockquote>
-            <figcaption>↳ 被引用于「数据分析师（Now Fit）」的匹配解释</figcaption>
+            <blockquote>
+              {t("C001 · 「独立完成部门数据看板搭建，支撑三个业务组的日常决策」")}
+            </blockquote>
+            <figcaption>{t("↳ 被引用于「数据分析师（Now Fit）」的匹配解释")}</figcaption>
           </figure>
         </div>
       </section>
@@ -143,17 +155,18 @@ export function WelcomePage() {
       <section className="wl-scene wl-warm">
         <div className="wl-inner">
           <p className="wl-chapter" data-reveal>
-            03 · 双空间检索
+            {t("03 · 双空间检索")}
           </p>
-          <h2 data-reveal>硬条件交给数据库，语义交给向量</h2>
+          <h2 data-reveal>{t("硬条件交给数据库，语义交给向量")}</h2>
           <p className="wl-lede" data-reveal>
-            签证、地点、学历这类底线由数据库直接过滤；关键词与语义两路并行检索、融合重排，
-            兼顾"写了什么"与"意味着什么"。
+            {t(
+              '签证、地点、学历这类底线由数据库直接过滤；关键词与语义两路并行检索、融合重排， 兼顾"写了什么"与"意味着什么"。',
+            )}
           </p>
           <div className="wl-tiers" data-reveal>
-            <span data-tier="now">Now Fit · 现在就投</span>
-            <span data-tier="stretch">Stretch Fit · 跳一跳够得着</span>
-            <span data-tier="bridge">Bridge Role · 迂回积累</span>
+            <span data-tier="now">{t("Now Fit · 现在就投")}</span>
+            <span data-tier="stretch">{t("Stretch Fit · 跳一跳够得着")}</span>
+            <span data-tier="bridge">{t("Bridge Role · 迂回积累")}</span>
           </div>
         </div>
       </section>
@@ -161,29 +174,33 @@ export function WelcomePage() {
       <section className="wl-scene wl-dark">
         <div className="wl-inner">
           <p className="wl-chapter" data-reveal>
-            04 · 全程督导
+            {t("04 · 全程督导")}
           </p>
-          <h2 data-reveal>过程透明，质量有人把关</h2>
+          <h2 data-reveal>{t("过程透明，质量有人把关")}</h2>
           <p className="wl-lede" data-reveal>
-            项目经理核查每个阶段的产出：信息不足会追问、结果存疑会重查；重试有上限，进度看得见。
+            {t(
+              "项目经理核查每个阶段的产出：信息不足会追问、结果存疑会重查；重试有上限，进度看得见。",
+            )}
           </p>
         </div>
       </section>
 
       <section className="wl-scene wl-ivory wl-final">
         <div className="wl-inner" data-reveal>
-          <h2>准备好了吗？</h2>
+          <h2>{t("准备好了吗？")}</h2>
           <p className="wl-lede">
-            {me.data
-              ? "随时可以从首页顶栏进入工作台继续。"
-              : "验证码登录，首次登录自动创建账号。"}
+            {t(
+              me.data
+                ? "随时可以从首页顶栏进入工作台继续。"
+                : "验证码登录，首次登录自动创建账号。",
+            )}
           </p>
           <div className="mk-cta-row">
             <button type="button" className="v2-btn primary mk-cta" onClick={exitIntro}>
-              {me.data ? "返回首页" : "进入 Career RAG"}
+              {t(me.data ? "返回首页" : "进入 Career RAG")}
             </button>
           </div>
-          <p className="v2-footnote">此介绍只在首次进入时展示</p>
+          <p className="v2-footnote">{t("此介绍只在首次进入时展示")}</p>
         </div>
       </section>
     </div>

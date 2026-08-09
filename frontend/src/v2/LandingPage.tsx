@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import { api } from "../api/queries";
+import { LanguageToggle, useLanguage } from "../i18n";
 import "./theme.css";
 
 type Channel = "email" | "phone";
@@ -15,6 +16,7 @@ const CHANNEL_META: Record<Channel, { label: string; placeholder: string; inputL
 
 export function LandingPage() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [channel, setChannel] = useState<Channel>("email");
   const [target, setTarget] = useState("");
   const [code, setCode] = useState("");
@@ -55,11 +57,11 @@ export function LandingPage() {
 
   const errorText = (error: unknown): string => {
     if (error instanceof ApiError) {
-      if (error.status === 401) return "验证码不正确或已过期，请重试。";
-      if (error.status === 429) return "请求太频繁，请稍后再试。";
+      if (error.status === 401) return t("验证码不正确或已过期，请重试。");
+      if (error.status === 429) return t("请求太频繁，请稍后再试。");
       return error.message;
     }
-    return "网络异常，请重试。";
+    return t("网络异常，请重试。");
   };
 
   return (
@@ -67,25 +69,31 @@ export function LandingPage() {
       <nav className="v2-topnav">
         <span className="v2-wordmark">Career RAG</span>
         <Link className="v2-back-home" to="/">
-          ← 返回首页
+          {t("← 返回首页")}
         </Link>
       </nav>
       <main className="v2-hero">
         <section>
-          <h1>把求职这件事，交给一支为你服务的团队</h1>
+          <h1>{t("把求职这件事，交给一支为你服务的团队")}</h1>
           <p className="lede">
-            上传简历，和你的职业顾问团队聊清楚方向。需求顾问、岗位顾问、规划师与项目经理在一个群里协作——
-            每一条推荐都有 JD 原文证据，每一条简历建议都指回你的真实经历。
+            {t(
+              "上传简历，和你的职业顾问团队聊清楚方向。需求顾问、岗位顾问、规划师与项目经理在一个群里协作—— 每一条推荐都有 JD 原文证据，每一条简历建议都指回你的真实经历。",
+            )}
           </p>
           <ul className="v2-hero-points">
-            <li>已支持的硬条件（地点、签证担保要求、学历、经验等）由数据库过滤；其余偏好参与检索排序</li>
-            <li>多轮启发式咨询：从明确目标到探索方向都被认真对待</li>
-            <li>全程可解释：分层推荐、证据溯源、过程透明</li>
+            <li>
+              {t(
+                "已支持的硬条件（地点、签证担保要求、学历、经验等）由数据库过滤；其余偏好参与检索排序",
+              )}
+            </li>
+            <li>{t("多轮启发式咨询：从明确目标到探索方向都被认真对待")}</li>
+            <li>{t("全程可解释：分层推荐、证据溯源、过程透明")}</li>
           </ul>
         </section>
-        <section className="v2-login-card" aria-label="登录">
-          <h2>开始使用</h2>
-          <p className="hint">验证码登录，首次登录自动创建账号</p>
+        <section className="v2-login-card" aria-label={t("登录")}>
+          <LanguageToggle className="v2-login-lang" />
+          <h2>{t("开始使用")}</h2>
+          <p className="hint">{t("验证码登录，首次登录自动创建账号")}</p>
           <div className="v2-tabs" role="tablist">
             {enabledChannels.map((key) => (
               <button
@@ -98,12 +106,12 @@ export function LandingPage() {
                   verify.reset();
                 }}
               >
-                {CHANNEL_META[key].label}
+                {t(CHANNEL_META[key].label)}
               </button>
             ))}
           </div>
           <div className="v2-field">
-            <label htmlFor="login-target">{CHANNEL_META[channel].inputLabel}</label>
+            <label htmlFor="login-target">{t(CHANNEL_META[channel].inputLabel)}</label>
             <input
               id="login-target"
               value={target}
@@ -113,12 +121,12 @@ export function LandingPage() {
             />
           </div>
           <div className="v2-field">
-            <label htmlFor="login-code">验证码</label>
+            <label htmlFor="login-code">{t("验证码")}</label>
             <div className="v2-otp-row">
               <input
                 id="login-code"
                 value={code}
-                placeholder="6 位数字"
+                placeholder={t("6 位数字")}
                 inputMode="numeric"
                 maxLength={6}
                 onChange={(event) => setCode(event.target.value)}
@@ -129,7 +137,7 @@ export function LandingPage() {
                 disabled={!target.trim() || cooldown > 0 || request.isPending}
                 onClick={() => request.mutate()}
               >
-                {cooldown > 0 ? `${cooldown}s` : "获取验证码"}
+                {cooldown > 0 ? `${cooldown}s` : t("获取验证码")}
               </button>
             </div>
           </div>
@@ -139,14 +147,18 @@ export function LandingPage() {
             disabled={!target.trim() || code.trim().length < 6 || verify.isPending}
             onClick={() => verify.mutate()}
           >
-            {verify.isPending ? "登录中…" : "登录 / 注册"}
+            {t(verify.isPending ? "登录中…" : "登录 / 注册")}
           </button>
-          {request.isSuccess ? <p className="v2-notice">验证码已发送，5 分钟内有效。</p> : null}
+          {request.isSuccess ? (
+            <p className="v2-notice">{t("验证码已发送，5 分钟内有效。")}</p>
+          ) : null}
           {request.isError ? <p className="v2-error">{errorText(request.error)}</p> : null}
           {verify.isError ? <p className="v2-error">{errorText(verify.error)}</p> : null}
         </section>
       </main>
-      <p className="v2-footnote">演示环境 · 岗位数据含合成演示语料 · 不构成任何求职承诺</p>
+      <p className="v2-footnote">
+        {t("演示环境 · 岗位数据含合成演示语料 · 不构成任何求职承诺")}
+      </p>
     </div>
   );
 }

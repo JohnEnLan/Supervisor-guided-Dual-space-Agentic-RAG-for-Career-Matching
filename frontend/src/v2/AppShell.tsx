@@ -5,6 +5,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { ApiError, onUnauthorized } from "../api/client";
 import { api } from "../api/queries";
+import { LanguageToggle, useLanguage } from "../i18n";
 import {
   clearUserScopedStorage,
   readSessionTitle,
@@ -25,6 +26,7 @@ function sessionDateLabel(updatedAt: string): string {
 
 export function AppShell() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
@@ -138,7 +140,7 @@ export function AppShell() {
           ref={navigationTriggerRef}
           type="button"
           className="v2-mobile-nav-trigger"
-          aria-label="打开导航"
+          aria-label={t("打开导航")}
           aria-expanded={navigationOpen}
           aria-controls="v2-primary-navigation"
           onClick={() => setNavigationOpen(true)}
@@ -146,12 +148,13 @@ export function AppShell() {
           <Menu size={20} />
         </button>
         <span className="v2-wordmark">Career RAG</span>
+        <LanguageToggle className="v2-lang-mobile" />
       </header>
       {navigationOpen ? (
         <button
           type="button"
           className="v2-drawer-backdrop"
-          aria-label="关闭导航遮罩"
+          aria-label={t("关闭导航遮罩")}
           onClick={closeNavigation}
         />
       ) : null}
@@ -162,7 +165,7 @@ export function AppShell() {
         data-open={String(navigationOpen)}
         role={navigationOpen ? "dialog" : undefined}
         aria-modal={navigationOpen ? "true" : undefined}
-        aria-label={navigationOpen ? "主导航" : undefined}
+        aria-label={navigationOpen ? t("主导航") : undefined}
       >
         <div className="v2-sidebar-heading">
           <span className="v2-wordmark">Career RAG</span>
@@ -170,7 +173,7 @@ export function AppShell() {
             ref={navigationCloseRef}
             type="button"
             className="v2-sidebar-close"
-            aria-label="关闭导航"
+            aria-label={t("关闭导航")}
             onClick={closeNavigation}
           >
             <X size={20} />
@@ -186,40 +189,50 @@ export function AppShell() {
           }}
         >
           <MessageSquarePlus size={17} />
-          新的咨询
+          {t("新的咨询")}
         </button>
-        <ul className="v2-session-list" aria-label="历史会话">
-          {(sessions.data?.sessions ?? []).map((item) => (
-            <li key={item.session_id}>
-              <NavLink
-                to={`/app/sessions/${item.session_id}`}
-                className={({ isActive }) => (isActive ? "active" : "")}
-                onClick={closeNavigation}
-              >
-                {me.data?.user_id
-                  ? readSessionTitle(me.data.user_id, item.session_id) ?? `咨询 · ${sessionDateLabel(item.updated_at)}`
-                  : `咨询 · ${sessionDateLabel(item.updated_at)}`}
-                <span className="v2-session-meta">
-                  {item.status} · {sessionDateLabel(item.updated_at)}
-                </span>
-              </NavLink>
-            </li>
-          ))}
+        <ul className="v2-session-list" aria-label={t("历史会话")}>
+          {(sessions.data?.sessions ?? []).map((item) => {
+            const fallbackTitle = t("咨询 · {date}", {
+              date: sessionDateLabel(item.updated_at),
+            });
+            return (
+              <li key={item.session_id}>
+                <NavLink
+                  to={`/app/sessions/${item.session_id}`}
+                  className={({ isActive }) => (isActive ? "active" : "")}
+                  onClick={closeNavigation}
+                >
+                  {me.data?.user_id
+                    ? readSessionTitle(me.data.user_id, item.session_id) ?? fallbackTitle
+                    : fallbackTitle}
+                  <span className="v2-session-meta">
+                    {item.status} · {sessionDateLabel(item.updated_at)}
+                  </span>
+                </NavLink>
+              </li>
+            );
+          })}
         </ul>
         {sessions.data ? (
-          <p className="v2-quota-usage" aria-label="咨询使用情况">
-            已创建{sessions.data.has_more ? "至少 " : " "}{sessions.data.sessions?.length ?? 0} 次咨询
+          <p className="v2-quota-usage" aria-label={t("咨询使用情况")}>
+            {t(
+              sessions.data.has_more
+                ? "已创建至少 {count} 次咨询"
+                : "已创建 {count} 次咨询",
+              { count: sessions.data.sessions?.length ?? 0 },
+            )}
           </p>
         ) : null}
         <div className="v2-sidebar-footer">
           <NavLink to="/app/profile" onClick={closeNavigation}>
             <UserRound size={16} />
-            {me.data?.display_name || "我的档案"}
+            {me.data?.display_name || t("我的档案")}
           </NavLink>
           {me.data?.is_admin === true ? (
             <NavLink to="/admin" onClick={closeNavigation}>
               <ShieldCheck size={16} />
-              管理控制台
+              {t("管理控制台")}
             </NavLink>
           ) : null}
           <button
@@ -230,11 +243,12 @@ export function AppShell() {
             }}
           >
             <LogOut size={16} />
-            退出登录
+            {t("退出登录")}
           </button>
         </div>
       </aside>
       <main className="v2-main">
+        <LanguageToggle className="v2-lang-float" />
         <Outlet
           context={{
             startNewConsultation: () => createSession.mutate(),
@@ -243,11 +257,11 @@ export function AppShell() {
         />
       </main>
       {quotaOpen ? (
-        <FocusModal label="额度已用完" onClose={() => setQuotaOpen(false)}>
-          <h2>咨询额度已用完</h2>
-          <p>当前账户的咨询额度已用完。</p>
+        <FocusModal label={t("额度已用完")} onClose={() => setQuotaOpen(false)}>
+          <h2>{t("咨询额度已用完")}</h2>
+          <p>{t("当前账户的咨询额度已用完。")}</p>
           <button type="button" className="v2-btn ghost" onClick={() => setQuotaOpen(false)}>
-            知道了
+            {t("知道了")}
           </button>
         </FocusModal>
       ) : null}

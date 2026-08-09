@@ -1,5 +1,6 @@
 import { Navigate, createBrowserRouter, useOutletContext, useParams } from "react-router-dom";
 
+import { useLanguage } from "../i18n";
 import { AdminPage } from "../v2/AdminPage";
 import { AppShell, type AppShellOutletContext } from "../v2/AppShell";
 import { HomePage } from "../v2/HomePage";
@@ -21,14 +22,15 @@ function HomeGate() {
 
 function EmptyWorkbench() {
   const { startNewConsultation, isCreatingConsultation } = useOutletContext<AppShellOutletContext>();
+  const { t } = useLanguage();
   return (
-    <section className="v2-empty" role="region" aria-label="开始咨询">
-      <p className="v2-empty-eyebrow">职业顾问团队已就位</p>
-      <h1>用三步拿到可追溯的岗位建议</h1>
+    <section className="v2-empty" role="region" aria-label={t("开始咨询")}>
+      <p className="v2-empty-eyebrow">{t("职业顾问团队已就位")}</p>
+      <h1>{t("用三步拿到可追溯的岗位建议")}</h1>
       <ol className="v2-empty-guide">
-        <li><strong>上传简历</strong><span>整理经历并保留原文证据</span></li>
-        <li><strong>聊清方向</strong><span>确认目标、地点与签证条件</span></li>
-        <li><strong>查看结果</strong><span>获得分层岗位、证据与行动建议</span></li>
+        <li><strong>{t("上传简历")}</strong><span>{t("整理经历并保留原文证据")}</span></li>
+        <li><strong>{t("聊清方向")}</strong><span>{t("确认目标、地点与签证条件")}</span></li>
+        <li><strong>{t("查看结果")}</strong><span>{t("获得分层岗位、证据与行动建议")}</span></li>
       </ol>
       <button
         type="button"
@@ -36,7 +38,7 @@ function EmptyWorkbench() {
         disabled={isCreatingConsultation}
         onClick={startNewConsultation}
       >
-        {isCreatingConsultation ? "正在创建…" : "开始新的咨询"}
+        {t(isCreatingConsultation ? "正在创建…" : "开始新的咨询")}
       </button>
     </section>
   );

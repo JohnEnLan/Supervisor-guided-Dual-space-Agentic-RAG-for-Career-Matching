@@ -3,6 +3,7 @@ import { Database, FileSearch, Layers, MessageSquare, Route, ShieldCheck } from 
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/queries";
+import { LanguageToggle, useLanguage } from "../i18n";
 import "./theme.css";
 import "./marketing.css";
 
@@ -41,6 +42,7 @@ const FEATURES = [
 
 export function HomePage() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const loggedIn = Boolean(me.data);
 
@@ -54,70 +56,77 @@ export function HomePage() {
     <div className="mk-page">
       <nav className="v2-topnav">
         <span className="v2-wordmark">Career RAG</span>
-        <button
-          type="button"
-          className="v2-btn ghost"
-          onClick={() => navigate(loggedIn ? "/app" : "/login")}
-        >
-          {loggedIn ? "进入工作台" : "登录"}
-        </button>
+        <div className="v2-topnav-actions">
+          <LanguageToggle />
+          <button
+            type="button"
+            className="v2-btn ghost"
+            onClick={() => navigate(loggedIn ? "/app" : "/login")}
+          >
+            {t(loggedIn ? "进入工作台" : "登录")}
+          </button>
+        </div>
       </nav>
 
       <header className="mk-hero">
         <p className="mk-eyebrow">SUPERVISOR-GUIDED AGENTIC RAG</p>
         <h1>
-          把求职这件事，
+          {t("把求职这件事，")}
           <br />
-          交给一支为你服务的团队
+          {t("交给一支为你服务的团队")}
         </h1>
         <p className="mk-lede">
-          上传简历，和 AI 顾问团队聊清方向，拿到有证据、分层次、可执行的岗位推荐与行动方案。
+          {t(
+            "上传简历，和 AI 顾问团队聊清方向，拿到有证据、分层次、可执行的岗位推荐与行动方案。",
+          )}
         </p>
         <div className="mk-cta-row">
           <button type="button" className="v2-btn primary mk-cta" onClick={enterApp}>
-            进入应用
+            {t("进入应用")}
           </button>
           <button type="button" className="v2-btn ghost" onClick={() => navigate("/welcome")}>
-            了解它如何工作
+            {t("了解它如何工作")}
           </button>
         </div>
       </header>
 
-      <section className="mk-features" aria-label="功能陈列">
-        <h2>一套认真对待求职的系统</h2>
+      <section className="mk-features" aria-label={t("功能陈列")}>
+        <h2>{t("一套认真对待求职的系统")}</h2>
         <div className="mk-feature-grid">
           {FEATURES.map(({ icon: Icon, title, text }) => (
             <article key={title} className="mk-feature-card">
               <Icon size={22} aria-hidden />
-              <h3>{title}</h3>
-              <p>{text}</p>
+              <h3>{t(title)}</h3>
+              <p>{t(text)}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="mk-steps" aria-label="使用步骤">
-        <h2>三步拿到结果</h2>
+      <section className="mk-steps" aria-label={t("使用步骤")}>
+        <h2>{t("三步拿到结果")}</h2>
         <ol>
           <li>
-            <strong>上传简历</strong>
-            <span>整理经历并保留原文证据</span>
+            <strong>{t("上传简历")}</strong>
+            <span>{t("整理经历并保留原文证据")}</span>
           </li>
           <li>
-            <strong>聊清方向</strong>
-            <span>确认目标、地点与签证条件</span>
+            <strong>{t("聊清方向")}</strong>
+            <span>{t("确认目标、地点与签证条件")}</span>
           </li>
           <li>
-            <strong>查看结果</strong>
-            <span>分层岗位、证据解释与行动建议</span>
+            <strong>{t("查看结果")}</strong>
+            <span>{t("分层岗位、证据解释与行动建议")}</span>
           </li>
         </ol>
         <button type="button" className="v2-btn primary mk-cta" onClick={enterApp}>
-          进入应用
+          {t("进入应用")}
         </button>
       </section>
 
-      <p className="v2-footnote">毕业设计演示系统 · 演示环境 · 岗位数据含合成演示语料 · 不构成任何求职承诺</p>
+      <p className="v2-footnote">
+        {t("毕业设计演示系统 · 演示环境 · 岗位数据含合成演示语料 · 不构成任何求职承诺")}
+      </p>
     </div>
   );
 }
