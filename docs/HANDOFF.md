@@ -140,7 +140,22 @@ REL=/opt/career-rag/releases/frontend-$(date +%Y%m%d%H%M) && mkdir -p "$REL" \
    原文（风格破例）。
 4. 运维站桩：QQ SMTP 授权码答辩前轮换；R8 三档对齐截图待线上采集。
 
-## 6. 工作方式约定（沿用）
+## 6. 终局快照与仓库现状（2026-08-09 收尾）
+
+- 终结提交 `dd1ead9`（"final complete, user ran tests"），**langgraph 分支**
+  已同步推送 GitHub（origin）与伯明翰 GitLab（gitlab 远端）。
+  **main 分支是旧的**——一切成果以 langgraph 为准；如需评审可见，
+  把默认分支切到 langgraph 或开 MR 合并。
+- B9 品牌更名已上线（releases/frontend-202608091302）。
+- 工作区已按"先移档案不直删"铁律清理：历届部署中间产物、旧部署包、
+  沙箱临时目录都在
+  `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\2026-08-09_final_cleanup\`；
+  用户答辩材料在 `C:\Users\WIN11\Desktop\毕业论文_birmingham\答辩准备\`
+  （两份 docx + 三张图，别当垃圾清掉）。
+- 部署包不入库：需要时 `git archive` + `npm run build` 现打（§4 命令）。
+- 清理纪律：项目过程文件先移入 `项目过程档案\`，不直接删除。
+
+## 7. 工作方式约定（沿用）
 
 - 一次一个模块，跑通再下一个；先写清输入/输出契约再动手。
 - 改动面白名单制：只动说好的文件；执行者自查后由协调者/用户复核。
