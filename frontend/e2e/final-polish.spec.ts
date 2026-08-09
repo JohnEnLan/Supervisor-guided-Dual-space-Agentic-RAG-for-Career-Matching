@@ -651,7 +651,9 @@ test("reduced motion keeps idle, hover, and focus wordmark feedback static and v
   await expect(brand).toBeFocused();
   await assertStaticFeedback();
   expect(await brand.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid");
+  await brand.hover();
   await page.mouse.down();
+  expect(await brand.evaluate((element) => element.matches(":active"))).toBe(true);
   expect(await brand.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
   await page.mouse.up();
 });
