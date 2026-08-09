@@ -645,6 +645,8 @@ test("reduced motion keeps idle, hover, and focus wordmark feedback static and v
   await assertStaticFeedback();
   await brand.hover();
   await assertStaticFeedback();
+  await page.mouse.move(0, 0);
+  await expect.poll(() => brand.evaluate((element) => element.matches(":hover"))).toBe(false);
   await page.keyboard.press("Tab");
   await expect(brand).toBeFocused();
   await assertStaticFeedback();
