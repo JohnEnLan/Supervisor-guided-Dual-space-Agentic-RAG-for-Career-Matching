@@ -258,6 +258,15 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await expect(confirmBriefButton).not.toBeVisible();
   await page.getByRole("button", { name: "生成确认单" }).click();
   await expect(confirmBriefButton).toBeVisible();
+  const briefSummary = page.locator(".v2-brief");
+  await expect(briefSummary.getByText("需求摘要（Match Brief）")).toBeVisible();
+  await expect(briefSummary).toContainText("目标");
+  await expect(briefSummary).toContainText("硬条件地点 Shanghai、不需要签证担保");
+  await expect(briefSummary).toContainText("排序偏好preferred_industries tech");
+  await expect(briefSummary).toContainText("暂不考虑sales");
+  await expect(briefSummary).toContainText("结果数量5");
+  await expect(briefSummary).not.toContainText('{"');
+  await expect(briefSummary).not.toContainText('":');
 
   await confirmBriefButton.click();
 
@@ -268,16 +277,26 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
     .poll(() => page.evaluate(() => localStorage.getItem("title:user-e2e-0001:sess-e2e-1")))
     .toBe("Find backend");
 
-  await expect(page.getByText(/本次规划已完成：Now Fit 1 个、Stretch Fit 3 个/)).toBeVisible();
+  await expect(page.getByText(/岗位分析完成：Now Fit 1 个、Stretch Fit 3 个/)).toBeVisible();
+  await expect(page.getByText(/结果已发布。投递后欢迎回来/)).toContainText("不构成 offer 承诺");
   expect(state.statusPoll).toBeGreaterThanOrEqual(RUN_STAGES.length);
   // 静态 PM 欢迎语常驻 1 条；run 播报的 intro 被去重后不得出现第 2 条
   await expect(page.getByText(/欢迎来到职业规划服务群。我是项目经理 PM/)).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Backend Engineer", exact: true })).toBeVisible();
+  const resultTable = page.getByRole("table", { name: "岗位推荐列表" });
+  await expect(resultTable).toBeVisible();
+  for (const heading of ["#", "分层", "岗位名", "公司·地点", "语料标签"]) {
+    await expect(resultTable.getByRole("columnheader", { name: heading })).toBeVisible();
+  }
+  await expect(page.getByRole("article")).toHaveCount(0);
   await expect(page.getByText("①", { exact: true })).toBeVisible();
   await expect(page.getByText("4.", { exact: true })).toBeVisible();
   await expect(page.getByText("现在就投").first()).toBeVisible();
   await expect(page.getByText("混合检索（BM25+语义双路）")).toBeVisible();
   await expect(page.getByText("支持双空间增强")).toBeVisible();
+  await resultTable.getByRole("button", { name: "查看 Backend Engineer 详情" }).click();
+  const firstJobCard = page.getByRole("article", { name: "Backend Engineer 详情" });
+  await expect(firstJobCard).toBeVisible();
+  await expect(firstJobCard.getByRole("button", { name: "被拒" })).toHaveCount(0);
   await page.getByRole("button", { name: "演示数据 · CN" }).first().click();
   await expect(page.getByText(/合成演示语料/).first()).toBeVisible();
   const sourceLink = page.getByRole("link", { name: "查看原岗位 ↗" }).first();
@@ -295,18 +314,24 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
 
   await resultActions.getByRole("button", { name: "更新申请进展" }).click();
   await expect(page.getByRole("button", { name: "被拒" }).first()).toBeFocused();
+  await firstJobCard.getByRole("button", { name: "收起进展" }).click();
   await resultActions.getByRole("button", { name: "新建咨询细化方向" }).click();
   await expect(page.getByRole("dialog", { name: "新建咨询确认" })).toBeVisible();
   await page.getByRole("button", { name: "保留当前页面" }).click();
 
   const outcomeLabels = ["被拒", "过筛", "面试", "Offer"];
-  const jobCards = page.locator(".v2-job-card");
-  await expect(jobCards).toHaveCount(outcomeLabels.length);
   for (const [index, label] of outcomeLabels.entries()) {
-    const card = jobCards.nth(index);
-    await expect(card.getByRole("button", { name: "提交进展" })).toBeDisabled();
-    await card.getByRole("button", { name: label }).click();
+    const title = index === 0 ? "Backend Engineer" : `Backend Engineer ${index + 1}`;
+    const rowToggle = resultTable.getByRole("button", { name: `查看 ${title} 详情` });
+    if ((await rowToggle.getAttribute("aria-expanded")) !== "true") await rowToggle.click();
+    const card = page.getByRole("article", { name: `${title} 详情` });
+    await expect(card.getByRole("button", { name: label })).toHaveCount(0);
     await card.getByRole("button", { name: "提交进展" }).click();
+    const submitProgress = card.getByRole("button", { name: "提交进展" });
+    await expect(submitProgress).toBeDisabled();
+    await card.getByRole("button", { name: label }).click();
+    await expect(submitProgress).toBeEnabled();
+    await submitProgress.click();
     await expect(card.getByText(/已记录/)).toBeVisible();
   }
   expect(state.reactionOutcomes).toEqual([...VALID_OUTCOMES]);
@@ -405,7 +430,7 @@ test("consult refetch renders a finalizable PM note with its action CTA", async 
   const finalizableCta = noteBubble.getByRole("button", { name: "生成确认单" });
   await expect(finalizableCta).toBeEnabled();
   await finalizableCta.click();
-  await expect(page.getByText("Match Brief 确认单")).toBeVisible();
+  await expect(page.getByText("需求摘要（Match Brief）")).toBeVisible();
 });
 
 test("required-slot chips follow consultation data and keep visa=false complete", async ({ page }) => {
@@ -503,13 +528,13 @@ test("resume conflicts preserve the draft and recover through processing, update
   await expect(input).toHaveAttribute("placeholder", /告诉小意你的想法/);
   const consultGetsBeforeConflict = consultGets;
   await page.getByRole("button", { name: "生成确认单" }).click();
-  await expect(page.getByText("Match Brief 确认单")).toBeVisible();
+  await expect(page.getByText("需求摘要（Match Brief）")).toBeVisible();
 
   await input.fill("这段输入需要由我确认后重试");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText("新简历处理中")).toBeVisible();
   await expect(input).toHaveValue("这段输入需要由我确认后重试");
-  await expect(page.getByText("Match Brief 确认单")).toHaveCount(0);
+  await expect(page.getByText("需求摘要（Match Brief）")).toHaveCount(0);
   await expect.poll(() => previewRefetches).toBeGreaterThan(0);
   await expect.poll(() => consultGets).toBeGreaterThan(consultGetsBeforeConflict);
 

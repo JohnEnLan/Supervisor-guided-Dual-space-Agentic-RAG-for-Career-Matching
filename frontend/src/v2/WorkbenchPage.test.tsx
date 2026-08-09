@@ -167,6 +167,14 @@ describe("plan-ready execution effect", () => {
     expect(workbenchSource).toMatch(/\[status\.data, runId, execute\.mutate\]/);
     expect(workbenchSource).not.toMatch(/\[status\.data, runId, execute\]/);
   });
+
+  it("renders the mode guidance before a full-width attachment, input, and send row", () => {
+    const modeRow = workbenchSource.indexOf('className="v2-mode-toggle v2-composer-mode"');
+    const inputRow = workbenchSource.indexOf('className="v2-composer-row"');
+
+    expect(modeRow).toBeGreaterThan(-1);
+    expect(inputRow).toBeGreaterThan(modeRow);
+  });
 });
 
 describe("v2 personas", () => {
@@ -188,12 +196,12 @@ describe("session-scoped workbench state", () => {
     const { router } = renderWorkbench();
 
     await user.click(await screen.findByRole("button", { name: "生成确认单" }));
-    expect(await screen.findByText("Match Brief 确认单")).toBeVisible();
+    expect(await screen.findByText("需求摘要（Match Brief）")).toBeVisible();
 
     await act(() => router.navigate("/app/sessions/sess-2"));
 
     await waitFor(() =>
-      expect(screen.queryByText("Match Brief 确认单")).not.toBeInTheDocument(),
+      expect(screen.queryByText("需求摘要（Match Brief）")).not.toBeInTheDocument(),
     );
   });
 
@@ -213,8 +221,8 @@ describe("session-scoped workbench state", () => {
   });
 });
 
-describe("truthful Match Brief constraints", () => {
-  it("separates SQL-enforced fields from retrieval and ranking directions", async () => {
+describe("natural-language Match Brief summary", () => {
+  it("shows mapped Chinese phrases without JSON literals", async () => {
     const user = userEvent.setup();
     mockWorkbenchApi();
     vi.mocked(api.consultFinalize).mockResolvedValue({
@@ -222,34 +230,33 @@ describe("truthful Match Brief constraints", () => {
       hard_constraints: {
         locations: ["Shanghai"],
         need_visa_sponsor: false,
-        max_years_exp: 5,
-        degree_required: "bachelor",
-        role_clusters: ["backend"],
-        companies: ["Acme"],
-        remote: true,
-        work_mode: "hybrid",
+        unknown_key: "保留值",
       },
-      soft_preferences: {},
-      avoid_roles: [],
+      soft_preferences: {
+        preferred_locations: ["深圳"],
+        preferred_role_clusters: ["市场营销"],
+        title_keywords: ["用户运营"],
+      },
+      avoid_roles: ["销售"],
       result_count: 5,
     });
     renderWorkbench();
 
     await user.click(await screen.findByRole("button", { name: "生成确认单" }));
 
-    const locked = screen.getByText("硬条件（SQL 锁定）").parentElement!;
-    expect(locked).toHaveTextContent("locations");
-    expect(locked).toHaveTextContent("max_years_exp");
-    expect(locked).toHaveTextContent("degree_required");
-    expect(locked).toHaveTextContent("role_clusters");
-    expect(locked).toHaveTextContent("companies");
-    expect(locked).not.toHaveTextContent("need_visa_sponsor");
-    expect(locked).not.toHaveTextContent("remote");
-
-    const directional = screen.getByText("检索方向 / 排序参考").parentElement!;
-    expect(directional).toHaveTextContent("need_visa_sponsor: false");
-    expect(directional).toHaveTextContent("remote: true");
-    expect(directional).toHaveTextContent('work_mode: "hybrid"');
+    const summary = screen.getByText("需求摘要（Match Brief）").closest(".v2-brief")!;
+    expect(summary).toHaveTextContent("目标backend engineer");
+    expect(summary).toHaveTextContent("硬条件地点 Shanghai、不需要签证担保、unknown_key 保留值");
+    expect(summary).toHaveTextContent(
+      "排序偏好偏好地点 深圳、岗位簇 市场营销、关键词 用户运营",
+    );
+    expect(summary).toHaveTextContent("暂不考虑销售");
+    expect(summary).toHaveTextContent("结果数量5");
+    expect(summary).toHaveTextContent(
+      "检索将基于你的完整简历档案 + 以上确认条件（硬条件数据库过滤，偏好参与排序）。",
+    );
+    expect(summary).not.toHaveTextContent('{"');
+    expect(summary).not.toHaveTextContent('":');
   });
 });
 
@@ -358,7 +365,9 @@ describe("consultation supervisor notes and finalization", () => {
     expect(finalizeButton).toBeEnabled();
     await user.click(finalizeButton);
     expect(
-      await screen.findByText("确认单由你们的对话记录自动生成，请你核对无误后开始。"),
+      await screen.findByText(
+        "检索将基于你的完整简历档案 + 以上确认条件（硬条件数据库过滤，偏好参与排序）。",
+      ),
     ).toBeVisible();
   });
 
@@ -448,6 +457,30 @@ describe("resume confirmation profile", () => {
       await screen.findByText(
         '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
       ),
+    ).toBeVisible();
+  });
+
+  it("shows mode microcopy and changes the opening guidance for exploration", async () => {
+    const user = userEvent.setup();
+    mockWorkbenchApi();
+    renderWorkbench();
+
+    const targeted = await screen.findByRole("tab", { name: "目标明确" });
+    const explore = screen.getByRole("tab", { name: "探索方向" });
+    expect(screen.getByText("已有意向岗位，直接补条件")).toBeVisible();
+    expect(screen.getByText("不确定方向，小意帮你梳理")).toBeVisible();
+    expect(targeted).toHaveAttribute("aria-describedby");
+    expect(explore).toHaveAttribute("aria-describedby");
+    expect(
+      screen.getByText(
+        '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
+      ),
+    ).toBeVisible();
+
+    await user.click(explore);
+
+    expect(
+      screen.getByText("还不确定方向？没关系，切到这里我们先聊聊你的兴趣和优势，一起找方向。"),
     ).toBeVisible();
   });
 
@@ -824,6 +857,72 @@ describe("truthful result cards", () => {
     vi.spyOn(api, "capabilities").mockResolvedValue(apiFixtures.capabilities());
   }
 
+  it("publishes strategist analysis, a strategist result table, then the PM closing", async () => {
+    mockCompletedResult();
+    vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult(1));
+
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const analysis = await screen.findByText(/岗位分析完成：Now Fit/);
+    const results = await screen.findByRole("region", { name: "匹配结果" });
+    const closing = screen.getByText(/结果已发布。投递后欢迎回来/);
+    expect(analysis.closest(".v2-msg")).toHaveAttribute("data-persona", "strategist");
+    expect(results.closest(".v2-msg")).toHaveAttribute("data-persona", "strategist");
+    expect(closing.closest(".v2-msg")).toHaveAttribute("data-persona", "pm");
+    expect(analysis.compareDocumentPosition(results) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(results.compareDocumentPosition(closing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(closing).toHaveTextContent("不构成 offer 承诺");
+  });
+
+  it("shows a compact table and expands only the selected job with aria state", async () => {
+    const user = userEvent.setup();
+    mockCompletedResult();
+    vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult(2));
+
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const table = await screen.findByRole("table", { name: "岗位推荐列表" });
+    for (const heading of ["#", "分层", "岗位名", "公司·地点", "语料标签"]) {
+      expect(within(table).getByRole("columnheader", { name: heading })).toBeVisible();
+    }
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "被拒" })).not.toBeInTheDocument();
+
+    const first = within(table).getByRole("button", { name: "查看 Backend Engineer 详情" });
+    const second = within(table).getByRole("button", { name: "查看 Backend Engineer 2 详情" });
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    await user.click(first);
+    expect(first).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("article", { name: "Backend Engineer 详情" })).toBeVisible();
+
+    await user.click(second);
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    expect(second).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByRole("article", { name: "Backend Engineer 详情" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Backend Engineer 2 详情" })).toBeVisible();
+  });
+
+  it("mounts the existing reaction form only after the in-card progress disclosure", async () => {
+    const user = userEvent.setup();
+    mockCompletedResult();
+    vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult(1));
+
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    const row = await screen.findByRole("button", { name: "查看 Backend Engineer 详情" });
+    expect(screen.queryByRole("button", { name: "被拒" })).not.toBeInTheDocument();
+    await user.click(row);
+
+    const progress = screen.getByRole("button", { name: "提交进展" });
+    expect(progress).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "被拒" })).not.toBeInTheDocument();
+    await user.click(progress);
+
+    expect(screen.getByRole("button", { name: "被拒" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "过筛" })).toBeVisible();
+    expect(progress).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("covers the full ranking rule and shows only truth-sourced capability chips", async () => {
     mockCompletedResult();
     vi.spyOn(api, "runResult").mockResolvedValue(apiFixtures.runResult(5));
@@ -851,15 +950,20 @@ describe("truthful result cards", () => {
 
     renderWorkbench("/app/sessions/sess-1?run=run-created");
 
-    const cards = await screen.findAllByRole("article");
-    const sourceLink = within(cards[0]).getByRole("link", { name: "查看原岗位 ↗" });
+    const table = await screen.findByRole("table", { name: "岗位推荐列表" });
+    await user.click(within(table).getByRole("button", { name: "查看 Backend Engineer 详情" }));
+    const firstCard = screen.getByRole("article", { name: "Backend Engineer 详情" });
+    const sourceLink = within(firstCard).getByRole("link", { name: "查看原岗位 ↗" });
     expect(sourceLink).toHaveAttribute("href", "https://jobs.example.com/role-1");
     expect(sourceLink).toHaveAttribute("rel", "noopener noreferrer");
-    expect(within(cards[1]).queryByRole("link", { name: "查看原岗位 ↗" })).not.toBeInTheDocument();
 
-    const demoDisclosure = within(cards[0]).getByRole("button", { name: /演示数据 · CN/ });
+    const demoDisclosure = within(firstCard).getByRole("button", { name: /演示数据 · CN/ });
     await user.click(demoDisclosure);
-    expect(within(cards[0]).getByText(/合成演示语料/)).toBeVisible();
+    expect(within(firstCard).getByText(/合成演示语料/)).toBeVisible();
+
+    await user.click(within(table).getByRole("button", { name: "查看 Backend Engineer 2 详情" }));
+    const secondCard = screen.getByRole("article", { name: "Backend Engineer 2 详情" });
+    expect(within(secondCard).queryByRole("link", { name: "查看原岗位 ↗" })).not.toBeInTheDocument();
   });
 
   it("maps all three result actions to existing evidence, progress, and new-consult interactions", async () => {
@@ -1010,13 +1114,13 @@ describe("resume-generation conflict recovery", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     await user.click(screen.getByRole("button", { name: "生成确认单" }));
-    expect(await screen.findByText("Match Brief 确认单")).toBeVisible();
+    expect(await screen.findByText("需求摘要（Match Brief）")).toBeVisible();
     await user.type(input, "保留这段尚未提交的输入");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     expect(await screen.findByText("新简历处理中")).toBeVisible();
     expect(input).toHaveValue("保留这段尚未提交的输入");
-    expect(screen.queryByText("Match Brief 确认单")).not.toBeInTheDocument();
+    expect(screen.queryByText("需求摘要（Match Brief）")).not.toBeInTheDocument();
     expect(api.consultTurn).toHaveBeenCalledTimes(1);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["resume-preview", "sess-1"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["consult", "sess-1"] });
@@ -1288,23 +1392,23 @@ describe("protected timeline scrolling", () => {
     const resultButton = await screen.findByRole("button", { name: "结果已生成 ↓" });
     expect(timeline!.scrollTop).toBe(200);
     const resultAnchor = await screen.findByRole("region", { name: "匹配结果" });
-    const firstResultCard = resultAnchor.querySelector<HTMLElement>(".v2-job-card");
-    expect(firstResultCard).not.toBeNull();
+    const firstResultRow = resultAnchor.querySelector<HTMLElement>(".v2-result-row");
+    expect(firstResultRow).not.toBeNull();
     const regionScrollIntoView = vi.fn();
-    const cardScrollIntoView = vi.fn();
+    const rowScrollIntoView = vi.fn();
     Object.defineProperty(resultAnchor, "scrollIntoView", {
       configurable: true,
       value: regionScrollIntoView,
     });
-    Object.defineProperty(firstResultCard!, "scrollIntoView", {
+    Object.defineProperty(firstResultRow!, "scrollIntoView", {
       configurable: true,
-      value: cardScrollIntoView,
+      value: rowScrollIntoView,
     });
     await user.click(resultButton);
 
-    expect(cardScrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(rowScrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
     expect(regionScrollIntoView).not.toHaveBeenCalled();
-    expect(firstResultCard).toHaveClass("is-highlighted");
+    expect(firstResultRow).toHaveClass("is-highlighted");
     expect(screen.queryByRole("button", { name: "结果已生成 ↓" })).not.toBeInTheDocument();
   });
 });

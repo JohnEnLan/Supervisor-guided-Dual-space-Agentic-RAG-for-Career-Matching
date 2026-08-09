@@ -317,6 +317,13 @@ describe("default context and toggle accessibility", () => {
     expect(centeredPadding(900)).toBe(legacyPadding(900));
     expect(centeredPadding(375)).toBe(legacyPadding(375));
   });
+
+  it("keeps composer controls in a stable full-width second row", () => {
+    expect(themeSource).toMatch(
+      /\.v2-composer-row\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s,
+    );
+    expect(themeSource).toMatch(/\.v2-composer-mode\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  });
 });
 
 describe("HomePage language switching", () => {

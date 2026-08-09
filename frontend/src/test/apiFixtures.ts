@@ -445,7 +445,7 @@ export const apiFixtures = {
         display_name: "需求顾问·小意",
         kind: "brief",
         stage: "intent",
-        text: "本次 Match Brief 已确认：目标是“Find backend engineer roles matching my Python experience”。本次检索约束为 {\"locations\":[\"Shanghai\"],\"need_visa_sponsor\":false}，已记录并传入检索计划；软偏好为 {\"preferred_industries\":[\"tech\"]}，用于排序加权；暂不考虑的岗位为 [\"sales\"]；计划返回最多 5 个结果。",
+        text: "本次需求已确认：目标「Find backend engineer roles matching my Python experience」；硬条件——地点 Shanghai、不需要签证担保；排序偏好——preferred_industries tech；暂不考虑：sales。接下来小检会基于你的完整简历档案 + 以上条件开始检索。",
       },
       {
         seq: 3,
@@ -505,11 +505,19 @@ export const apiFixtures = {
       },
       {
         seq: 10,
+        persona: "strategist",
+        display_name: "规划师·小策",
+        kind: "result",
+        stage: "result",
+        text: `岗位分析完成：Now Fit ${recommendationCount > 0 ? 1 : 0} 个、Stretch Fit ${Math.max(recommendationCount - 1, 0)} 个、Bridge Role 0 个。下面把结果发给你，每个岗位都附证据与建议。`,
+      },
+      {
+        seq: 11,
         persona: "pm",
         display_name: "项目经理·PM",
         kind: "result",
         stage: "result",
-        text: `本次规划已完成：Now Fit ${recommendationCount > 0 ? 1 : 0} 个、Stretch Fit ${Math.max(recommendationCount - 1, 0)} 个、Bridge Role 0 个；warning 0 项。请前往 Results 页查看岗位证据、缺口分析、简历建议与职业路径详情。匹配结果仅供求职决策参考，不构成 offer 承诺。`,
+        text: "结果已发布。投递后欢迎回来在对应岗位卡上提交进展（被拒/过筛/面试/Offer），这些反馈会帮助我们持续校准推荐。匹配结果仅供求职决策参考，不构成 offer 承诺。",
       },
     ];
     // 真实投影对 completed 与 completed_with_warnings 都会生成 result 消息
@@ -520,7 +528,7 @@ export const apiFixtures = {
       status,
       stage: resultReady ? "result" : "retrieval",
       next_poll_ms: nextPollMs,
-      // 消息随进度渐进出现：终局的 PM 发布核查消息只在完成态下发，
+      // 消息随进度渐进出现：终局的小策分析与 PM 收尾只在完成态下发，
       // 与真实后端投影语义一致（运行中不得预告结果）。
       messages: resultReady ? messages : messages.slice(0, 4),
     } satisfies RunConversation;

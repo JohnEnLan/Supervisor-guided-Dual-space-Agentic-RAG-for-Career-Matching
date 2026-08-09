@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -54,6 +53,14 @@ _ERROR_TEXT = {
         "（代码：run_execution_failed）。"
     ),
     "run_cancelled": "本次服务已取消（代码：run_cancelled）。",
+}
+
+_SUMMARY_FIELD_LABELS = {
+    "locations": "地点",
+    "need_visa_sponsor": "签证担保",
+    "preferred_locations": "偏好地点",
+    "preferred_role_clusters": "岗位簇",
+    "title_keywords": "关键词",
 }
 
 
@@ -206,22 +213,33 @@ def project_run_conversation(
     warning_codes = _warning_codes(run, result)
     if run.status in {RunStatus.COMPLETED, RunStatus.COMPLETED_WITH_WARNINGS}:
         tier_counts = _tier_counts(result)
+        for code in warning_codes:
+            add("pm", "warning", _warning_message(code), "result")
+        warnings_clause = (
+            f"，另有 {len(warning_codes)} 条发布提示" if warning_codes else ""
+        )
+        add(
+            "strategist",
+            "result",
+            (
+                "岗位分析完成："
+                f"Now Fit {tier_counts['now_fit']} 个、"
+                f"Stretch Fit {tier_counts['stretch_fit']} 个、"
+                f"Bridge Role {tier_counts['bridge_role']} 个"
+                f"{warnings_clause}。下面把结果发给你，每个岗位都附证据与建议。"
+            ),
+            "result",
+        )
         add(
             "pm",
             "result",
             (
-                "本次规划已完成："
-                f"Now Fit {tier_counts['now_fit']} 个、"
-                f"Stretch Fit {tier_counts['stretch_fit']} 个、"
-                f"Bridge Role {tier_counts['bridge_role']} 个；"
-                f"warning {len(warning_codes)} 项。"
-                "请前往 Results 页查看岗位证据、缺口分析、简历建议与"
-                "职业路径详情。匹配结果仅供求职决策参考，不构成 offer 承诺。"
+                "结果已发布。投递后欢迎回来在对应岗位卡上提交进展（被拒/过筛/"
+                "面试/Offer），这些反馈会帮助我们持续校准推荐。匹配结果仅供求职"
+                "决策参考，不构成 offer 承诺。"
             ),
             "result",
         )
-        for code in warning_codes:
-            add("pm", "warning", _warning_message(code), "result")
     elif run.status in TERMINAL_STATUSES:
         for code in warning_codes:
             add("pm", "warning", _warning_message(code), "result")
@@ -249,24 +267,21 @@ def _has_completed_stage(run: MatchRun, stage: RunStage) -> bool:
 
 def _brief_message(approved_plan: dict[str, Any]) -> str:
     career_goal = str(approved_plan.get("career_goal") or "待确认").strip()
-    hard_constraints = _format_public_value(
+    hard_constraints = _format_summary(
         approved_plan.get("hard_constraints"),
         empty_text="无额外限制",
     )
-    soft_preferences = _format_public_value(
+    soft_preferences = _format_summary(
         approved_plan.get("soft_preferences"),
         empty_text="无额外偏好",
     )
-    avoid_roles = _format_public_value(
-        approved_plan.get("avoid_roles"),
-        empty_text="无",
-    )
-    result_count = approved_plan.get("result_count") or 5
+    avoid_roles = _format_summary_value(approved_plan.get("avoid_roles")) or "无"
     return (
-        f"本次 Match Brief 已确认：目标是“{career_goal}”。"
-        f"本次检索约束为 {hard_constraints}，已记录并传入检索计划；"
-        f"软偏好为 {soft_preferences}，用于排序加权；"
-        f"暂不考虑的岗位为 {avoid_roles}；计划返回最多 {result_count} 个结果。"
+        f"本次需求已确认：目标「{career_goal}」；"
+        f"硬条件——{hard_constraints}；"
+        f"排序偏好——{soft_preferences}；"
+        f"暂不考虑：{avoid_roles}。"
+        "接下来小检会基于你的完整简历档案 + 以上条件开始检索。"
     )
 
 
@@ -347,15 +362,40 @@ def _has_controlled_reretrieval(
     return any(event.get("stage") == "reretrieval_loop" for event in recovery_events)
 
 
-def _format_public_value(value: Any, *, empty_text: str) -> str:
-    if value in (None, "", [], {}):
+def _format_summary(value: Any, *, empty_text: str) -> str:
+    if not isinstance(value, Mapping):
         return empty_text
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    parts: list[str] = []
+    for raw_key, raw_value in value.items():
+        key = str(raw_key)
+        if key == "need_visa_sponsor" and isinstance(raw_value, bool):
+            parts.append("需要签证担保" if raw_value else "不需要签证担保")
+            continue
+        formatted_value = _format_summary_value(raw_value)
+        if not formatted_value:
+            continue
+        parts.append(f"{_SUMMARY_FIELD_LABELS.get(key, key)} {formatted_value}")
+    return "、".join(parts) or empty_text
+
+
+def _format_summary_value(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, Mapping):
+        return "、".join(
+            f"{key} {formatted}"
+            for key, item in value.items()
+            if (formatted := _format_summary_value(item))
+        )
+    if isinstance(value, (list, tuple, set)):
+        return "、".join(
+            formatted
+            for item in value
+            if (formatted := _format_summary_value(item))
+        )
+    return str(value).strip()
 
 
 def _warning_codes(

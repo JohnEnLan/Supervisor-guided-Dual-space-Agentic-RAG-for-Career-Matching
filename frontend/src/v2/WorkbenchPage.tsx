@@ -421,28 +421,50 @@ function finalizationMilestoneText(
   );
 }
 
-const SQL_LOCKED_CONSTRAINT_FIELDS = new Set([
-  "location",
-  "locations",
-  "max_years_exp",
-  "role_cluster",
-  "role_clusters",
-  "degree_required",
-  "companies",
-]);
+const SUMMARY_FIELD_LABELS: Record<string, string> = {
+  locations: "地点",
+  need_visa_sponsor: "签证担保",
+  preferred_locations: "偏好地点",
+  preferred_role_clusters: "岗位簇",
+  title_keywords: "关键词",
+};
 
-function isSqlLockedConstraint([key, value]: [string, unknown]): boolean {
-  if (key === "need_visa_sponsor") return value === true;
-  if (!SQL_LOCKED_CONSTRAINT_FIELDS.has(key) || value == null) return false;
-  if (typeof value === "string") return Boolean(value.trim());
-  if (Array.isArray(value)) return value.length > 0;
-  return key === "max_years_exp";
+function summaryValue(value: unknown, t: Translate): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "boolean") return value ? t("是") : t("否");
+  if (Array.isArray(value)) {
+    return value.map((item) => summaryValue(item, t)).filter(Boolean).join("、");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const formatted = summaryValue(item, t);
+        return formatted ? `${key} ${formatted}` : "";
+      })
+      .filter(Boolean)
+      .join("、");
+  }
+  return String(value).trim();
 }
 
-function constraintText(entries: [string, unknown][]): string {
-  return entries.length
-    ? entries.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("；")
-    : "无";
+function summaryText(
+  value: Record<string, unknown> | null | undefined,
+  emptyText: string,
+  t: Translate,
+): string {
+  if (!value) return emptyText;
+  const parts = Object.entries(value)
+    .map(([key, item]) => {
+      if (key === "need_visa_sponsor" && typeof item === "boolean") {
+        return t(item ? "需要签证担保" : "不需要签证担保");
+      }
+      const formatted = summaryValue(item, t);
+      if (!formatted) return "";
+      const label = SUMMARY_FIELD_LABELS[key] ? t(SUMMARY_FIELD_LABELS[key]) : key;
+      return `${label} ${formatted}`;
+    })
+    .filter(Boolean);
+  return parts.join("、") || emptyText;
 }
 
 function BriefCard({
@@ -459,26 +481,23 @@ function BriefCard({
   confirmed: boolean;
 }) {
   const { t } = useLanguage();
-  const hard = draft.hard_constraints ?? {};
-  const hardEntries = Object.entries(hard);
-  const sqlLocked = hardEntries.filter(isSqlLockedConstraint);
-  const directional = hardEntries.filter((entry) => !isSqlLockedConstraint(entry));
+  const hardSummary = summaryText(draft.hard_constraints, t("无额外限制"), t);
+  const softSummary = summaryText(draft.soft_preferences, t("无额外偏好"), t);
   return (
     <div className="v2-brief">
-      <p className="v2-brief-title">{t("Match Brief 确认单")}</p>
-      <p className="v2-brief-guidance">{t("确认单由你们的对话记录自动生成，请你核对无误后开始。")}</p>
+      <p className="v2-brief-title">{t("需求摘要（Match Brief）")}</p>
       <dl>
         <div>
           <dt>{t("目标")}</dt>
           <dd>{draft.career_goal}</dd>
         </div>
         <div>
-          <dt>{t("硬条件（SQL 锁定）")}</dt>
-          <dd>{sqlLocked.length ? constraintText(sqlLocked) : t("无")}</dd>
+          <dt>{t("硬条件")}</dt>
+          <dd>{hardSummary}</dd>
         </div>
         <div>
-          <dt>{t("检索方向 / 排序参考")}</dt>
-          <dd>{directional.length ? constraintText(directional) : t("无")}</dd>
+          <dt>{t("排序偏好")}</dt>
+          <dd>{softSummary}</dd>
         </div>
         <div>
           <dt>{t("暂不考虑")}</dt>
@@ -489,6 +508,9 @@ function BriefCard({
           <dd>{draft.result_count}</dd>
         </div>
       </dl>
+      <p className="v2-brief-guidance">
+        {t("检索将基于你的完整简历档案 + 以上确认条件（硬条件数据库过滤，偏好参与排序）。")}
+      </p>
       {confirmed && brief ? (
         <p className="v2-notice">{t("已确认，任务 {runId} 开始执行。", { runId: brief.run_id.slice(0, 8) })}</p>
       ) : (
@@ -531,6 +553,9 @@ function ResultCards({
   onNewConsult: () => void;
 }) {
   const { t } = useLanguage();
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  const [feedbackJobId, setFeedbackJobId] = useState<string | null>(null);
+  const [pendingControl, setPendingControl] = useState<"evidence" | "feedback" | null>(null);
   const result = useQuery({
     queryKey: ["v2-result", runId],
     queryFn: () => api.runResult(runId),
@@ -539,7 +564,28 @@ function ResultCards({
     queryKey: ["capabilities"],
     queryFn: api.capabilities,
   });
-  
+  const firstJobId = result.data?.result.recommended_roles?.[0]?.job_id ?? null;
+
+  useEffect(() => {
+    if (!pendingControl || !firstJobId) return;
+    if (expandedJobId !== firstJobId) {
+      setExpandedJobId(firstJobId);
+      return;
+    }
+    if (pendingControl === "feedback" && feedbackJobId !== firstJobId) {
+      setFeedbackJobId(firstJobId);
+      return;
+    }
+    const selector = pendingControl === "evidence" ? ".v2-evidence-trigger" : ".reaction-outcomes button";
+    const control = anchorRef.current?.querySelector<HTMLButtonElement>(selector);
+    if (!control) return;
+    if (pendingControl === "evidence" && control.getAttribute("aria-expanded") !== "true") {
+      control.click();
+    }
+    control.focus();
+    setPendingControl(null);
+  }, [anchorRef, expandedJobId, feedbackJobId, firstJobId, pendingControl]);
+
   if (result.isPending)
     return (
       <div
@@ -586,16 +632,15 @@ function ResultCards({
       return null;
     }
   };
-  const activateResultControl = (selector: string, click = false) => {
-    const control = anchorRef.current?.querySelector<HTMLButtonElement>(selector);
-    if (!control) return;
-    if (click && control.getAttribute("aria-expanded") !== "true") control.click();
-    control.focus();
+  const toggleDetails = (jobId: string) => {
+    setExpandedJobId((current) => (current === jobId ? null : jobId));
+    setFeedbackJobId(null);
+    setPendingControl(null);
   };
   return (
     <div
       ref={anchorRef}
-      className="v2-results"
+      className={`v2-results${highlighted ? " is-highlighted" : ""}`}
       role="region"
       aria-label={t("匹配结果")}
       tabIndex={-1}
@@ -604,44 +649,108 @@ function ResultCards({
         <span>{t("混合检索（BM25+语义双路）")}</span>
         {capabilities.data?.dual_space_enabled === true ? <span>{t("支持双空间增强")}</span> : null}
       </div>
-      {(product.recommended_roles ?? []).map((role: Recommendation, index: number) => {
-        const sourceUrl = safeSourceUrl(role.source_url);
-        return (
-          <article
-            key={role.job_id}
-            className={`v2-job-card${highlighted && index === 0 ? " is-highlighted" : ""}`}
-          >
-            <header>
-              <div className="v2-job-card-eyebrow">
-                <span className="v2-rank" data-featured={index < 3 ? "true" : "false"}>
-                  {featuredRanks[index] ?? `${index + 1}.`}
-                </span>
-                <span className={`v2-tier ${role.tier}`}>{tierLabel[role.tier] ? t(tierLabel[role.tier]) : role.tier}</span>
-              </div>
-              {role.demo_synthetic ? (
-                <DemoDisclosure countryCode={role.country_code} />
-              ) : null}
-              <h3>{role.title ?? role.job_id}</h3>
-              <p>
-                {role.company ?? "—"} · {role.location ?? "—"}
-              </p>
-              {sourceUrl ? (
-                <a className="v2-source-link" href={sourceUrl} target="_blank" rel="noopener noreferrer">
-                  {t("查看原岗位 ↗")}
-                </a>
-              ) : null}
-            </header>
-            <p className="v2-job-why">{role.concise_explanation}</p>
-            <EvidenceDrawer
-              title={role.title ?? role.job_id}
-              evidence={role.evidence ?? []}
-              resumeEvidence={role.resume_evidence ?? []}
-              agentMatchReasons={role.why_this_match ?? []}
-            />
-            <ReactionForm runId={runId} jobId={role.job_id} />
-          </article>
-        );
-      })}
+      <div className="v2-result-table-wrap">
+        <table className="v2-result-table" aria-label={t("岗位推荐列表")}>
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">{t("分层")}</th>
+              <th scope="col">{t("岗位名")}</th>
+              <th scope="col">{t("公司·地点")}</th>
+              <th scope="col">{t("语料标签")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(product.recommended_roles ?? []).map((role: Recommendation, index: number) => {
+              const sourceUrl = safeSourceUrl(role.source_url);
+              const title = role.title ?? role.job_id;
+              const expanded = expandedJobId === role.job_id;
+              const feedbackOpen = feedbackJobId === role.job_id;
+              const detailId = `v2-job-detail-${index}`;
+              const feedbackId = `v2-job-feedback-${index}`;
+              return (
+                <Fragment key={role.job_id}>
+                  <tr
+                    className={`v2-result-row${highlighted && index === 0 ? " is-highlighted" : ""}`}
+                    onClick={() => toggleDetails(role.job_id)}
+                  >
+                    <td>
+                      <span className="v2-rank" data-featured={index < 3 ? "true" : "false"}>
+                        {featuredRanks[index] ?? `${index + 1}.`}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`v2-tier ${role.tier}`}>
+                        {tierLabel[role.tier] ? t(tierLabel[role.tier]) : role.tier}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="v2-result-row-trigger"
+                        aria-expanded={expanded}
+                        aria-controls={detailId}
+                        aria-label={t("查看 {title} 详情", { title })}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleDetails(role.job_id);
+                        }}
+                      >
+                        <h3>{title}</h3>
+                      </button>
+                    </td>
+                    <td>{role.company ?? "—"} · {role.location ?? "—"}</td>
+                    <td>
+                      <span className="v2-corpus-tag" data-synthetic={role.demo_synthetic ? "true" : "false"}>
+                        {role.demo_synthetic ? t("演示语料") : t("真实语料")}
+                      </span>
+                    </td>
+                  </tr>
+                  {expanded ? (
+                    <tr className="v2-result-detail-row">
+                      <td colSpan={5}>
+                        <article id={detailId} className="v2-job-card" aria-label={t("{title} 详情", { title })}>
+                          <header>
+                            {role.demo_synthetic ? <DemoDisclosure countryCode={role.country_code} /> : null}
+                            <h3>{title}</h3>
+                            <p>{role.company ?? "—"} · {role.location ?? "—"}</p>
+                            {sourceUrl ? (
+                              <a className="v2-source-link" href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                                {t("查看原岗位 ↗")}
+                              </a>
+                            ) : null}
+                          </header>
+                          <p className="v2-job-why">{role.concise_explanation}</p>
+                          <EvidenceDrawer
+                            title={title}
+                            evidence={role.evidence ?? []}
+                            resumeEvidence={role.resume_evidence ?? []}
+                            agentMatchReasons={role.why_this_match ?? []}
+                          />
+                          <button
+                            type="button"
+                            className="v2-feedback-trigger"
+                            aria-expanded={feedbackOpen}
+                            aria-controls={feedbackId}
+                            onClick={() => setFeedbackJobId((current) => (current === role.job_id ? null : role.job_id))}
+                          >
+                            {feedbackOpen ? t("收起进展") : t("提交进展")}
+                          </button>
+                          {feedbackOpen ? (
+                            <div id={feedbackId} className="v2-feedback-panel">
+                              <ReactionForm runId={runId} jobId={role.job_id} />
+                            </div>
+                          ) : null}
+                        </article>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {resumeStrategy.length ? (
         <details className="v2-extra">
           <summary>{t("简历修改建议（{count} 条）", { count: resumeStrategy.length })}</summary>
@@ -683,15 +792,16 @@ function ResultCards({
         <p className="v2-warnings">{t("提示：{warnings}", { warnings: warnings.join("、") })}</p>
       ) : null}
       <div className="v2-result-actions" role="group" aria-label={t("结果后续行动")}>
-        <button type="button" onClick={() => activateResultControl(".v2-evidence-trigger", true)}>
-          {t("查看第 1 名的证据")}
-        </button>
-        <button
-          type="button"
-          onClick={() => activateResultControl('.v2-job-card .reaction-outcomes button')}
-        >
-          {t("更新申请进展")}
-        </button>
+        {(product.recommended_roles ?? []).length ? (
+          <>
+            <button type="button" onClick={() => setPendingControl("evidence")}>
+              {t("查看第 1 名的证据")}
+            </button>
+            <button type="button" onClick={() => setPendingControl("feedback")}>
+              {t("更新申请进展")}
+            </button>
+          </>
+        ) : null}
         <button type="button" onClick={onNewConsult}>
           {t("新建咨询细化方向")}
         </button>
@@ -1168,6 +1278,9 @@ export function WorkbenchPage() {
   const running = Boolean(runId) && !TERMINAL.has(status.data?.status ?? "");
   const completed =
     status.data?.status === "completed" || status.data?.status === "completed_with_warnings";
+  const hasStrategistResult = runMessages.some(
+    (item) => item.persona === "strategist" && item.kind === "result",
+  );
   const retryableTerminal = ["failed", "stale", "cancelled"].includes(status.data?.status ?? "");
 
   const consultBubbles = useMemo(
@@ -1528,7 +1641,9 @@ export function WorkbenchPage() {
             (consult.data.round === 0 || transcript.length === 0) ? (
               <p>
                 {t(
-                  '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
+                  mode === "explore"
+                    ? "还不确定方向？没关系，切到这里我们先聊聊你的兴趣和优势，一起找方向。"
+                    : '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
                 )}
               </p>
             ) : null}
@@ -1628,12 +1743,22 @@ export function WorkbenchPage() {
               >
                 <p style={{ whiteSpace: "pre-line" }}>{t(item.text)}</p>
               </Bubble>
+              {completed && runId && item.persona === "strategist" && item.kind === "result" ? (
+                <Bubble persona="strategist" tone="card">
+                  <ResultCards
+                    runId={runId}
+                    anchorRef={resultRef}
+                    highlighted={timelineScroll.resultHighlighted}
+                    onNewConsult={() => setRetryModal("refine")}
+                  />
+                </Bubble>
+              ) : null}
             </Fragment>
           );
         })}
 
-        {completed && runId ? (
-          <Bubble persona="pm" tone="card">
+        {completed && runId && !hasStrategistResult ? (
+          <Bubble persona="strategist" tone="card">
             <ResultCards
               runId={runId}
               anchorRef={resultRef}
@@ -1671,6 +1796,91 @@ export function WorkbenchPage() {
       ) : null}
 
       <footer className="v2-composer">
+        <div className="v2-mode-toggle v2-composer-mode" role="tablist" aria-label={t("咨询模式")}>
+          <button
+            role="tab"
+            aria-label={t("目标明确")}
+            aria-describedby="v2-targeted-mode-description"
+            aria-selected={mode === "targeted"}
+            onClick={() => setMode("targeted")}
+          >
+            <span>{t("目标明确")}</span>
+            <small id="v2-targeted-mode-description">{t("已有意向岗位，直接补条件")}</small>
+          </button>
+          <button
+            role="tab"
+            aria-label={t("探索方向")}
+            aria-describedby="v2-explore-mode-description"
+            aria-selected={mode === "explore"}
+            onClick={() => setMode("explore")}
+          >
+            <span>{t("探索方向")}</span>
+            <small id="v2-explore-mode-description">{t("不确定方向，小意帮你梳理")}</small>
+          </button>
+        </div>
+        <div className="v2-composer-row">
+          <label
+            className="v2-btn ghost v2-attach"
+            aria-label={t("上传简历")}
+            title={
+              imageUploadEnabled
+                ? t("支持 {formats}（PNG/JPG/WEBP）", {
+                    formats: t(supportedFormatsLabel(imageUploadEnabled)),
+                  })
+                : t("支持 PDF/DOCX/TXT；图片识别即将开放")
+            }
+          >
+            <Paperclip size={17} />
+            <input
+              type="file"
+              accept={
+                imageUploadEnabled
+                  ? ".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                  : ".pdf,.docx,.txt"
+              }
+              hidden
+              disabled={Boolean(runId) || upload.isPending}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  setPendingFile(file);
+                  upload.reset();
+                  parseResume.reset();
+                }
+                event.target.value = "";
+              }}
+            />
+          </label>
+          <textarea
+            ref={messageInputRef}
+            value={message}
+            placeholder={
+              canConsult
+                ? t("告诉小意你的想法…（回车发送，Shift+回车换行）")
+                : runId
+                  ? t("任务执行中，可在上方查看团队进展")
+                  : t("先用左侧 📎 上传简历，确认档案后开聊")
+            }
+            disabled={inputDisabled}
+            maxLength={2000}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (message.trim() && !inputDisabled) turn.mutate();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="v2-btn primary v2-send"
+            disabled={inputDisabled || !message.trim()}
+            onClick={() => turn.mutate()}
+            aria-label={t("发送")}
+          >
+            <Send size={17} />
+          </button>
+        </div>
         {canConsult ? (
           <section className="v2-consult-slots" aria-label={t("咨询必填信息")}>
             <div className="v2-slot-chips">
@@ -1700,79 +1910,6 @@ export function WorkbenchPage() {
             />
           </section>
         ) : null}
-        <div className="v2-mode-toggle" role="tablist" aria-label={t("咨询模式")}>
-          <button
-            role="tab"
-            aria-selected={mode === "targeted"}
-            onClick={() => setMode("targeted")}
-          >
-            {t("目标明确")}
-          </button>
-          <button role="tab" aria-selected={mode === "explore"} onClick={() => setMode("explore")}>
-            {t("探索方向")}
-          </button>
-        </div>
-        <label
-          className="v2-btn ghost v2-attach"
-          aria-label={t("上传简历")}
-          title={
-            imageUploadEnabled
-              ? t("支持 {formats}（PNG/JPG/WEBP）", {
-                  formats: t(supportedFormatsLabel(imageUploadEnabled)),
-                })
-              : t("支持 PDF/DOCX/TXT；图片识别即将开放")
-          }
-        >
-          <Paperclip size={17} />
-          <input
-            type="file"
-            accept={
-              imageUploadEnabled
-                ? ".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-                : ".pdf,.docx,.txt"
-            }
-            hidden
-            disabled={Boolean(runId) || upload.isPending}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) {
-                setPendingFile(file);
-                upload.reset();
-                parseResume.reset();
-              }
-              event.target.value = "";
-            }}
-          />
-        </label>
-        <textarea
-          ref={messageInputRef}
-          value={message}
-          placeholder={
-            canConsult
-              ? t("告诉小意你的想法…（回车发送，Shift+回车换行）")
-              : runId
-                ? t("任务执行中，可在上方查看团队进展")
-                : t("先用左侧 📎 上传简历，确认档案后开聊")
-          }
-          disabled={inputDisabled}
-          maxLength={2000}
-          onChange={(event) => setMessage(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              if (message.trim() && !inputDisabled) turn.mutate();
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="v2-btn primary v2-send"
-          disabled={inputDisabled || !message.trim()}
-          onClick={() => turn.mutate()}
-          aria-label={t("发送")}
-        >
-          <Send size={17} />
-        </button>
         {resumeRecovery ? (
           <p
             className={`${resumeRecovery === "error" ? "v2-error" : "v2-notice"} v2-composer-error`}

@@ -81,6 +81,36 @@ def _completed_result(*, warnings: list[str] | None = None) -> ProductResult:
     )
 
 
+def test_brief_message_uses_natural_chinese_summaries_and_preserves_unknown_keys() -> None:
+    from app.api.conversation_projector import _brief_message
+
+    message = _brief_message(
+        {
+            "career_goal": "增长产品经理",
+            "hard_constraints": {
+                "locations": ["深圳", "杭州"],
+                "need_visa_sponsor": False,
+                "unknown_key": "保留值",
+            },
+            "soft_preferences": {
+                "preferred_locations": ["深圳"],
+                "preferred_role_clusters": ["市场营销"],
+                "title_keywords": ["用户运营"],
+            },
+            "avoid_roles": ["销售", "客服"],
+        }
+    )
+
+    assert message == (
+        "本次需求已确认：目标「增长产品经理」；"
+        "硬条件——地点 深圳、杭州、不需要签证担保、unknown_key 保留值；"
+        "排序偏好——偏好地点 深圳、岗位簇 市场营销、关键词 用户运营；"
+        "暂不考虑：销售、客服。接下来小检会基于你的完整简历档案 + 以上条件开始检索。"
+    )
+    assert '{"' not in message
+    assert '":' not in message
+
+
 def test_completed_conversation_has_four_personas_and_stable_order(
     monkeypatch,
 ) -> None:
@@ -145,6 +175,7 @@ def test_completed_conversation_has_four_personas_and_stable_order(
         "progress",
         "checkpoint",
         "result",
+        "result",
     ]
     assert messages[2]["persona"] == "pm"
     assert messages[2]["stage"] == "intent"
@@ -165,10 +196,26 @@ def test_completed_conversation_has_four_personas_and_stable_order(
     assert "所有建议只基于已核验信息" not in response.text
     assert "简历原始证据和用户确认的澄清证据" in messages[6]["text"]
     assert "基于某个岗位细化简历" in messages[7]["text"]
-    assert "Now Fit 1 个、Stretch Fit 1 个、Bridge Role 1 个" in messages[-1][
-        "text"
-    ]
-    assert "Results 页" in messages[-1]["text"]
+    result_message, closing_message = messages[-2:]
+    assert result_message["persona"] == "strategist"
+    assert result_message["kind"] == "result"
+    assert "岗位分析完成：Now Fit 1 个、Stretch Fit 1 个、Bridge Role 1 个" in (
+        result_message["text"]
+    )
+    assert "每个岗位都附证据与建议" in result_message["text"]
+    assert closing_message == {
+        "seq": len(messages),
+        "persona": "pm",
+        "display_name": "项目经理·PM",
+        "kind": "result",
+        "text": (
+            "结果已发布。投递后欢迎回来在对应岗位卡上提交进展（被拒/过筛/"
+            "面试/Offer），这些反馈会帮助我们持续校准推荐。匹配结果仅供求职"
+            "决策参考，不构成 offer 承诺。"
+        ),
+        "stage": "result",
+    }
+    assert "不构成 offer 承诺" in closing_message["text"]
 
 
 def test_conversation_announces_allowlisted_recovery_events(monkeypatch) -> None:
@@ -271,11 +318,14 @@ def test_completed_with_warnings_translates_known_and_unknown_codes(
         == "本次服务带有一项系统提示，请在 Results 页核对详情"
         "（代码：future_warning_code）。"
     )
-    assert "warning 2 项" in next(
+    messages = response.json()["messages"]
+    assert "另有 2 条发布提示" in next(
         message["text"]
-        for message in response.json()["messages"]
-        if message["kind"] == "result"
+        for message in messages
+        if message["kind"] == "result" and message["persona"] == "strategist"
     )
+    assert messages[-1]["persona"] == "pm"
+    assert "不构成 offer 承诺" in messages[-1]["text"]
 
 
 def test_conversation_returns_404_for_unknown_run(monkeypatch) -> None:

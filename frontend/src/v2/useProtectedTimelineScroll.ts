@@ -77,7 +77,7 @@ export function useProtectedTimelineScroll({
   const followNotice = useCallback(() => {
     if (notice === "result" && resultRef.current) {
       const target =
-        resultRef.current.querySelector<HTMLElement>(".v2-job-card") ?? resultRef.current;
+        resultRef.current.querySelector<HTMLElement>(".v2-result-row") ?? resultRef.current;
       target.scrollIntoView({ behavior: "smooth", block: "start" });
       setResultHighlighted(true);
       if (highlightTimer.current != null) window.clearTimeout(highlightTimer.current);
