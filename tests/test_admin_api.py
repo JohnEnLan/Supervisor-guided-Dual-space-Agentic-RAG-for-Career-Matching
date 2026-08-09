@@ -297,9 +297,65 @@ async def test_admin_users_query_has_stable_latest_resume_and_email_ordering(
     assert "session.resume_version DESC" in sql
     assert "session.session_id ASC" in sql
     assert "SELECT COUNT(*) FROM session_state AS counted_session" in sql
-    assert "education,0,school" in sql
+    assert "education,0,institution" in sql
     assert "education,0,degree" in sql
     assert connection.calls[0][2] == (21, 20)
+
+
+@pytest.mark.asyncio
+async def test_admin_users_resume_paths_resolve_against_real_state_shape(
+    monkeypatch,
+) -> None:
+    import re
+
+    from app.db import admin_store
+
+    connection = _Connection(fetch_results=[[]])
+    _install_pool(monkeypatch, admin_store, connection)
+
+    await admin_store.list_admin_users(page=1)
+
+    sql = connection.calls[0][1]
+    paths = re.findall(r"#>> '\{([^}]*)\}'", sql)
+    assert paths
+
+    # 与 resume_intake SYSTEM_PROMPT 输出 shape 一致的最小真实 state。
+    real_shape_state = {
+        "resume_state": {
+            "contact": {
+                "name": "Ada Lovelace",
+                "phone": "+44 7700 900123",
+                "email": "ada@example.com",
+                "evidence_span_ids": ["s1"],
+            },
+            "education": [
+                {
+                    "institution": "University of Birmingham",
+                    "degree": "MSc",
+                    "field": "Computer Science",
+                    "dates": "2024 - 2025",
+                    "details": [],
+                    "evidence_span_ids": ["s2"],
+                }
+            ],
+        }
+    }
+    for path in paths:
+        value: object = real_shape_state
+        for segment in path.split(","):
+            if isinstance(value, list):
+                index = int(segment)
+                value = value[index] if index < len(value) else None
+            elif isinstance(value, dict):
+                value = value.get(segment)
+            else:
+                value = None
+            if value is None:
+                break
+        assert isinstance(value, str) and value, (
+            f"SQL JSON path {{{path}}} does not resolve on the real "
+            "resume_state shape"
+        )
 
 
 @pytest.mark.asyncio

@@ -117,7 +117,7 @@ async def list_admin_users(*, page: int) -> dict[str, Any]:
                        AS resume_name,
                    resume.state #>> '{resume_state,contact,phone}'
                        AS resume_phone,
-                   resume.state #>> '{resume_state,education,0,school}'
+                   resume.state #>> '{resume_state,education,0,institution}'
                        AS resume_school,
                    resume.state #>> '{resume_state,education,0,degree}'
                        AS resume_degree
