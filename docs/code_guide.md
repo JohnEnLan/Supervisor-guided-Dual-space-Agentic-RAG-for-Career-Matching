@@ -21,7 +21,7 @@
 17. The same i18n test has three static-page no-Han guards: English `HomePage`, `WelcomePage`, and `LandingPage` bodies contain no Han characters.
 18. `frontend/e2e/english-language-journey.spec.ts` covers mobile journey persistence, mobile toggle restoration, document-title changes, and invalid-storage fallback.
 
-> 对齐代码：`deb58c7`。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号。
+> 对齐代码：`de2fd83`（B5+B6 终审完成时点）。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号；行号以该提交为准，后续批次可能漂移。
 
 ## 1. 一分钟理解代码
 

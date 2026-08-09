@@ -16,7 +16,7 @@ In English mode the exact notice is: **“Some generated or data-dependent conve
 
 The dictionary uses exact-match fallback: a missing English key returns the original Chinese key. The system neither guesses nor calls a translation model; this honest fallback also protects unknown backend copy and dynamic content.
 
-> 对齐实现：`deb58c7`。本指南按用户在答辩演示中实际看到的顺序编写，不把内部日志、提示词或数据库状态包装成页面功能。
+> 对齐实现：`de2fd83`（B5+B6 终审完成时点）。本指南按用户在答辩演示中实际看到的顺序编写，不把内部日志、提示词或数据库状态包装成页面功能。
 
 ## 1. 产品是什么
 
