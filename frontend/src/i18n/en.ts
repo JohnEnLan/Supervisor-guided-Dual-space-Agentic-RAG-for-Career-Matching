@@ -4,8 +4,8 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
     "Some generated or data-dependent conversation content may remain in Chinese.",
   "中文": "Chinese",
   "进入应用": "Open the app",
-  "枝涯 Career Arbor · 循枝见路，向远而生":
-    "Career Arbor · Follow the branches, find your path.",
+  "枝涯 Career Arbor": "Career Arbor",
+  "循枝见路，向远而生": "Follow the branches, find your path.",
   "枝涯 — 你的 AI 职业路径智能体":
     "Career Arbor — Your AI Career-Path Agent",
   "当前语言：{current}；切换到 {target}":

@@ -400,7 +400,9 @@ describe("HomePage language switching", () => {
         name: "把求职这件事，交给一支为你服务的团队",
       }),
     ).toBeVisible();
-    expect(screen.getByText("枝涯 Career Arbor · 循枝见路，向远而生")).toBeVisible();
+    expect(screen.getByText("枝涯 Career Arbor", { selector: ".mk-brand-name" })).toBeVisible();
+    expect(screen.getByText("循枝见路，向远而生", { selector: ".mk-brand-slogan" })).toBeVisible();
+    expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(screen.getByRole("region", { name: "功能陈列" })).toBeVisible();
     expect(document.querySelector(".v2-footnote")).toHaveTextContent(
       "枝涯 — 你的 AI 职业路径智能体",
@@ -420,9 +422,13 @@ describe("HomePage language switching", () => {
         name: "Put your job search in the hands of a team built around you",
       }),
     ).toBeVisible();
+    expect(screen.getByText("Career Arbor", { selector: ".mk-brand-name" })).toBeVisible();
     expect(
-      screen.getByText("Career Arbor · Follow the branches, find your path."),
+      screen.getByText("Follow the branches, find your path.", {
+        selector: ".mk-brand-slogan",
+      }),
     ).toBeVisible();
+    expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(screen.getByRole("link", { name: "Career Arbor" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("region", { name: "Features" })).toBeVisible();
     expect(document.querySelector(".v2-footnote")).toHaveTextContent(

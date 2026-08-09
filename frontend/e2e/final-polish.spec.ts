@@ -252,6 +252,67 @@ test("brand reaches home from an authenticated app entry with no intro flag", as
   ).toBeVisible();
 });
 
+test("homepage brand lockup keeps its hierarchy and bounds in both languages", async ({
+  page,
+}, testInfo) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("career_rag_intro_seen_v1", "1");
+  });
+  await installUnauthorizedApi(page);
+  await page.goto("/");
+
+  const assertBrandHierarchy = async () => {
+    const measurements = await page.evaluate(() => {
+      const lockup = document.querySelector<HTMLElement>(".mk-brand-lockup")!;
+      const slogan = document.querySelector<HTMLElement>(".mk-brand-slogan")!;
+      const name = document.querySelector<HTMLElement>(".mk-brand-name")!;
+      const heading = document.querySelector<HTMLElement>(".mk-hero h1")!;
+      const box = lockup.getBoundingClientRect();
+
+      return {
+        slogan: Number.parseFloat(getComputedStyle(slogan).fontSize),
+        name: Number.parseFloat(getComputedStyle(name).fontSize),
+        heading: Number.parseFloat(getComputedStyle(heading).fontSize),
+        headingCount: document.querySelectorAll("h1").length,
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+        lockup: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      };
+    });
+
+    expect(measurements.slogan).toBeLessThan(measurements.name);
+    expect(measurements.name).toBeLessThan(measurements.heading);
+    expect(measurements.headingCount).toBe(1);
+    expect(measurements.scrollWidth).toBeLessThanOrEqual(measurements.clientWidth);
+    expect(measurements.lockup.left).toBeGreaterThanOrEqual(0);
+    expect(measurements.lockup.right).toBeLessThanOrEqual(measurements.viewport.width);
+    expect(measurements.lockup.top).toBeGreaterThanOrEqual(0);
+    expect(measurements.lockup.bottom).toBeLessThanOrEqual(measurements.viewport.height);
+  };
+
+  for (const width of [320, 375, 650, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => localStorage.setItem("career_rag_lang_v1", "zh"));
+    await page.reload();
+
+    await expect(page.locator(".mk-hero h1")).toBeVisible();
+    await assertBrandHierarchy();
+    await page.screenshot({
+      path: testInfo.outputPath(`home-${width}-zh.png`),
+      fullPage: true,
+    });
+
+    await page.locator(".v2-language-toggle").click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await assertBrandHierarchy();
+    await page.screenshot({
+      path: testInfo.outputPath(`home-${width}-en.png`),
+      fullPage: true,
+    });
+  }
+});
+
 test("new consultation action aligns with the session rows", async ({ page }) => {
   await installAuthenticatedShellApi(page);
   await page.goto("/app");

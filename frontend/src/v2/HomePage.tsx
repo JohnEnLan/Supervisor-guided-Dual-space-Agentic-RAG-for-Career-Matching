@@ -70,7 +70,11 @@ export function HomePage() {
       </nav>
 
       <header className="mk-hero">
-        <p className="mk-eyebrow">{t("枝涯 Career Arbor · 循枝见路，向远而生")}</p>
+        <p className="mk-brand-lockup">
+          <strong className="mk-brand-name">{t("枝涯 Career Arbor")}</strong>
+          <span className="mk-brand-branch" aria-hidden="true" />
+          <span className="mk-brand-slogan">{t("循枝见路，向远而生")}</span>
+        </p>
         <h1>
           {t("把求职这件事，")}
           <br />
