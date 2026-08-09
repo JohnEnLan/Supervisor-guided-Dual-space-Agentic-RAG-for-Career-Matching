@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { apiFixtures } from "../src/test/apiFixtures";
+import { opaqueRgbContrastRatio } from "./color-contrast";
 
 async function installUnauthorizedApi(page: Page) {
   await page.route("**/api/v1/**", (route) =>
@@ -36,12 +37,113 @@ async function installAuthenticatedShellApi(page: Page) {
 
 async function wordmarkFeedback(brand: Locator) {
   return brand.evaluate((element) => {
-    const branchTransform = getComputedStyle(element, "::after").transform;
+    const branch = getComputedStyle(element, "::after");
+    const leaf = getComputedStyle(element, "::before");
+    const branchTransform = branch.transform;
     return {
       branchScaleX: branchTransform === "none" ? null : new DOMMatrixReadOnly(branchTransform).a,
-      leafOpacity: Number.parseFloat(getComputedStyle(element, "::before").opacity),
+      leafOpacity: Number.parseFloat(leaf.opacity),
+      branchTransition: {
+        duration: branch.transitionDuration,
+        properties: branch.transitionProperty.split(",").map((property) => property.trim()).sort(),
+      },
+      leafTransition: {
+        duration: leaf.transitionDuration,
+        properties: leaf.transitionProperty.split(",").map((property) => property.trim()).sort(),
+      },
     };
   });
+}
+
+function expectBrandFeedbackTransition(feedback: Awaited<ReturnType<typeof wordmarkFeedback>>) {
+  expect(feedback.branchTransition.duration).toBe("0.22s, 0.22s");
+  expect(feedback.leafTransition.duration).toBe("0.22s, 0.22s");
+  expect(feedback.branchTransition.properties).toEqual(["opacity", "transform"]);
+  expect(feedback.leafTransition.properties).toEqual(["opacity", "transform"]);
+}
+
+type Rect = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+type BrandMeasurements = {
+  slogan: number;
+  name: number;
+  heading: number;
+  headingCount: number;
+  scrollWidth: number;
+  clientWidth: number;
+  lockup: Pick<Rect, "left" | "right" | "top" | "bottom">;
+  nav: Rect;
+  wordmark: Rect;
+  actions: Rect;
+  horizontalSeparation: number;
+  verticalSeparation: number;
+  viewport: { width: number; height: number };
+};
+
+async function measureHomepageBrand(page: Page): Promise<BrandMeasurements> {
+  return page.evaluate(() => {
+    const lockup = document.querySelector<HTMLElement>(".mk-brand-lockup")!;
+    const slogan = document.querySelector<HTMLElement>(".mk-brand-slogan")!;
+    const name = document.querySelector<HTMLElement>(".mk-brand-name")!;
+    const heading = document.querySelector<HTMLElement>(".mk-hero h1")!;
+    const nav = document.querySelector<HTMLElement>(".v2-topnav")!;
+    const wordmark = nav.querySelector<HTMLElement>(".v2-wordmark")!;
+    const actions = nav.querySelector<HTMLElement>(".v2-topnav-actions")!;
+    const lockupBox = lockup.getBoundingClientRect();
+    const toRect = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const navBox = toRect(nav);
+    const wordmarkBox = toRect(wordmark);
+    const actionsBox = toRect(actions);
+    return {
+      slogan: Number.parseFloat(getComputedStyle(slogan).fontSize),
+      name: Number.parseFloat(getComputedStyle(name).fontSize),
+      heading: Number.parseFloat(getComputedStyle(heading).fontSize),
+      headingCount: document.querySelectorAll("h1").length,
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      lockup: { left: lockupBox.left, right: lockupBox.right, top: lockupBox.top, bottom: lockupBox.bottom },
+      nav: navBox,
+      wordmark: wordmarkBox,
+      actions: actionsBox,
+      horizontalSeparation: Math.max(wordmarkBox.left - actionsBox.right, actionsBox.left - wordmarkBox.right),
+      verticalSeparation: Math.max(wordmarkBox.top - actionsBox.bottom, actionsBox.top - wordmarkBox.bottom),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    };
+  });
+}
+
+function rectangleIsInside(outer: Pick<Rect, "left" | "right" | "top" | "bottom">, inner: Pick<Rect, "left" | "right" | "top" | "bottom">) {
+  return inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom;
+}
+
+function assertHomepageBrandHierarchy(measurements: BrandMeasurements) {
+  const insideViewport = (box: Pick<Rect, "left" | "right" | "top" | "bottom">) =>
+    box.left >= 0 && box.right <= measurements.viewport.width && box.top >= 0 && box.bottom <= measurements.viewport.height;
+  expect(measurements.slogan).toBeLessThan(measurements.name);
+  expect(measurements.name).toBeLessThan(measurements.heading);
+  expect(measurements.headingCount).toBe(1);
+  expect(measurements.scrollWidth).toBeLessThanOrEqual(measurements.clientWidth);
+  expect(rectangleIsInside({ left: 0, right: measurements.viewport.width, top: 0, bottom: measurements.viewport.height }, measurements.lockup)).toBe(true);
+  return {
+    separated: measurements.horizontalSeparation >= 4 || measurements.verticalSeparation >= 4,
+    insideNav: [measurements.wordmark, measurements.actions].every((item) => rectangleIsInside(measurements.nav, item)),
+    insideViewport: [measurements.wordmark, measurements.actions].every(insideViewport),
+  };
+}
+
+function expectPureFixedLeafRotation(transform: string) {
+  const values = transform.match(/^matrix\(([^)]+)\)$/)?.[1].split(",").map(Number);
+  expect(values).toHaveLength(6);
+  const [cosine, sine, negativeSine, cosineAgain, translateX, translateY] = values!;
+  const angle = (-30 * Math.PI) / 180;
+  expect(cosine).toBeCloseTo(Math.cos(angle), 5);
+  expect(sine).toBeCloseTo(Math.sin(angle), 5);
+  expect(negativeSine).toBeCloseTo(-Math.sin(angle), 5);
+  expect(cosineAgain).toBeCloseTo(Math.cos(angle), 5);
+  expect(translateX).toBeCloseTo(0, 5);
+  expect(translateY).toBeCloseTo(0, 5);
 }
 
 async function wordmarkFontSizeInRem(brand: Locator) {
@@ -94,23 +196,7 @@ test("advisor system places the supervisor over all three business stages", asyn
       },
     };
   });
-  const contrastRatios = await page.locator(".wl-advisor-system").evaluate((system) => {
-    const rgb = (value: string) =>
-      (value.match(/[\d.]+/g) ?? []).slice(0, 3).map((channel) => Number(channel) / 255);
-    const luminance = (value: string) => {
-      const linear = rgb(value).map((channel) =>
-        channel <= 0.03928
-          ? channel / 12.92
-          : ((channel + 0.055) / 1.055) ** 2.4,
-      );
-      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-    };
-    const contrast = (foreground: string, background: string) => {
-      const values = [luminance(foreground), luminance(background)].sort(
-        (left, right) => right - left,
-      );
-      return (values[0] + 0.05) / (values[1] + 0.05);
-    };
+  const contrastColors = await page.locator(".wl-advisor-system").evaluate((system) => {
     const supervisorCard = system.querySelector<HTMLElement>(".wl-supervisor-card")!;
     const supervisorLabel = supervisorCard.querySelector<HTMLElement>(".wl-team-stage")!;
     const businessCard = system.querySelector<HTMLElement>(".wl-team-flow .wl-team-card")!;
@@ -118,20 +204,25 @@ test("advisor system places the supervisor over all three business stages", asyn
     const busElement = system.querySelector<HTMLElement>(".wl-supervision-bus")!;
     const scene = system.closest<HTMLElement>(".wl-dark")!;
     return {
-      supervisorLabel: contrast(
-        getComputedStyle(supervisorLabel).color,
-        getComputedStyle(supervisorCard).backgroundColor,
-      ),
-      businessLabel: contrast(
-        getComputedStyle(businessLabel).color,
-        getComputedStyle(businessCard).backgroundColor,
-      ),
-      relationship: contrast(
-        getComputedStyle(busElement, "::before").borderLeftColor,
-        getComputedStyle(scene).backgroundColor,
-      ),
+      supervisorLabel: [getComputedStyle(supervisorLabel).color, getComputedStyle(supervisorCard).backgroundColor],
+      businessLabel: [getComputedStyle(businessLabel).color, getComputedStyle(businessCard).backgroundColor],
+      relationship: [getComputedStyle(busElement, "::before").borderLeftColor, getComputedStyle(scene).backgroundColor],
     };
   });
+  const contrastRatios = {
+    supervisorLabel: opaqueRgbContrastRatio(
+      contrastColors.supervisorLabel[0],
+      contrastColors.supervisorLabel[1],
+    ),
+    businessLabel: opaqueRgbContrastRatio(
+      contrastColors.businessLabel[0],
+      contrastColors.businessLabel[1],
+    ),
+    relationship: opaqueRgbContrastRatio(
+      contrastColors.relationship[0],
+      contrastColors.relationship[1],
+    ),
+  };
   expect(supervisorBox).not.toBeNull();
   expect(busBox).not.toBeNull();
   for (const stageBox of stageBoxes) {
@@ -261,86 +352,6 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
   await installUnauthorizedApi(page);
   await page.goto("/");
 
-  const assertBrandHierarchy = async () => {
-    const measurements = await page.evaluate(() => {
-      const lockup = document.querySelector<HTMLElement>(".mk-brand-lockup")!;
-      const slogan = document.querySelector<HTMLElement>(".mk-brand-slogan")!;
-      const name = document.querySelector<HTMLElement>(".mk-brand-name")!;
-      const heading = document.querySelector<HTMLElement>(".mk-hero h1")!;
-      const nav = document.querySelector<HTMLElement>(".v2-topnav")!;
-      const wordmark = nav.querySelector<HTMLElement>(".v2-wordmark")!;
-      const actions = nav.querySelector<HTMLElement>(".v2-topnav-actions")!;
-      const box = lockup.getBoundingClientRect();
-      const toRect = (element: HTMLElement) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        };
-      };
-      const navBox = toRect(nav);
-      const wordmarkBox = toRect(wordmark);
-      const actionsBox = toRect(actions);
-
-      return {
-        slogan: Number.parseFloat(getComputedStyle(slogan).fontSize),
-        name: Number.parseFloat(getComputedStyle(name).fontSize),
-        heading: Number.parseFloat(getComputedStyle(heading).fontSize),
-        headingCount: document.querySelectorAll("h1").length,
-        scrollWidth: document.documentElement.scrollWidth,
-        clientWidth: document.documentElement.clientWidth,
-        lockup: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
-        nav: navBox,
-        wordmark: wordmarkBox,
-        actions: actionsBox,
-        horizontalSeparation: Math.max(
-          wordmarkBox.left - actionsBox.right,
-          actionsBox.left - wordmarkBox.right,
-        ),
-        verticalSeparation: Math.max(
-          wordmarkBox.top - actionsBox.bottom,
-          actionsBox.top - wordmarkBox.bottom,
-        ),
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-      };
-    });
-
-    const inside = (
-      outer: { left: number; right: number; top: number; bottom: number },
-      inner: { left: number; right: number; top: number; bottom: number },
-    ) =>
-      inner.left >= outer.left &&
-      inner.right <= outer.right &&
-      inner.top >= outer.top &&
-      inner.bottom <= outer.bottom;
-    const insideViewport = (box: { left: number; right: number; top: number; bottom: number }) =>
-      box.left >= 0 &&
-      box.right <= measurements.viewport.width &&
-      box.top >= 0 &&
-      box.bottom <= measurements.viewport.height;
-
-    expect(measurements.slogan).toBeLessThan(measurements.name);
-    expect(measurements.name).toBeLessThan(measurements.heading);
-    expect(measurements.headingCount).toBe(1);
-    expect(measurements.scrollWidth).toBeLessThanOrEqual(measurements.clientWidth);
-    expect(measurements.lockup.left).toBeGreaterThanOrEqual(0);
-    expect(measurements.lockup.right).toBeLessThanOrEqual(measurements.viewport.width);
-    expect(measurements.lockup.top).toBeGreaterThanOrEqual(0);
-    expect(measurements.lockup.bottom).toBeLessThanOrEqual(measurements.viewport.height);
-    return {
-      measurements,
-      separated: measurements.horizontalSeparation >= 4 || measurements.verticalSeparation >= 4,
-      insideNav: [measurements.wordmark, measurements.actions].every((item) =>
-        inside(measurements.nav, item),
-      ),
-      insideViewport: [measurements.wordmark, measurements.actions].every(insideViewport),
-    };
-  };
-
   const navViolations: Array<{ width: number; language: "zh" | "en"; details: unknown }> = [];
 
   for (const width of [320, 375, 650, 1280]) {
@@ -349,7 +360,8 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
     await page.reload();
 
     await expect(page.locator(".mk-hero h1")).toBeVisible();
-    const chineseNav = await assertBrandHierarchy();
+    const chineseMeasurements = await measureHomepageBrand(page);
+    const chineseNav = assertHomepageBrandHierarchy(chineseMeasurements);
     if (!chineseNav.separated || !chineseNav.insideNav || !chineseNav.insideViewport) {
       navViolations.push({ width, language: "zh", details: chineseNav });
     }
@@ -360,7 +372,8 @@ test("homepage brand lockup keeps its hierarchy and bounds in both languages", a
 
     await page.locator(".v2-language-toggle").click();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    const englishNav = await assertBrandHierarchy();
+    const englishMeasurements = await measureHomepageBrand(page);
+    const englishNav = assertHomepageBrandHierarchy(englishMeasurements);
     if (!englishNav.separated || !englishNav.insideNav || !englishNav.insideViewport) {
       navViolations.push({ width, language: "en", details: englishNav });
     }
@@ -424,7 +437,7 @@ test("mobile drawer keeps the new consultation action aligned with session rows"
   expect(Math.abs(boxes.action.width - boxes.session.width)).toBeLessThanOrEqual(0.5);
 });
 
-test("brand wordmark has a 44px target and branch feedback", async ({ page }) => {
+test("brand wordmark keeps its responsive type and 44px target", async ({ page }) => {
   await installUnauthorizedApi(page);
   await page.setViewportSize({ width: 320, height: 812 });
   await page.goto("/welcome");
@@ -444,33 +457,61 @@ test("brand wordmark has a 44px target and branch feedback", async ({ page }) =>
   expect(target).not.toBeNull();
   expect(target!.height).toBeGreaterThanOrEqual(44);
 
+});
+
+test("brand wordmark pointer feedback grows without moving navigation layout", async ({ page }) => {
+  await installUnauthorizedApi(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/welcome");
+  const brand = page.locator(".wl-page .v2-wordmark");
+
   const idle = await wordmarkFeedback(brand);
   expect(idle.branchScaleX).not.toBeNull();
-  expect(idle.branchScaleX!).toBeLessThan(1);
+  expect(idle.branchScaleX!).toBeLessThanOrEqual(0.35);
+  expect(idle.leafOpacity).toBe(0);
+  expectBrandFeedbackTransition(idle);
   await brand.hover();
   await expect.poll(() => wordmarkFeedback(brand).then(({ branchScaleX }) => branchScaleX)).toBe(1);
   await expect.poll(() => wordmarkFeedback(brand).then(({ leafOpacity }) => leafOpacity)).toBe(1);
   const hover = await wordmarkFeedback(brand);
   expect(hover.branchScaleX).toBe(1);
-  expect(hover.branchScaleX).toBeGreaterThan(idle.branchScaleX!);
+  expect(hover.leafOpacity).toBe(1);
+  expect(hover.branchScaleX! - idle.branchScaleX!).toBeGreaterThanOrEqual(0.6);
+  expectBrandFeedbackTransition(hover);
 
   const layoutBeforePress = await brand.evaluate((element) => {
     const nav = element.closest("nav")!.getBoundingClientRect();
     const actions = element.closest("nav")!.querySelector<HTMLElement>(".wl-topbar-actions")!
       .getBoundingClientRect();
-    return { navWidth: nav.width, navHeight: nav.height, actionsLeft: actions.left };
+    return {
+      nav: { left: nav.left, top: nav.top, width: nav.width, height: nav.height },
+      actions: { left: actions.left, top: actions.top, width: actions.width, height: actions.height },
+    };
   });
+  const transformBeforePress = await brand.evaluate((element) => getComputedStyle(element).transform);
   await page.mouse.down();
-  expect(await brand.evaluate((element) => getComputedStyle(element).transform)).not.toBe("none");
+  const transformDuringPress = await brand.evaluate((element) => getComputedStyle(element).transform);
+  expect(transformDuringPress).not.toBe(transformBeforePress);
   const layoutDuringPress = await brand.evaluate((element) => {
     const nav = element.closest("nav")!.getBoundingClientRect();
     const actions = element.closest("nav")!.querySelector<HTMLElement>(".wl-topbar-actions")!
       .getBoundingClientRect();
-    return { navWidth: nav.width, navHeight: nav.height, actionsLeft: actions.left };
+    return {
+      nav: { left: nav.left, top: nav.top, width: nav.width, height: nav.height },
+      actions: { left: actions.left, top: actions.top, width: actions.width, height: actions.height },
+    };
   });
   expect(layoutDuringPress).toEqual(layoutBeforePress);
   await page.mouse.move(0, 0);
   await page.mouse.up();
+
+});
+
+test("brand wordmark keyboard focus preserves contrast and full feedback", async ({ page }) => {
+  await installUnauthorizedApi(page);
+  await page.goto("/welcome");
+  const brand = page.locator(".wl-page .v2-wordmark");
+  const idle = await wordmarkFeedback(brand);
   await brand.evaluate((element) => (element as HTMLElement).blur());
   await expect(page).toHaveURL(/\/welcome$/);
   await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
@@ -494,42 +535,25 @@ test("brand wordmark has a 44px target and branch feedback", async ({ page }) =>
     .poll(() => brand.evaluate((element) => getComputedStyle(element).color))
     .toBe(focusColor);
 
-  const focus = await brand.evaluate((element) => ({
-    outlineStyle: getComputedStyle(element).outlineStyle,
-    outlineWidth: Number.parseFloat(getComputedStyle(element).outlineWidth),
-    outlineColor: getComputedStyle(element).outlineColor,
-    color: getComputedStyle(element).color,
-    backgroundColor: getComputedStyle(element.closest(".wl-page")!).backgroundColor,
-  }));
+  const focus = await brand.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+      outlineColor: style.outlineColor,
+      wordmarkColor: style.color,
+      backgroundColor: getComputedStyle(element.closest(".wl-page")!).backgroundColor,
+    };
+  });
   expect(focus.outlineStyle).toBe("solid");
   expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
   await expect.poll(() => wordmarkFeedback(brand).then(({ branchScaleX }) => branchScaleX)).toBe(1);
   await expect.poll(() => wordmarkFeedback(brand).then(({ leafOpacity }) => leafOpacity)).toBe(1);
   const focused = await wordmarkFeedback(brand);
   expect(focused.branchScaleX).toBe(1);
-  expect(focused.branchScaleX).toBeGreaterThan(idle.branchScaleX!);
-
-  const contrast = await brand.evaluate((element) => {
-    const rgb = (value: string) =>
-      (value.match(/[\d.]+/g) ?? []).slice(0, 3).map((channel) => Number(channel) / 255);
-    const luminance = (value: string) => {
-      const linear = rgb(value).map((channel) =>
-        channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-      );
-      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-    };
-    const ratio = (foreground: string, background: string) => {
-      const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
-      return (values[0] + 0.05) / (values[1] + 0.05);
-    };
-    const background = getComputedStyle(element.closest(".wl-page")!).backgroundColor;
-    return {
-      outline: ratio(getComputedStyle(element).outlineColor, background),
-      wordmark: ratio(getComputedStyle(element).color, background),
-    };
-  });
-  expect(contrast.outline).toBeGreaterThanOrEqual(3);
-  expect(contrast.wordmark).toBeGreaterThanOrEqual(4.5);
+  expect(focused.leafOpacity).toBe(1);
+  expect(opaqueRgbContrastRatio(focus.outlineColor, focus.backgroundColor)).toBeGreaterThanOrEqual(3);
+  expect(opaqueRgbContrastRatio(focus.wordmarkColor, focus.backgroundColor)).toBeGreaterThanOrEqual(4.5);
 });
 
 for (const width of [320, 375, 650]) {
@@ -594,31 +618,38 @@ test("desktop sidebar wordmark remains inside its bounds in both languages", asy
   await assertInsideSidebar("Career Arbor");
 });
 
-test("reduced motion keeps the focused wordmark static and visible", async ({ page }) => {
+test("reduced motion keeps idle, hover, and focus wordmark feedback static and visible", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await installUnauthorizedApi(page);
   await page.goto("/welcome");
-  const brand = page.getByRole("link", { name: "枝涯" });
+  const brand = page.locator(".wl-page .v2-wordmark");
+  const assertStaticFeedback = async () => {
+    const styles = await brand.evaluate((element) => ({
+      linkTransition: getComputedStyle(element).transitionDuration,
+      branchTransition: getComputedStyle(element, "::after").transitionDuration,
+      leafTransition: getComputedStyle(element, "::before").transitionDuration,
+      branchOpacity: Number.parseFloat(getComputedStyle(element, "::after").opacity),
+      leafOpacity: Number.parseFloat(getComputedStyle(element, "::before").opacity),
+      branchTransform: getComputedStyle(element, "::after").transform,
+      leafTransform: getComputedStyle(element, "::before").transform,
+    }));
+    expect(styles.linkTransition).toBe("0s");
+    expect(styles.branchTransition).toBe("0s");
+    expect(styles.leafTransition).toBe("0s");
+    expect(styles.branchOpacity).toBe(1);
+    expect(styles.leafOpacity).toBe(1);
+    expect(styles.branchTransform).toBe("none");
+    expectPureFixedLeafRotation(styles.leafTransform);
+  };
+
+  await assertStaticFeedback();
+  await brand.hover();
+  await assertStaticFeedback();
   await page.keyboard.press("Tab");
   await expect(brand).toBeFocused();
-
-  const styles = await brand.evaluate((element) => ({
-    transition: getComputedStyle(element).transitionDuration,
-    beforeTransition: getComputedStyle(element, "::before").transitionDuration,
-    afterTransition: getComputedStyle(element, "::after").transitionDuration,
-    outlineStyle: getComputedStyle(element).outlineStyle,
-    afterTransform: getComputedStyle(element, "::after").transform,
-    beforeMatrix: (getComputedStyle(element, "::before").transform.match(/[\d.-]+/g) ?? [])
-      .map(Number),
-  }));
-  expect(styles.transition).toBe("0s");
-  expect(styles.beforeTransition).toBe("0s");
-  expect(styles.afterTransition).toBe("0s");
-  expect(styles.outlineStyle).toBe("solid");
-  expect(styles.afterTransform).toBe("none");
-  expect(styles.beforeMatrix).toHaveLength(6);
-  expect(styles.beforeMatrix[0] ** 2 + styles.beforeMatrix[1] ** 2).toBeCloseTo(1, 5);
-  expect(styles.beforeMatrix[2] ** 2 + styles.beforeMatrix[3] ** 2).toBeCloseTo(1, 5);
-  expect(styles.beforeMatrix[4]).toBeCloseTo(0, 5);
-  expect(styles.beforeMatrix[5]).toBeCloseTo(0, 5);
+  await assertStaticFeedback();
+  expect(await brand.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid");
+  await page.mouse.down();
+  expect(await brand.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
+  await page.mouse.up();
 });

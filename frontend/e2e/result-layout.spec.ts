@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { opaqueRgbContrastRatio } from "./color-contrast";
+
 const globalSource = readFileSync(
   new URL("../src/styles/global.css", import.meta.url),
   "utf8",
@@ -23,20 +25,9 @@ const CANONICAL_TIERS = [
   ["bridge_role", "Bridge Role"],
 ] as const;
 
-function contrastRatio(foreground: string, background: string) {
-  const channels = (color: string) => {
-    const match = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-    if (!match) throw new Error(`Expected an opaque rgb() color, received ${color}`);
-    return match.slice(1).map(Number);
-  };
-  const luminance = (color: string) =>
-    channels(color)
-      .map((channel) => channel / 255)
-      .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
-      .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
-  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
-  return (lighter + 0.05) / (darker + 0.05);
-}
+test("opaque rgb contrast helper preserves the WCAG black-on-white ratio", () => {
+  expect(opaqueRgbContrastRatio("rgb(0, 0, 0)", "rgb(255, 255, 255)")).toBe(21);
+});
 
 async function installResultTable(page: Page, width: number) {
   await page.setViewportSize({ width: width + 40, height: 900 });
@@ -147,7 +138,7 @@ for (const width of [320, 375, 650, 1280]) {
         return { foreground: style.color, background: style.backgroundColor };
       });
       expect.soft(
-        contrastRatio(computedColors.foreground, computedColors.background),
+        opaqueRgbContrastRatio(computedColors.foreground, computedColors.background),
         `${CANONICAL_TIERS[index][1]} badge contrast`,
       ).toBeGreaterThanOrEqual(4.5);
     }

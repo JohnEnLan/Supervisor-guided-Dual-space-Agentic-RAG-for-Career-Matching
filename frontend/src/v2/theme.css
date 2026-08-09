@@ -10,6 +10,8 @@
   --v2-accent-soft: #f6e3da;
   --v2-accent-hover: #a94e2f;
   --v2-ok: #147b58;
+  --v2-tier-now-foreground: #127653;
+  --v2-tier-stretch-foreground: #a04a2d;
   --v2-warn: #9a6500;
   --v2-persona-intent: #147b78;
   --v2-persona-scout: #4a6fa5;
@@ -25,9 +27,54 @@
 .v2-landing { min-height: 100vh; display: flex; flex-direction: column; background: var(--v2-canvas); color: var(--v2-ink); font-family: var(--v2-sans); }
 .v2-topnav { display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(20px, 5vw, 64px); }
 .v2-topnav-actions, .wl-topbar-actions { display: flex; align-items: center; gap: 10px; }
-.v2-wordmark { position: relative; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; color: inherit; font-family: var(--v2-serif); font-size: clamp(1.45rem, 1.25rem + 0.7vw, 1.8rem); font-weight: 680; line-height: 1.05; letter-spacing: 0.005em; text-decoration: none; white-space: nowrap; isolation: isolate; transition: color var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out; }
-.v2-wordmark::after { content: ""; position: absolute; right: 0; bottom: 4px; left: 0; height: 1px; pointer-events: none; background: var(--v2-accent); opacity: 0.42; transform: scaleX(0.28); transform-origin: left center; transition: opacity var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out; }
-.v2-wordmark::before { content: ""; position: absolute; right: -1px; bottom: 5px; width: 8px; height: 5px; pointer-events: none; border-radius: 100% 0 100% 0; background: var(--v2-accent); opacity: 0; transform: rotate(-30deg) scale(0.55); transform-origin: left bottom; transition: opacity var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out; }
+.v2-wordmark {
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  font-family: var(--v2-serif);
+  font-size: clamp(1.45rem, 1.25rem + 0.7vw, 1.8rem);
+  font-weight: 680;
+  line-height: 1.05;
+  letter-spacing: 0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  isolation: isolate;
+  transition: color var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out;
+}
+/* ::after draws the decorative branch that grows on interaction. */
+.v2-wordmark::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 4px;
+  left: 0;
+  height: 1px;
+  pointer-events: none;
+  background: var(--v2-accent);
+  opacity: 0.42;
+  transform: scaleX(0.28);
+  transform-origin: left center;
+  transition: opacity var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out;
+}
+/* ::before draws the decorative leaf at the branch tip. */
+.v2-wordmark::before {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: 5px;
+  width: 8px;
+  height: 5px;
+  pointer-events: none;
+  border-radius: 100% 0 100% 0;
+  background: var(--v2-accent);
+  opacity: 0;
+  transform: rotate(-30deg) scale(0.55);
+  transform-origin: left bottom;
+  transition: opacity var(--v2-brand-motion) ease-out, transform var(--v2-brand-motion) ease-out;
+}
 .v2-wordmark:hover, .v2-wordmark:focus-visible { color: var(--v2-accent-hover); }
 .v2-wordmark:hover::after, .v2-wordmark:focus-visible::after { opacity: 1; transform: scaleX(1); }
 .v2-wordmark:hover::before, .v2-wordmark:focus-visible::before { opacity: 1; transform: rotate(-30deg) scale(1); }
@@ -305,8 +352,8 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.v2-tier.now_fit { border-color: color-mix(in srgb, var(--v2-ok) 28%, transparent); background: #e0f0e9; color: #127653; }
-.v2-tier.stretch_fit { border-color: color-mix(in srgb, var(--v2-accent) 22%, transparent); background: var(--v2-accent-soft); color: #a04a2d; }
+.v2-tier.now_fit { border-color: color-mix(in srgb, var(--v2-ok) 28%, transparent); background: #e0f0e9; color: var(--v2-tier-now-foreground); }
+.v2-tier.stretch_fit { border-color: color-mix(in srgb, var(--v2-accent) 22%, transparent); background: var(--v2-accent-soft); color: var(--v2-tier-stretch-foreground); }
 .v2-tier.bridge_role { border-color: color-mix(in srgb, #5b4a8a 20%, transparent); background: #e8e3f5; color: #5b4a8a; }
 .v2-demo-disclosure { position: absolute; top: 0; right: 0; z-index: 2; }
 .v2-demo-disclosure button { min-height: 26px; padding: 3px 9px; border: 1px dashed #d9b268; border-radius: 999px; background: #fdf1dc; color: #8a6116; cursor: pointer; font: 650 0.72rem/1 var(--v2-sans); }
@@ -375,9 +422,9 @@
   .v2-message-meta { transition: none; }
   .v2-wordmark, .v2-wordmark::before, .v2-wordmark::after { transition: none; }
   .v2-wordmark:active { transform: none; }
-  .v2-wordmark:focus-visible::after { opacity: 1; transform: none; }
-  .v2-wordmark:focus-visible::before { opacity: 1; transform: rotate(-30deg); }
-  /* B3 复审（Codex C9）：折叠箭头/档案按钮/证据箭头的 transform 过渡一并归零 */
+  .v2-wordmark::after, .v2-wordmark:hover::after, .v2-wordmark:focus-visible::after { opacity: 1; transform: none; }
+  .v2-wordmark::before, .v2-wordmark:hover::before, .v2-wordmark:focus-visible::before { opacity: 1; transform: rotate(-30deg); }
+  /* Reduced motion removes transform transitions from remaining disclosure controls. */
   .v2-collapse summary::after, .v2-resume-profile-trigger svg, .v2-evidence-chevron { transition: none; }
   .v2-timeline { scroll-behavior: auto; }
 }
