@@ -232,6 +232,12 @@ test("v2 group-chat journey: login to evidence-backed results", async ({ page })
   await expect(resumeProfile.getByText("Career RAG")).toBeVisible();
   await expect(page.getByText(/📎 重新上传/)).toBeVisible();
   await page.getByRole("button", { name: "确认简历档案" }).click();
+  await expect(page.getByText(/✅ 简历档案已确认/)).toBeVisible();
+  await expect(
+    page.getByText(
+      '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
+    ),
+  ).toBeVisible();
 
   const input = page.getByPlaceholder(/告诉小意你的想法/);
   await input.fill("我想在上海找后端开发");

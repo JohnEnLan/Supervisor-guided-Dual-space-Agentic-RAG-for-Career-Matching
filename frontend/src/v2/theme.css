@@ -79,7 +79,7 @@
 .v2-attach { width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; cursor: pointer; flex: none; align-self: center; }
 .v2-pending-actions { display: flex; gap: 10px; margin-top: 10px; }
 .v2-pending-actions .v2-btn { width: auto; }
-.v2-upload-preview { margin: 10px 0 0; padding: 10px 12px; background: var(--v2-surface-warm); border-left: 3px solid var(--v2-accent); border-radius: 8px; font-size: 0.86rem; color: var(--v2-muted); line-height: 1.6; max-height: 130px; overflow: hidden; }
+.v2-upload-preview { margin: 10px 0 12px; padding: 10px 12px; background: var(--v2-surface-warm); border-left: 3px solid var(--v2-accent); border-radius: 8px; font-size: 0.86rem; color: var(--v2-muted); line-height: 1.6; max-height: 200px; overflow-y: auto; animation: v2previewenter 220ms ease-out both; }
 .v2-parse-quota { color: var(--v2-muted); font-size: 0.85rem; margin: 10px 0; }
 .v2-resume-reupload-hint { color: var(--v2-muted); font-size: 0.82rem; }
 
@@ -129,7 +129,7 @@
 .v2-room-header h1 { font-family: var(--v2-serif); font-size: 1.15rem; margin: 0; }
 .v2-room-header p { margin: 2px 0 0; color: var(--v2-muted); font-size: 0.8rem; }
 .v2-room-status { display: inline-flex; align-items: center; gap: 6px; color: var(--v2-accent); font-size: 0.85rem; }
-.v2-timeline { flex: 1; overflow-y: auto; margin: 0; padding: 22px clamp(16px, 4vw, 48px); list-style: none; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+.v2-timeline { flex: 1; overflow-y: auto; margin: 0; padding: 22px max(clamp(16px, 4vw, 48px), calc((100% - 900px) / 2)); list-style: none; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
 .v2-msg { display: flex; gap: 10px; max-width: 760px; animation: v2messageenter 200ms ease-out both; }
 .v2-msg.mine { align-self: flex-end; flex-direction: row-reverse; }
 .v2-avatar { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--v2-ink); font-size: 0.7rem; font-weight: 700; }
@@ -216,7 +216,7 @@
 .v2-resume-evidence p { margin: 3px 0 0; }
 .v2-resume-empty { color: var(--v2-muted); }
 /* B1 R8：composer 行内元素垂直居中（原 end 对齐在单行态下按钮下坠） */
-.v2-composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 14px clamp(16px, 4vw, 48px) 18px; border-top: 1px solid var(--v2-line); background: var(--v2-surface); }
+.v2-composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 14px max(clamp(16px, 4vw, 48px), calc((100% - 900px) / 2)) 18px; border-top: 1px solid var(--v2-line); background: var(--v2-surface); }
 .v2-consult-slots { grid-column: 1 / -1; display: grid; gap: 8px; }
 .v2-slot-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .v2-slot-chip { min-height: 30px; padding: 4px 10px; border: 1px solid var(--v2-line); border-radius: 999px; background: var(--v2-canvas); color: var(--v2-muted); cursor: pointer; font: 600 0.76rem/1.3 var(--v2-sans); }
@@ -310,6 +310,7 @@
 @keyframes v2progresspulse { 50% { transform: scale(0.78); opacity: 0.55; } }
 @keyframes v2resultflash { from { background: var(--v2-accent-soft); } to { background: transparent; } }
 @keyframes v2messageenter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes v2previewenter { from { opacity: 0; } to { opacity: 1; } }
 
 @media (max-width: 520px) {
   .v2-progress-message .v2-bubble { width: calc(100vw - 76px); min-width: 0; }
@@ -317,7 +318,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin, .v2-msg, .v2-profile-line, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
+  .spin, .v2-msg, .v2-profile-line, .v2-upload-preview, .v2-progress-list li[data-pulsing="true"] .v2-progress-marker, .v2-results.is-highlighted, .v2-job-card.is-highlighted { animation: none; }
   .v2-sidebar { transition: none; }
   .v2-message-meta { transition: none; }
   /* B3 复审（Codex C9）：折叠箭头/档案按钮/证据箭头的 transform 过渡一并归零 */

@@ -424,6 +424,72 @@ describe("resume confirmation profile", () => {
     });
   }
 
+  it("keeps the confirmed profile and state-aware PM welcome in the timeline", async () => {
+    mockWorkbenchApi();
+    renderWorkbench();
+
+    expect(
+      await screen.findByText(
+        "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。你的简历档案已确认，接下来和小意聊清求职方向就能开始匹配。",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("✅ 简历档案已确认（v1），随时可以点右下档案重新查看。"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "查看完整档案" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "确认简历档案" })).not.toBeInTheDocument();
+  });
+
+  it("opens the confirmed consultation with direction guidance when the transcript is empty", async () => {
+    mockWorkbenchApi();
+    renderWorkbench();
+
+    expect(
+      await screen.findByText(
+        '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
+      ),
+    ).toBeVisible();
+  });
+
+  it("hides the confirmed-profile continuity card once a run exists", async () => {
+    mockWorkbenchApi();
+    renderWorkbench("/app/sessions/sess-1?run=run-created");
+
+    expect(
+      await screen.findByText(
+        "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。你的简历档案已确认，接下来和小意聊清求职方向就能开始匹配。",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getAllByText(/欢迎来到职业规划服务群。我是项目经理 PM/),
+    ).toHaveLength(1);
+    expect(screen.queryByText(/✅ 简历档案已确认/)).not.toBeInTheDocument();
+  });
+
+  it("does not repeat the direction guidance when confirmed consultation history exists", async () => {
+    mockWorkbenchApi();
+    vi.mocked(api.consultState).mockResolvedValue(apiFixtures.consultState(1));
+    renderWorkbench();
+
+    expect(await screen.findByText("用户第 1 轮")).toBeVisible();
+    expect(
+      screen.queryByText(
+        '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preserves the exact unconfirmed PM welcome copy", async () => {
+    mockUnconfirmedFullResume();
+    renderWorkbench();
+
+    expect(
+      await screen.findByText(
+        "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（PDF/DOCX/TXT）。",
+      ),
+    ).toBeVisible();
+  });
+
   it("expands all six preview DTO categories inline without dropping their fields", async () => {
     const user = userEvent.setup();
     mockUnconfirmedFullResume();

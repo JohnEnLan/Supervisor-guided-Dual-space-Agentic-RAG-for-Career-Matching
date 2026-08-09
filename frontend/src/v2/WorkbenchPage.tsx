@@ -1276,10 +1276,14 @@ export function WorkbenchPage() {
       <ol className="v2-timeline" ref={timelineRef} onScroll={timelineScroll.onScroll} aria-live="polite">
         <Bubble persona="pm">
           <p>
-            {t(
-              "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（{formats}）。",
-              { formats: t(supportedFormatsLabel(imageUploadEnabled)) },
-            )}
+            {resumeConfirmed
+              ? t(
+                  "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。你的简历档案已确认，接下来和小意聊清求职方向就能开始匹配。",
+                )
+              : t(
+                  "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（{formats}）。",
+                  { formats: t(supportedFormatsLabel(imageUploadEnabled)) },
+                )}
           </p>
         </Bubble>
 
@@ -1509,6 +1513,25 @@ export function WorkbenchPage() {
             >
               {confirmResume.isPending ? t("确认中…") : t("确认简历档案")}
             </button>
+          </Bubble>
+        ) : null}
+
+        {resumeConfirmed && !runId ? (
+          <Bubble persona="intent_consultant" tone="card">
+            <p>
+              {t("✅ 简历档案已确认（v{version}），随时可以点右下档案重新查看。", {
+                version: preview.data.resume_version,
+              })}
+            </p>
+            <ResumeProfileAccordion preview={preview.data} />
+            {consult.isSuccess &&
+            (consult.data.round === 0 || transcript.length === 0) ? (
+              <p>
+                {t(
+                  '现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到"探索方向"，我们一起梳理。',
+                )}
+              </p>
+            ) : null}
           </Bubble>
         ) : null}
 

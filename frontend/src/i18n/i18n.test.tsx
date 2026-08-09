@@ -286,6 +286,37 @@ describe("default context and toggle accessibility", () => {
     expect(themeSource).toMatch(/\.v2-lang-notice\s*\{[^}]*flex:\s*0\s+0\s+auto/s);
     expect(themeSource).toMatch(/@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.v2-lang-notice\s*\{[^}]*width:\s*auto;[^}]*margin:\s*8px\s+14px\s+0/s);
   });
+
+  it("makes long upload previews scrollable with a reduced-motion-safe fade-in", () => {
+    expect(themeSource).toMatch(/\.v2-upload-preview\s*\{[^}]*max-height:\s*200px/s);
+    expect(themeSource).toMatch(/\.v2-upload-preview\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(themeSource).toMatch(
+      /\.v2-upload-preview\s*\{[^}]*animation:\s*v2previewenter\s+220ms\s+ease-out/s,
+    );
+    expect(themeSource).toMatch(/@keyframes\s+v2previewenter\s*\{[^}]*opacity:\s*0/s);
+    expect(themeSource).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.v2-upload-preview[^}]*animation:\s*none/s,
+    );
+  });
+
+  it("aligns the timeline and composer to the same centered 900px content column", () => {
+    const centeredColumn = /calc\(\(100%\s*-\s*900px\)\s*\/\s*2\)/s;
+    expect(themeSource.match(/\.v2-timeline\s*\{[^}]*\}/s)?.[0]).toMatch(centeredColumn);
+    expect(themeSource.match(/\.v2-composer\s*\{[^}]*\}/s)?.[0]).toMatch(centeredColumn);
+
+    const legacyPadding = (width: number) => Math.min(48, Math.max(16, width * 0.04));
+    const centeredPadding = (width: number) =>
+      Math.max(legacyPadding(width), (width - 900) / 2);
+    const contentWidth = (width: number) => width - centeredPadding(width) * 2;
+
+    // Desktop workbench width = viewport width - the existing 268px sidebar.
+    expect(contentWidth(1280 - 268)).toBe(900);
+    expect(contentWidth(1965 - 268)).toBe(900);
+    // At and below the existing mobile breakpoint, the new max() resolves to
+    // the exact legacy clamp() padding, so the mobile layout is unchanged.
+    expect(centeredPadding(900)).toBe(legacyPadding(900));
+    expect(centeredPadding(375)).toBe(legacyPadding(375));
+  });
 });
 
 describe("HomePage language switching", () => {
@@ -572,6 +603,26 @@ describe("L2 business-page language switching", () => {
     expect(await screen.findByRole("heading", { name: "Career Planning Service Room" })).toBeVisible();
     expect(screen.getByText("🎓 Education: 伯明翰大学 · MSc")).toBeVisible();
     expect(screen.queryByText("职业规划服务群")).not.toBeInTheDocument();
+  });
+
+  it("translates the confirmed-profile continuity copy", async () => {
+    renderEnglishWorkbench(true);
+
+    expect(
+      await screen.findByText(
+        "Welcome to your career planning service room. I’m PM, the project manager. Xiaoyi handles your needs, Xiaojian scouts roles, and Xiaoce develops your strategy. I review quality at every stage. Your resume profile is confirmed; next, clarify your job-search direction with Xiaoyi to begin matching.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "✅ Resume profile confirmed (v1). You can reopen it anytime from the profile control in the bottom-right.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Now tell me what you’re looking for—your target role, preferred location, and visa status. One sentence is enough. If you’re unsure, switch to “Explore options” and we’ll work it out together.",
+      ),
+    ).toBeVisible();
   });
 
   it("rebuilds Workbench consult-slot and milestone templates while preserving dynamic values", async () => {

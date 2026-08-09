@@ -248,6 +248,8 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
   "服务进行中": "Service in progress",
   "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。先点下方输入框左侧的 📎 把简历发进群（{formats}）。":
     "Welcome to your career planning service room. I’m PM, the project manager. Xiaoyi handles your needs, Xiaojian scouts roles, and Xiaoce develops your strategy. I review quality at every stage. Use the 📎 beside the input below to share your resume ({formats}).",
+  "欢迎来到职业规划服务群。我是项目经理 PM，小意负责需求、小检负责岗位、小策负责规划，我会在每个环节前后做质量把关。你的简历档案已确认，接下来和小意聊清求职方向就能开始匹配。":
+    "Welcome to your career planning service room. I’m PM, the project manager. Xiaoyi handles your needs, Xiaojian scouts roles, and Xiaoce develops your strategy. I review quality at every stage. Your resume profile is confirmed; next, clarify your job-search direction with Xiaoyi to begin matching.",
   "把简历发到群里，我先帮你整理成标准档案（每条都会标注原文出处）——用下方输入框左侧的 📎 就能发{formats}。上传是免费预览，确认解析后才开始整理。":
     "Send your resume to the room and I’ll organize it into a standard profile with source references for every item. Use the 📎 beside the input below{formats}. Uploading is a free preview; processing starts only after you confirm.",
   "（{formats}）": " ({formats})",
@@ -291,6 +293,10 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
   "确认无误后，我们就开始聊方向！": "Once everything looks right, we’ll discuss your direction.",
   "确认中…": "Confirming…",
   "确认简历档案": "Confirm resume profile",
+  "✅ 简历档案已确认（v{version}），随时可以点右下档案重新查看。":
+    "✅ Resume profile confirmed (v{version}). You can reopen it anytime from the profile control in the bottom-right.",
+  "现在告诉我你的求职方向吧——目标岗位、期望地点、签证情况，一句话说清也行；不确定的话切到\"探索方向\"，我们一起梳理。":
+    "Now tell me what you’re looking for—your target role, preferred location, and visa status. One sentence is enough. If you’re unsure, switch to “Explore options” and we’ll work it out together.",
   "咨询状态加载失败，请重试": "Could not load the consultation state. Please try again.",
   "重试加载咨询状态": "Retry loading the consultation state",
   "第 {round} 轮": "Round {round}",
