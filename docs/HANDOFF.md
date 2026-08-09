@@ -51,6 +51,7 @@ migrate 脚本永远静默）。
 | `docs/product_guide.md` / `docs/code_guide.md` | 产品走读 / 代码走读（锚点 de2fd83，行号会漂移） |
 | `docs/known_issues.md`、`docs/limitations_and_future_work.md` | 已知问题与展望 |
 | `.env.example`、`deploy/env.production.template` | 配置模板（生产模板禁真实邮箱/密钥） |
+| `docs/DEPLOY_FOR_AI.md` | **「上传服务器/部署」的确切含义与分工**——用户说"上线/部署/传服务器"时先读这个 |
 | `README.md` | **本地启动方式**（`start.ps1` / `python -m app.serve` 模块入口）——dev 服务怎么跑起来看这里 |
 | `docs/INDEX.md` | 仓库文档总地图（论文材料、validation 证据链） |
 | `CLAUDE_LANGGRAPH.md` | §5 V2 修订案（裁决链最高层） |
