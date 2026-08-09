@@ -1,5 +1,21 @@
 # Career-RAG 产品使用指南（群聊工作台 V2）
 
+## Language switching / 语言切换（B6-L3）
+
+LanguageToggle is placed in all five implemented locations: the `HomePage` navigation, the `WelcomePage` top bar before **Skip introduction**, the `LandingPage` login card, and `AppShell`'s desktop top-right control plus mobile navigation. Chinese (`zh`) is the default. Only `zh|en` is persisted in browser `localStorage` under `career_rag_lang_v1` and restored after refresh. If storage is unavailable, module memory keeps the selection only for the current loaded application/page lifecycle; it does not survive a full reload while storage remains unavailable. An invalid stored value safely falls back to Chinese.
+
+This is an interface-language setting, not machine translation of user or model content. Its scope has exactly three layers:
+
+1. **L1 — front-end static chrome.** Navigation, controls, labels, empty states, titles, accessibility labels, and fixed templates are dictionary-translated; the document language and title change with the selection.
+2. **L2 — marked deterministic backend copy.** Only status/projection text from approved backend sources and included in the marked dictionary section may be translated by exact key. It is fixed product copy, not a free-form answer.
+3. **L3 — source-isolated content.** The direct fields `user_message`, `assistant_reply`, `next_question`, dynamic `supervisor_notes`, job/resume data fields, JD evidence, and LLM-generated content retain their source text and are never passed through translation. Evidence and user words are therefore not rewritten.
+
+The boundary is intentional: deterministic backend `runMessages` and the fixed resume-progress narration are L2 product copy and are exact-match translated. Every `runMessages` item, including interpolated/dynamic error-detail items, traverses `t(item.text)`; interpolated/dynamic messages are deliberately absent from the exact-match dictionary and therefore fall back unchanged. In contrast, consultation fields and dynamic Supervisor notes remain explicitly outside `t()`, so they are L3 and source-isolated even while the surrounding interface is English.
+
+In English mode the exact notice is: **“Some generated or data-dependent conversation content may remain in Chinese.”** Chinese generated or data-dependent content in an otherwise English interface is expected, not a translation failure.
+
+The dictionary uses exact-match fallback: a missing English key returns the original Chinese key. The system neither guesses nor calls a translation model; this honest fallback also protects unknown backend copy and dynamic content.
+
 > 对齐实现：`deb58c7`。本指南按用户在答辩演示中实际看到的顺序编写，不把内部日志、提示词或数据库状态包装成页面功能。
 
 ## 1. 产品是什么

@@ -1,5 +1,26 @@
 # Career-RAG 代码导览（冻结态 V2）
 
+## B6-L3 i18n navigation and boundaries
+
+1. `frontend/src/i18n/index.tsx` defines `Language` as `zh | en` and implements exact-key `translate`.
+2. `frontend/src/app/providers.tsx` installs `LanguageProvider`; page call sites use `useLanguage()` for `lang`, `t`, and `setLang`.
+3. `LanguageToggle` lives in the same i18n module and exposes current and target languages through its accessible label.
+4. Actual placements are `HomePage` navigation, `WelcomePage` top bar before **Skip introduction**, `LandingPage` login card, and `AppShell`'s `v2-lang-float` desktop top-right plus `v2-lang-mobile` mobile navigation.
+5. Chinese is the default; `LANGUAGE_STORAGE_KEY = "career_rag_lang_v1"` persists only `zh|en` in `localStorage`, with invalid values returning to `zh`.
+6. When storage fails, `memoryLanguage` retains the selection only for the current loaded application/page lifecycle; it does not survive a full reload while storage remains unavailable. `resetLanguageForTests` clears both forms of state.
+7. The provider also updates `document.documentElement.lang` (`zh-CN`/`en`) and the document title.
+8. `frontend/src/i18n/en.ts` holds `EN_TRANSLATIONS`; unknown entries retain the source Chinese key rather than being guessed.
+9. L1 covers front-end-owned static chrome, templates, and accessibility text at `t("…")` call sites.
+10. L2 covers deterministic backend projection copy only; `// BACKEND_SOURCE_KEYS_START` and `// BACKEND_SOURCE_KEYS_END` delimit its checked dictionary section.
+11. L2 approved sources are `app/api/conversation_projector.py` and `app/api/v1/sessions.py`; new L2 copy must update both source and marked dictionary section.
+12. L3 is source-isolated: `user_message`, `assistant_reply`, `next_question`, dynamic `supervisor_notes`, job/resume data fields, JD evidence, and LLM-generated content render directly, never through `t`.
+13. `frontend/src/v2/WorkbenchPage.tsx` sends every `runMessages` item through `t(item.text)`, including interpolated/dynamic error-detail items; those items are deliberately absent from the exact-match dictionary and therefore fall back unchanged. Consultation fields and dynamic Supervisor notes remain explicitly outside `t()`. `frontend/src/features/results/EvidenceDrawer.tsx` directly renders `reason` and `item.content`.
+14. Fixed resume-progress narration is also deterministic L2 product copy and exact-match translated; it is not L3 user/model data.
+15. `frontend/src/v2/AppShell.tsx` shows this English-only notice: `Some generated or data-dependent conversation content may remain in Chinese.`
+16. `scripts/check_i18n_backend_drift.py`, invoked by `tests/test_i18n_backend_drift.py`, guards L2 drift; `frontend/src/i18n/i18n.test.tsx` covers persistence, fallback, desktop/mobile controls, and L3 isolation.
+17. The same i18n test has three static-page no-Han guards: English `HomePage`, `WelcomePage`, and `LandingPage` bodies contain no Han characters.
+18. `frontend/e2e/english-language-journey.spec.ts` covers mobile journey persistence, mobile toggle restoration, document-title changes, and invalid-storage fallback.
+
 > 对齐代码：`deb58c7`。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号。
 
 ## 1. 一分钟理解代码

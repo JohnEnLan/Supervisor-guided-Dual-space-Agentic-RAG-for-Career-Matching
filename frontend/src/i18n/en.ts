@@ -1,4 +1,7 @@
 export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
+  "Some generated or data-dependent conversation content may remain in Chinese.":
+    "Some generated or data-dependent conversation content may remain in Chinese.",
+  "中文": "Chinese",
   "进入应用": "Open the app",
   "当前语言：{current}；切换到 {target}":
     "Current language: {current}; switch to {target}",
@@ -566,4 +569,62 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
   "监控数据暂时不可用。": "Monitoring data is temporarily unavailable.",
   "管理员专用": "Admin only",
   "评估与监控视图": "Evaluation and monitoring views",
+  // BACKEND_SOURCE_KEYS_START
+  "隐式案例空间暂时不可用，本次结果仅依据显式岗位匹配生成。":
+    "The implicit case space is temporarily unavailable, so these results are based only on explicit job matching.",
+  "部分推荐因缺少岗位编号未发布，已从 Results 页结果中移除。":
+    "Some recommendations were not published because they lack job IDs and have been removed from the Results page.",
+  "本次没有通过发布核查的岗位，请调整条件后重新尝试。":
+    "No roles passed the publication check this time. Adjust your criteria and try again.",
+  "部分格式不完整的简历建议未发布，其余可用建议不受影响。":
+    "Some incomplete resume recommendations were not published; the remaining usable recommendations are unaffected.",
+  "部分格式不完整的能力缺口未发布，其余分析不受影响。":
+    "Some incomplete skill-gap items were not published; the remaining analysis is unaffected.",
+  "部分格式不完整的职业路径建议未发布，其余分析不受影响。":
+    "Some incomplete career-path recommendations were not published; the remaining analysis is unaffected.",
+  "本次服务在执行过程中出现异常，请稍后重试或联系支持（代码：run_execution_failed）。":
+    "An error occurred while this service was running. Please try again later or contact support (code: run_execution_failed).",
+  "本次服务已取消（代码：run_cancelled）。": "This service run was cancelled (code: run_cancelled).",
+  "欢迎来到职业规划服务群。我是项目经理 PM，本次由需求顾问小意、岗位顾问小检和规划师小策协作，依次完成需求确认、岗位检索、策略规划与发布核查。我们会如实说明匹配依据与限制，建议不代表 offer 承诺。":
+    "Welcome to the career planning service room. I am PM, the project manager. Xiaoyi, Xiaojian, and Xiaoce will work together on needs confirmation, job retrieval, strategy planning, and publication review. We will explain the matching evidence and limitations honestly; recommendations are not an offer guarantee.",
+  "检索与融合已完成，候选集已提交 PM 进行交接检查。":
+    "Retrieval and fusion are complete. The candidate set has been handed to PM for a handoff check.",
+  "我正在基于候选岗位开展能力缺口分析，并生成有证据约束的简历建议与职业路径；所有建议只引用简历原始证据和用户确认的澄清证据，不补写未经证实的经历。":
+    "I am analyzing skill gaps from the candidate roles and preparing evidence-grounded resume recommendations and a career path. Every recommendation cites only original resume evidence and clarification evidence you confirmed; no unverified experience will be added.",
+  "缺口分析与简历建议已生成，现提交 PM 做最终发布核查。如果你之后想让我基于某个岗位细化简历，可在结果卡提交反馈或开启新咨询。":
+    "The gap analysis and resume recommendations are ready and have been submitted to PM for final publication review. If you later want to tailor your resume for a specific role, submit feedback on its result card or start a new consultation.",
+  "进入最终核查检查点：检查硬约束、JD/简历证据可追溯性、建议可执行性与结果完整性。必要时只允许一次受控重检索或修复。":
+    "Entering the final review checkpoint: checking hard constraints, traceability of JD and resume evidence, whether recommendations are actionable, and result completeness. At most one controlled re-retrieval or repair is allowed if needed.",
+  "核查发现候选覆盖仍需加强，触发了一次受控重检索（有界，最多一次）。":
+    "The review found that candidate coverage needed strengthening, so one controlled re-retrieval was triggered (bounded to one attempt).",
+  "核查发现发布内容需要校正，触发了一次受控修复（有界，最多一次）。":
+    "The review found that published content needed correction, so one controlled repair was triggered (bounded to one attempt).",
+  "我已接手确认单，岗位检索正在执行：适用的 metadata 条件筛选 → BM25/Dense 并行 → job_id 级 RRF 融合。":
+    "I have taken over the confirmed brief. Job retrieval is under way: applicable metadata filters → parallel BM25/Dense → job-ID-level RRF fusion.",
+  "我确认小检接收的约束与确认单一致，现交给小检执行。":
+    "I confirm that Xiaojian received constraints consistent with the brief. Handing the work to Xiaojian now.",
+  "小检接收的检索输入检查带有提示；确认单已交给小检继续执行，提示会保留供后续核查。":
+    "The check of Xiaojian's retrieval input has notes. The brief has been handed to Xiaojian to continue, and the notes will be kept for later review.",
+  "需求确认阶段已完成，确认单已交给小检执行。":
+    "Needs confirmation is complete, and the brief has been handed to Xiaojian to execute.",
+  "本次服务已取消。": "This service run was cancelled.",
+  "本次服务已超过可恢复时限，请重新提交任务。":
+    "This service run has passed its recovery window. Please submit the task again.",
+  "本次服务未能完成，请稍后重试或联系支持。":
+    "This service could not be completed. Please try again later or contact support.",
+  "图片简历，确认解析后将进行视觉识别（约几分钱）":
+    "Image resume. Vision recognition will run after you confirm processing (estimated cost: a few cents).",
+  "收到！我现在就把你的简历完整读一遍～":
+    "Got it! I will read through your resume carefully now.",
+  "这份是扫描件/图片，我用视觉识别读一读～":
+    "This is a scan or image, so I will read it with vision recognition.",
+  "检测到扫描页，我用视觉识别补读一下～":
+    "I detected scanned pages, so I will use vision recognition to fill in the text.",
+  "这份 DOCX 里我没能读到文字，转成 PDF 或图片再传一次就好啦～":
+    "I could not read any text in this DOCX. Convert it to PDF or an image and upload it again.",
+  "正在把这些经历梳理成结构化档案——这一步最花心思，稍等我一下…":
+    "I am organizing these experiences into a structured profile—this step takes the most thought, so please bear with me.",
+  "梳理完成！我逐条核对过：档案里的每个条目都能对回你的简历原文，绝不无中生有。":
+    "Organization complete! I checked each item: every entry in the profile traces back to your original resume, with nothing invented.",
+  // BACKEND_SOURCE_KEYS_END
 };

@@ -115,8 +115,8 @@ export function LanguageToggle({ className = "" }: { className?: string }) {
   const { lang, t, setLang } = useLanguage();
   const nextLanguage = lang === "zh" ? "en" : "zh";
   const label = t("当前语言：{current}；切换到 {target}", {
-    current: lang === "zh" ? "中文" : "English",
-    target: nextLanguage === "zh" ? "中文" : "English",
+    current: lang === "zh" ? t("中文") : "English",
+    target: nextLanguage === "zh" ? t("中文") : "English",
   });
 
   return (
@@ -127,7 +127,7 @@ export function LanguageToggle({ className = "" }: { className?: string }) {
       title={label}
       onClick={() => setLang(nextLanguage)}
     >
-      {nextLanguage === "en" ? "EN" : "中文"}
+      {nextLanguage === "en" ? "EN" : t("中文")}
     </button>
   );
 }

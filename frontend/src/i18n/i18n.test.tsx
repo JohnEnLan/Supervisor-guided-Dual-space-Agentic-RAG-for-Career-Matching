@@ -231,7 +231,7 @@ describe("LanguageProvider", () => {
     expect(document.title).toBe("Career RAG Workbench");
 
     await user.click(
-      screen.getByRole("button", { name: "Current language: English; switch to 中文" }),
+      screen.getByRole("button", { name: "Current language: English; switch to Chinese" }),
     );
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(document.title).toBe(ZH_TITLE);
@@ -279,6 +279,12 @@ describe("default context and toggle accessibility", () => {
     expect(themeSource).toContain("margin-left: auto");
     expect(themeSource).toMatch(/\.v2-login-card\s*\{[^}]*position:\s*relative/s);
     expect(themeSource).toMatch(/\.v2-login-lang\s*\{[^}]*position:\s*absolute/s);
+  });
+
+  it("reserves desktop flow space for the language notice and resets it on mobile", () => {
+    expect(themeSource).toMatch(/\.v2-lang-notice\s*\{[^}]*margin:\s*56px\s+clamp\(16px,\s*4vw,\s*48px\)\s+8px/s);
+    expect(themeSource).toMatch(/\.v2-lang-notice\s*\{[^}]*flex:\s*0\s+0\s+auto/s);
+    expect(themeSource).toMatch(/@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.v2-lang-notice\s*\{[^}]*width:\s*auto;[^}]*margin:\s*8px\s+14px\s+0/s);
   });
 });
 
@@ -347,7 +353,65 @@ describe("LandingPage language switching", () => {
   });
 });
 
+describe("static English-page Han guards", () => {
+  it("renders HomePage without Han characters in English", async () => {
+    const user = userEvent.setup();
+    renderHomePage();
+
+    await user.click(
+      screen.getByRole("button", { name: "当前语言：中文；切换到 English" }),
+    );
+
+    expect(document.body.textContent).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
+  it("renders WelcomePage without Han characters in English", async () => {
+    const user = userEvent.setup();
+    renderWelcomePage();
+
+    await user.click(
+      screen.getByRole("button", { name: "当前语言：中文；切换到 English" }),
+    );
+
+    expect(document.body.textContent).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
+  it("renders LandingPage without Han characters in English", async () => {
+    const user = userEvent.setup();
+    renderLandingPage();
+
+    await user.click(
+      screen.getByRole("button", { name: "当前语言：中文；切换到 English" }),
+    );
+
+    expect(document.body.textContent).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+});
+
 describe("AppShell language switching", () => {
+  it("shows the generated-content language notice only in English", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+    await screen.findByText("Test User");
+
+    const notice = "Some generated or data-dependent conversation content may remain in Chinese.";
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "当前语言：中文；切换到 English",
+      }),
+    );
+    expect(screen.getByText(notice)).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Current language: English; switch to Chinese",
+      }),
+    );
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
+  });
+
   it("provides desktop and mobile controls and translates shell-owned copy", async () => {
     const user = userEvent.setup();
     renderAppShell();

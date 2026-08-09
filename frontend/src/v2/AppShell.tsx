@@ -26,7 +26,7 @@ function sessionDateLabel(updatedAt: string): string {
 
 export function AppShell() {
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
@@ -249,6 +249,11 @@ export function AppShell() {
       </aside>
       <main className="v2-main">
         <LanguageToggle className="v2-lang-float" />
+        {lang === "en" ? (
+          <p className="v2-notice v2-lang-notice">
+            {t("Some generated or data-dependent conversation content may remain in Chinese.")}
+          </p>
+        ) : null}
         <Outlet
           context={{
             startNewConsultation: () => createSession.mutate(),
