@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { apiFixtures } from "../src/test/apiFixtures";
 
@@ -31,6 +31,23 @@ async function installAuthenticatedShellApi(page: Page) {
       contentType: "application/json",
       body: JSON.stringify(body),
     });
+  });
+}
+
+async function wordmarkFeedback(brand: Locator) {
+  return brand.evaluate((element) => {
+    const branchTransform = getComputedStyle(element, "::after").transform;
+    return {
+      branchScaleX: branchTransform === "none" ? 1 : new DOMMatrixReadOnly(branchTransform).a,
+      leafOpacity: Number.parseFloat(getComputedStyle(element, "::before").opacity),
+    };
+  });
+}
+
+async function wordmarkFontSizeInRem(brand: Locator) {
+  return brand.evaluate((element) => {
+    const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return Number.parseFloat(getComputedStyle(element).fontSize) / rootFontSize;
   });
 }
 
@@ -288,26 +305,28 @@ test("mobile drawer keeps the new consultation action aligned with session rows"
 
 test("brand wordmark has a 44px target and branch feedback", async ({ page }) => {
   await installUnauthorizedApi(page);
+  await page.setViewportSize({ width: 320, height: 812 });
   await page.goto("/welcome");
 
   const brand = page.getByRole("link", { name: "枝涯" });
+  const narrowFontSize = await wordmarkFontSizeInRem(brand);
+  expect(narrowFontSize).toBeGreaterThanOrEqual(1.45);
+  expect(narrowFontSize).toBeLessThanOrEqual(1.8);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const desktopFontSize = await wordmarkFontSizeInRem(brand);
+  expect(desktopFontSize).toBeGreaterThanOrEqual(1.45);
+  expect(desktopFontSize).toBeLessThanOrEqual(1.8);
+  expect(desktopFontSize).toBeGreaterThan(narrowFontSize);
+
   const target = await brand.boundingBox();
   expect(target).not.toBeNull();
   expect(target!.height).toBeGreaterThanOrEqual(44);
 
-  const idle = await brand.evaluate((element) => ({
-    line: getComputedStyle(element, "::after").transform,
-    leaf: getComputedStyle(element, "::before").opacity,
-  }));
+  const idle = await wordmarkFeedback(brand);
   await brand.hover();
-  await expect
-    .poll(() =>
-      brand.evaluate((element) => ({
-        line: getComputedStyle(element, "::after").transform,
-        leaf: getComputedStyle(element, "::before").opacity,
-      })),
-    )
-    .not.toEqual(idle);
+  await expect.poll(() => wordmarkFeedback(brand).then(({ branchScaleX }) => branchScaleX)).toBe(1);
+  await expect.poll(() => wordmarkFeedback(brand).then(({ leafOpacity }) => leafOpacity)).toBe(1);
 
   const layoutBeforePress = await brand.evaluate((element) => {
     const nav = element.closest("nav")!.getBoundingClientRect();
@@ -329,30 +348,37 @@ test("brand wordmark has a 44px target and branch feedback", async ({ page }) =>
   await brand.evaluate((element) => (element as HTMLElement).blur());
   await expect(page).toHaveURL(/\/welcome$/);
   await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
-  await expect
-    .poll(() =>
-      brand.evaluate((element) => ({
-        line: getComputedStyle(element, "::after").transform,
-        leaf: getComputedStyle(element, "::before").opacity,
-      })),
-    )
-    .toEqual(idle);
+  await expect.poll(() => wordmarkFeedback(brand)).toEqual(idle);
   await page.reload();
   await page.keyboard.press("Tab");
   await expect(brand).toBeFocused();
+
+  const focusColor = await brand.evaluate((element) => {
+    const expected = getComputedStyle(document.documentElement)
+      .getPropertyValue("--v2-accent-hover")
+      .trim();
+    const probe = document.createElement("span");
+    probe.style.color = expected;
+    document.body.append(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved;
+  });
+  await expect
+    .poll(() => brand.evaluate((element) => getComputedStyle(element).color))
+    .toBe(focusColor);
+
   const focus = await brand.evaluate((element) => ({
     outlineStyle: getComputedStyle(element).outlineStyle,
     outlineWidth: Number.parseFloat(getComputedStyle(element).outlineWidth),
     outlineColor: getComputedStyle(element).outlineColor,
     color: getComputedStyle(element).color,
     backgroundColor: getComputedStyle(element.closest(".wl-page")!).backgroundColor,
-    line: getComputedStyle(element, "::after").transform,
   }));
   expect(focus.outlineStyle).toBe("solid");
   expect(focus.outlineWidth).toBeGreaterThanOrEqual(2);
-  await expect
-    .poll(() => brand.evaluate((element) => getComputedStyle(element, "::after").transform))
-    .not.toBe(idle.line);
+  await expect.poll(() => wordmarkFeedback(brand).then(({ branchScaleX }) => branchScaleX)).toBe(1);
+  await expect.poll(() => wordmarkFeedback(brand).then(({ leafOpacity }) => leafOpacity)).toBe(1);
 
   const contrast = await brand.evaluate((element) => {
     const rgb = (value: string) =>
@@ -398,8 +424,8 @@ for (const width of [320, 375, 650]) {
         };
       });
       expect(boxes.brand.bottom - boxes.brand.top).toBeGreaterThanOrEqual(44);
-      expect(boxes.menu.right).toBeLessThanOrEqual(boxes.brand.left);
-      expect(boxes.brand.right).toBeLessThanOrEqual(boxes.language.left);
+      expect(boxes.brand.left - boxes.menu.right).toBeGreaterThanOrEqual(4);
+      expect(boxes.language.left - boxes.brand.right).toBeGreaterThanOrEqual(4);
       expect(boxes.language.right).toBeLessThanOrEqual(width);
     };
 
