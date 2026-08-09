@@ -1,6 +1,6 @@
 # Career-RAG 代码导览（冻结态 V2）
 
-> 对齐代码：`eada18b`。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号。
+> 对齐代码：`deb58c7`。这份文档面向答辩走读：先说用户动作，再指出后端数据如何流动，最后给出可以当场打开的文件与行号。
 
 ## 1. 一分钟理解代码
 
@@ -243,7 +243,27 @@ RAPTOR 离线建树入口是 `app/retrieval/raptor.py:300` `build_raptor_index`�
 
 所有请求统一经过 `frontend/src/api/client.ts:76`，方法封装在 `frontend/src/api/queries.ts:44`。`frontend/src/api/generated.ts` 由 OpenAPI 快照生成，不能手工维护。
 
-## 14. 评估与测试如何读
+## 14. B5：用量计量、管理员鉴权与 R9 收口
+
+`app/llm/usage_context.py:35` 用 `ContextVar` 提供可嵌套的异步 `usage_scope(user_id, session_id, purpose)`；内层可只改 purpose，退出后恢复外层。DeepSeek、Qwen Embedding、Qwen VL 与 reranker 都通过模块属性调用 `record_llm_usage`，缺失或畸形 usage 只告警，不改变正常业务结果。
+
+计量写入是 fail-open：`app/llm/usage_context.py:143` 在连续 5 次失败后静默 300 秒，到期只放一个探针；成功完全恢复，失败重新熔断，`CancelledError` 始终穿透。consult、normalize 和 run 在任务边界建 scope；`app/api/v1/runs.py:235` 的 wrapper 只按 `run_id` 联查一次属主，归因查询失败仍调用真实 executor，LangGraph async node、`BackgroundTasks` 与 `asyncio.to_thread` 继承同一上下文。
+
+`app/api/auth/sessions.py:74` 给新会话 JWT 写入服务端验证通道产生的 `idp=email|phone`；旧 token 可缺省，非法枚举整票 401。`app/api/auth/deps.py:88` 的 `require_admin` 每请求核对四层：已登录、当前 token 的 `idp=email`、单条数据库快照中的实时 `is_admin`、该用户任一 email 身份命中 `ADMIN_EMAILS`；token_version 校验先于管理员身份查询。
+
+管理员 API 全部由 `app/api/v1/admin.py:26` 的 router 级 `require_admin` 保护：
+
+| API | 用途 |
+|---|---|
+| `GET /api/v1/admin/overview` | 用户/登录/会话/咨询/run 与 token 汇总。 |
+| `GET /api/v1/admin/users?page=` | 分页用户和最近简历摘要。 |
+| `GET /api/v1/admin/users/{user_id}/resume` | 跨用户读取最新完整结构化简历。 |
+| `GET /api/v1/admin/runs/{run_id}/explain` | 读取终态 run 的公开 trace，不受 evaluation capability 门控。 |
+| `POST /api/v1/admin/sessions/{session_id}/reset-parse-count` | 行锁内清解析次数，并收敛重启遗留 queued。 |
+
+监控端点保留在 `app/api/v1/monitoring.py`，依赖顺序固定为 `require_monitoring_enabled` 后 `require_admin`，所以关 flag 时统一 404 且零身份查询。前端 `/admin` 壳在 `frontend/src/v2/AdminPage.tsx:116` 做无闪现 `/me` 门禁；Dashboard/用户/评估监控分别在 `frontend/src/v2/admin/`。`frontend/src/app/router.tsx:45` 把 R9 三条旧 settings 路径重定向到 `/admin` 对应 tab，并保留 evaluation 的 `runId` 查询参数。
+
+## 15. 评估与测试如何读
 
 `app/evaluation/metrics.py:12` `evaluate_rankings` 计算 P@K、R@K、MRR、NDCG；`:141` 核验硬过滤；`:169` 检查解释是否引用本岗位证据。演示评估入口是 `scripts/evaluate_demo_corpus.py:136`。
 
@@ -251,7 +271,7 @@ RAPTOR 离线建树入口是 `app/retrieval/raptor.py:300` `build_raptor_index`�
 
 检索指标只引用 `data/eval/demo_corpus_cross_v1/` 与 `docs/validation/2026-08-06-cross-encoder-ablation.md`：15 条查询、852 个 LLM 池化判定对；双开结果 P@5 `0.920`、R@10 `0.323`、MRR `1.000`、NDCG@5 `0.939`。标签未经人工复核，Recall 是池内口径，不能解释成个人求职成功率。
 
-## 15. 答辩时最值得现场打开的五处
+## 16. 答辩时最值得现场打开的五处
 
 1. `app/db/state_store.py:207`：一次原子更新如何建立新 generation 并作废旧确认。
 2. `app/api/v1/sessions.py:816`：用户澄清如何变成逐字保存的 `C###` 证据。

@@ -169,6 +169,24 @@ grep -q '^RESUME_OCR_ENABLED=' app/.env || printf '\n%s\n' \
 # 得到 409 resume_ocr_disabled（不扣额度），引导用户重传文字版。
 
 # 本批无需 migrate（B4 未新增数据库迁移）
+# B5 必须应用 0011；migrate 静默退出仍是正常语义，以 schema_migrations 为准。
+(cd /opt/career-rag/app && sudo -u career ../venv/bin/python -m app.db.migrate)
+sudo -u postgres psql -d career_rag -c \
+  "SELECT name, applied_at FROM schema_migrations WHERE name = '0011_llm_usage_and_product_events.sql';"
+
+# B5 的管理员邮箱与三个开关逐键幂等追加；执行前替换邮箱占位符。
+# 分别守卫可兼容“已有 ADMIN_EMAILS、尚无三个 flag”的增量环境；若已有
+# ADMIN_EMAILS 空行，直接编辑该行，守卫不会覆盖现值。
+grep -q '^ADMIN_EMAILS=' app/.env || printf '\n%s\n' \
+  'ADMIN_EMAILS=<<管理员登录邮箱>>' >> app/.env
+grep -q '^EVALUATION_CAPABILITY_ENABLED=' app/.env || printf '%s\n' \
+  'EVALUATION_CAPABILITY_ENABLED=true' >> app/.env
+grep -q '^MONITORING_ENABLED=' app/.env || printf '%s\n' \
+  'MONITORING_ENABLED=true' >> app/.env
+grep -q '^MONITORING_ADMIN_MODE=' app/.env || printf '%s\n' \
+  'MONITORING_ADMIN_MODE=true' >> app/.env
+
+# ADMIN_EMAILS 与三个 flag 都由进程启动时的 settings 读取，改完必须重启。
 systemctl restart career-rag && sleep 8
 curl -s http://127.0.0.1:8000/api/v1/capabilities   # 吐 JSON 才继续
 
@@ -181,6 +199,34 @@ mv -Tf /opt/career-rag/current.tmp /opt/career-rag/frontend-current
 # ③ Caddyfile 有变更时：先校验再热加载
 cp /opt/career-rag/Caddyfile /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+```
+
+### B5 运维手册
+
+- `ADMIN_EMAILS` 是启动时加载的配置；增加或移除邮箱后必须重启
+  `career-rag` 才生效。新增管理员在重启后用白名单 email 重新登录，登录事务
+  才会同步 `is_admin`；移除并重启后，该账号下一次管理员请求返回 403。
+- 管理员必须使用 email OTP 登录；phone 会话、旧 token 缺少 `idp`、数据库
+  `is_admin=false`、或账号没有任一邮箱身份命中白名单，都会 fail-closed。
+- 解析额度 reset 端点只把 `resume_parse_count` 清零；若命中重启遗留的
+  `resume_queued`，还会置 `resume_error` 并清上传内容，**端点本身从不重排队**。
+
+**B3 红线（原文收录）**：若未来任何救济路径把**同一代**重新置回
+`resume_queued`（当前端点不这么做；正常流每代至多一次入队），必须连带
+`DELETE FROM resume_intake_progress WHERE session_id=$1 AND generation=$2`——
+该代曾达终态时残留的 `seq=100` 行会让新任务的终态 CAS 永久回滚、mark 兜底
+同撞 PK，会话卡死在 queued。
+
+break-glass 直接改 `users.is_admin` 时，必须在**同一条 UPDATE** 同步递增
+`token_version`，使旧票下一请求 401；不要只改布尔列：
+
+```sql
+UPDATE users
+SET is_admin = TRUE, token_version = token_version + 1
+WHERE user_id = '<<user_uuid>>'::uuid;
+
+-- 紧急吊销全部在票会话（所有账号都需重新登录）：
+UPDATE users SET token_version = token_version + 1;
 ```
 
 已打开的旧标签页刷新即恢复（index.html 为 no-store，新访客即刻拿新版）。
