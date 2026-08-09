@@ -14,7 +14,9 @@ function authAnd(page: Page, handler: (path: string, route: Route) => Promise<vo
   });
 }
 
-test("renders a privacy-safe read-only monitoring board", async ({ page }) => {
+// B5 R9：旧监控路由重定向进管理控制台；监控板只读且经 admin 保护的
+// /api/v1/monitoring/*（用户侧 capability 旗不再门控 admin 视图）。
+test("old monitoring route redirects to the admin read-only board", async ({ page }) => {
   await authAnd(page, async (path, route) => {
     const json = (body: unknown) =>
       route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
@@ -24,21 +26,21 @@ test("renders a privacy-safe read-only monitoring board", async ({ page }) => {
     return json(apiFixtures.recentRuns());
   });
   await page.goto("/app/settings/monitoring");
-  await expect(page.getByRole("heading", { name: "运行效果与工作量监控" })).toBeVisible();
+  await page.waitForURL(/\/admin\?tab=monitoring/);
+  await expect(page.getByRole("heading", { name: "运行监控" })).toBeVisible();
   await expect(page.getByText("JD 证据覆盖率")).toBeVisible();
   await expect(page.getByText("run-safe-001")).toBeVisible();
   await expect(page.getByRole("button", { name: /删除|修改/ })).toHaveCount(0);
 });
 
-test("does not call monitoring data routes when capability is disabled", async ({ page }) => {
-  let dataCalls = 0;
+test("admin monitoring board degrades read-only when data routes return 404", async ({ page }) => {
   await authAnd(page, (path, route) => {
     if (path.endsWith("/capabilities"))
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(apiFixtures.capabilities()) });
-    dataCalls += 1;
     return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "disabled" }) });
   });
   await page.goto("/app/settings/monitoring");
-  await expect(page.getByRole("heading", { name: "运行监控未开启" })).toBeVisible();
-  expect(dataCalls).toBe(0);
+  await page.waitForURL(/\/admin\?tab=monitoring/);
+  await expect(page.getByText("监控数据暂时不可用。")).toBeVisible();
+  await expect(page.getByRole("button", { name: /删除|修改/ })).toHaveCount(0);
 });
