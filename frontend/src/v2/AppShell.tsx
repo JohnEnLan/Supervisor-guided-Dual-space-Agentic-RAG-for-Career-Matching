@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, LogOut, Menu, MessageSquarePlus, ScrollText, UserRound, X } from "lucide-react";
+import { LogOut, Menu, MessageSquarePlus, ShieldCheck, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
@@ -216,14 +216,12 @@ export function AppShell() {
             <UserRound size={16} />
             {me.data?.display_name || "我的档案"}
           </NavLink>
-          <NavLink to="/app/settings/evaluation" onClick={closeNavigation}>
-            <ScrollText size={16} />
-            评估（答辩）
-          </NavLink>
-          <NavLink to="/app/settings/monitoring" onClick={closeNavigation}>
-            <BarChart3 size={16} />
-            监控（答辩）
-          </NavLink>
+          {me.data?.is_admin === true ? (
+            <NavLink to="/admin" onClick={closeNavigation}>
+              <ShieldCheck size={16} />
+              管理控制台
+            </NavLink>
+          ) : null}
           <button
             type="button"
             onClick={() => {

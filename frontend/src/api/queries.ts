@@ -4,6 +4,10 @@ import { apiRequest, jsonRequest, uploadRequest } from "./client";
 type Schemas = components["schemas"];
 
 export type Capabilities = Schemas["CapabilitiesResponse"];
+export type AdminOverview = Schemas["AdminOverviewResponse"];
+export type AdminResetParseCount = Schemas["AdminResetParseCountResponse"];
+export type AdminUserResume = Schemas["AdminUserResumeResponse"];
+export type AdminUsersPage = Schemas["AdminUsersPageResponse"];
 export type SessionCreateRequest = Schemas["SessionCreateRequest"];
 export type Session = Schemas["SessionResponse"];
 export type ResumeAccepted = Schemas["ResumeAcceptedResponse"];
@@ -46,6 +50,14 @@ export type SkillGap = Schemas["SkillGap"];
 const id = (value: string): string => encodeURIComponent(value);
 
 export const api = {
+  adminOverview: (): Promise<AdminOverview> => apiRequest("/admin/overview"),
+  adminUsers: (page = 1): Promise<AdminUsersPage> => apiRequest(`/admin/users?page=${page}`),
+  adminUserResume: (userId: string): Promise<AdminUserResume> =>
+    apiRequest(`/admin/users/${id(userId)}/resume`),
+  adminRunExplain: (runId: string): Promise<RunExplain> =>
+    apiRequest(`/admin/runs/${id(runId)}/explain`),
+  adminResetParseCount: (sessionId: string): Promise<AdminResetParseCount> =>
+    apiRequest(`/admin/sessions/${id(sessionId)}/reset-parse-count`, { method: "POST" }),
   capabilities: (): Promise<Capabilities> => apiRequest("/capabilities"),
   createSession: (body: SessionCreateRequest): Promise<Session> =>
     jsonRequest("/sessions", "POST", body),

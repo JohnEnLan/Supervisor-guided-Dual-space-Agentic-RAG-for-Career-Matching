@@ -1,6 +1,10 @@
 import type { components } from "../api/generated";
 
 type Schemas = components["schemas"];
+type AdminOverview = Schemas["AdminOverviewResponse"];
+type AdminResetParseCount = Schemas["AdminResetParseCountResponse"];
+type AdminUserResume = Schemas["AdminUserResumeResponse"];
+type AdminUsersPage = Schemas["AdminUsersPageResponse"];
 type Capabilities = Schemas["CapabilitiesResponse"];
 type ConsultFinalize = Schemas["ConsultBriefDraftResponse"];
 type ClarificationProgress = Schemas["ClarificationProgress"];
@@ -20,6 +24,7 @@ type ResumeUploaded = Schemas["ResumeUploadedResponse"];
 type ResumeConfirm = Schemas["ResumeConfirmResponse"];
 type ResumePreview = Schemas["ResumePreviewResponse"];
 type RunConversation = Schemas["RunConversationResponse"];
+type RunExplain = Schemas["RunExplainResponse"];
 type RunResult = Schemas["RunResultResponse"];
 type RunStatus = Schemas["RunStatusResponse"];
 type Session = Schemas["SessionResponse"];
@@ -129,6 +134,87 @@ export const apiFixtures = {
       last_login_at: null,
       created_at: "2026-08-01T08:00:00Z",
     }) satisfies Me,
+
+  adminOverview: (overrides: Partial<AdminOverview> = {}) =>
+    ({
+      users_total: 42,
+      logins_today: 5,
+      logins_7d: 19,
+      logins_30d: 31,
+      sessions_total: 76,
+      consult_turns_total: 114,
+      runs_total: 38,
+      tokens_by_day: [
+        { date: "2026-08-08", total_tokens: 1200 },
+        { date: "2026-08-09", total_tokens: 1800 },
+      ],
+      tokens_by_model: [
+        {
+          model: "deepseek-v4-flash",
+          prompt_tokens: 1_000_000,
+          completion_tokens: 500_000,
+          total_tokens: 1_500_000,
+        },
+      ],
+      ...overrides,
+    }) satisfies AdminOverview,
+
+  adminUsers: (overrides: Partial<AdminUsersPage> = {}) =>
+    ({
+      items: [
+        {
+          user_id: "user-e2e-0001",
+          email: "student@example.com",
+          created_at: "2026-08-01T08:00:00Z",
+          last_login_at: "2026-08-09T08:30:00Z",
+          session_count: 2,
+          resume_name: "张三",
+          resume_phone: null,
+          resume_school: "Demo University",
+          resume_degree: "MSc",
+        },
+      ],
+      page: 1,
+      page_size: 20,
+      has_more: false,
+      ...overrides,
+    }) satisfies AdminUsersPage,
+
+  adminUserResume: (overrides: Partial<AdminUserResume> = {}) =>
+    ({
+      user_id: "user-e2e-0001",
+      session_id: "sess-e2e-1",
+      resume_state: {
+        contact: { name: "张三", phone: "13800000000", email: "student@example.com" },
+        skills: ["Python", "SQL"],
+      },
+      ...overrides,
+    }) satisfies AdminUserResume,
+
+  adminResetParseCount: (overrides: Partial<AdminResetParseCount> = {}) =>
+    ({
+      session_id: "sess-e2e-1",
+      resume_parse_count: 0,
+      status: "resume_uploaded",
+      ...overrides,
+    }) satisfies AdminResetParseCount,
+
+  adminRunExplain: (runId = "run-e2e-1") =>
+    ({
+      run_id: runId,
+      fusion: { implicit_max_weight: 0.2 },
+      rank_trace: [
+        {
+          job_id: "job-e2e-1",
+          explicit_rank: 1,
+          implicit_rank: 2,
+          final_rank: 1,
+          implicit_weight: 0.2,
+        },
+      ],
+      recovery_events: [],
+      stage_durations_ms: { retrieval: 1800 },
+    }) satisfies RunExplain,
 
   profile: () => ({ profile: {}, updated_at: updatedAt }) satisfies MeProfile,
 

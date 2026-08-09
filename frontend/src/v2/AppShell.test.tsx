@@ -11,14 +11,16 @@ import { AppShell } from "./AppShell";
 function renderShell({
   sessionItems = [],
   hasMore = false,
+  isAdmin = false,
 }: {
   sessionItems?: { session_id: string; status: string; updated_at: string }[];
   hasMore?: boolean;
+  isAdmin?: boolean;
 } = {}) {
   vi.spyOn(api, "me").mockResolvedValue({
     user_id: "user-1",
     status: "active",
-    is_admin: false,
+    is_admin: isAdmin,
     display_name: "测试用户",
     created_at: "2026-08-06T10:00:00Z",
   });
@@ -142,6 +144,26 @@ describe("AppShell navigation truth", () => {
     const dialog = await screen.findByRole("dialog", { name: "额度已用完" });
     expect(dialog).toHaveTextContent("当前账户的咨询额度已用完");
     expect(dialog).not.toHaveTextContent(/3 次|¥|数字上限/);
+  });
+
+  it("removes examiner links and shows the admin entry only to administrators", async () => {
+    renderShell({ isAdmin: true });
+
+    expect(await screen.findByRole("link", { name: "管理控制台" })).toHaveAttribute(
+      "href",
+      "/admin",
+    );
+    expect(screen.queryByRole("link", { name: "评估（答辩）" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "监控（答辩）" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose the admin entry to regular users", async () => {
+    renderShell();
+
+    await screen.findByText("测试用户");
+    expect(screen.queryByRole("link", { name: "管理控制台" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "评估（答辩）" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "监控（答辩）" })).not.toBeInTheDocument();
   });
 
   it("traps quota-dialog focus, closes on Escape, and restores the trigger", async () => {

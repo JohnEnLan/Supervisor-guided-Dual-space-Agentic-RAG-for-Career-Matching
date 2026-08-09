@@ -1,7 +1,6 @@
-import { Navigate, createBrowserRouter, useOutletContext } from "react-router-dom";
+import { Navigate, createBrowserRouter, useOutletContext, useParams } from "react-router-dom";
 
-import { EvaluationRunPage } from "../features/evaluation/EvaluationRunPage";
-import { MonitoringPage } from "../features/monitoring/MonitoringPage";
+import { AdminPage } from "../v2/AdminPage";
 import { AppShell, type AppShellOutletContext } from "../v2/AppShell";
 import { HomePage } from "../v2/HomePage";
 import { hasSeenIntro } from "../v2/introSeen";
@@ -43,6 +42,13 @@ function EmptyWorkbench() {
   );
 }
 
+function LegacyEvaluationRedirect() {
+  const { runId } = useParams();
+  const search = new URLSearchParams({ tab: "evaluation" });
+  if (runId) search.set("runId", runId);
+  return <Navigate replace to={{ pathname: "/admin", search: `?${search.toString()}` }} />;
+}
+
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -60,6 +66,23 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />,
   },
   {
+    path: "/admin",
+    element: <AdminPage />,
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/app/settings/evaluation",
+    element: <LegacyEvaluationRedirect />,
+  },
+  {
+    path: "/app/settings/evaluation/:runId",
+    element: <LegacyEvaluationRedirect />,
+  },
+  {
+    path: "/app/settings/monitoring",
+    element: <Navigate replace to="/admin?tab=monitoring" />,
+  },
+  {
     path: "/app",
     element: <AppShell />,
     errorElement: <RouteError />,
@@ -67,9 +90,6 @@ export const router = createBrowserRouter([
       { index: true, element: <EmptyWorkbench /> },
       { path: "sessions/:sessionId", element: <WorkbenchPage /> },
       { path: "profile", element: <ProfilePage /> },
-      { path: "settings/evaluation", element: <EvaluationRunPage /> },
-      { path: "settings/evaluation/:runId", element: <EvaluationRunPage /> },
-      { path: "settings/monitoring", element: <MonitoringPage /> },
     ],
   },
   { path: "*", element: <Navigate replace to="/" /> },

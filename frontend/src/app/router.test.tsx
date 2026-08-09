@@ -85,3 +85,40 @@ describe("empty workbench", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/app/sessions/sess-empty-start"));
   });
 });
+
+describe("R9 legacy admin route migration", () => {
+  function renderRouter() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it.each([
+    ["/app/settings/evaluation", "?tab=evaluation"],
+    ["/app/settings/monitoring", "?tab=monitoring"],
+  ])("redirects %s to the matching admin tab", async (legacyPath, expectedSearch) => {
+    vi.mocked(api.me).mockReturnValue(new Promise(() => undefined));
+    await router.navigate(legacyPath);
+    renderRouter();
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin"));
+    expect(router.state.location.search).toBe(expectedSearch);
+  });
+
+  it("preserves the run id when redirecting an evaluation detail route", async () => {
+    vi.mocked(api.me).mockReturnValue(new Promise(() => undefined));
+    await router.navigate("/app/settings/evaluation/run%20with%20spaces");
+    renderRouter();
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin"));
+    expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toEqual({
+      tab: "evaluation",
+      runId: "run with spaces",
+    });
+  });
+});
