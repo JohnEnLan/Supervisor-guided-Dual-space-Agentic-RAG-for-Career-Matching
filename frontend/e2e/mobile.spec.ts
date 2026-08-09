@@ -67,7 +67,12 @@ test("375px journey keeps navigation, consultation, and results usable", async (
   await expect(drawer).toBeVisible();
   await expect(drawer.getByRole("button", { name: "关闭导航" })).toBeFocused();
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
-  await page.getByRole("button", { name: "关闭导航遮罩" }).click();
+  const backdrop = page.getByRole("button", { name: "关闭导航遮罩" });
+  const backdropBox = await backdrop.boundingBox();
+  expect(backdropBox).not.toBeNull();
+  await backdrop.click({
+    position: { x: backdropBox!.width - 8, y: backdropBox!.height / 2 },
+  });
   await expect(drawer).not.toBeVisible();
   await expect(menuButton).toBeFocused();
 

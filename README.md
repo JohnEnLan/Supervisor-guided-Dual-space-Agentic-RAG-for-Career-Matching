@@ -4,7 +4,9 @@ Career-RAG 是一个面向毕业设计答辩的多人职业匹配 Web 系统。�
 
 这里的 **Agentic RAG**，白话说就是“先从岗位库找证据，再让分工明确的 AI 角色基于证据完成任务”；**Supervisor** 是贯穿流程的项目经理，负责检查计划、约束、证据和发布条件。
 
-代码与实测工件冻结基线：`2474e48`。批次 9 的验收口径见 `docs/validation/2026-08-07-batch9-acceptance.md`。
+历史批次 9 的代码与实测工件冻结基线为 `2474e48`；本轮 UI 收尾与清理基于
+`langgraph@79af2dd` 的未提交工作树，验收口径见
+`docs/validation/2026-08-09-final-polish-acceptance.md`。
 
 ## 当前真实能力
 
@@ -121,7 +123,10 @@ npm.cmd run dev
 
 ## 测试入口
 
-批次 9 冻结验收的实测结果为：后端 pytest **642 passed**、Vitest **105/105**、Playwright **14/14**、全局冒烟 **32 passed, 0 failed**。来源仅为 `docs/validation/2026-08-07-batch9-acceptance.md`。
+2026-08-09 本轮最终实测结果为：后端 pytest **852 passed**、Vitest **206/206**、
+Playwright **28/28**；pyflakes、TypeScript 类型检查与 Vite 生产构建均通过。来源为
+`docs/validation/2026-08-09-final-polish-acceptance.md`。批次 9 的 **642 / 105 / 14 / 32**
+数字仅是历史冻结口径，见 `docs/validation/2026-08-07-batch9-acceptance.md`。
 
 ```powershell
 # 后端
@@ -171,5 +176,6 @@ npm.cmd run api:check
 - `docs/product_guide.md`：答辩时按用户看到的页面与状态讲产品。
 - `docs/code_guide.md`：按模块、文件和关键函数走读实现。
 - `docs/project_functionality_and_code_guide.md`：完整功能与代码详解，也是 V2 Word 文档的唯一 Markdown 源稿。
-- `docs/validation/2026-08-07-batch9-acceptance.md`：冻结验收与四项测试计数。
+- `docs/validation/2026-08-09-final-polish-acceptance.md`：本轮 UI、清理、交叉审查与最终门禁证据。
+- `docs/validation/2026-08-07-batch9-acceptance.md`：历史批次 9 冻结验收与四项测试计数。
 - `docs/validation/2026-08-06-cross-encoder-ablation.md`：四通道消融方法与限制。

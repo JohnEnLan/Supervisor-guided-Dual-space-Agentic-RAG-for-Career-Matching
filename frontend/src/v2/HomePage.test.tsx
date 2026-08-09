@@ -38,7 +38,7 @@ describe("HomePage", () => {
   });
 
   it("sends logged-out visitors straight to login (intro handled by HomeGate)", async () => {
-    // B1 R7：首访重定向职责上移到路由层 HomeGate；能渲染首页的都已读过介绍
+    // HomePage 只决定认证目的地；生产路由中的 HomeGate 独立负责介绍页门控。
     const user = userEvent.setup();
     const router = renderHome();
     const [primaryCta] = await screen.findAllByRole("button", { name: "进入应用" });

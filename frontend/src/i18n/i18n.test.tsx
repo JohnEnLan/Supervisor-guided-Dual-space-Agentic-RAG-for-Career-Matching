@@ -18,6 +18,7 @@ import { HomePage } from "../v2/HomePage";
 import { LandingPage } from "../v2/LandingPage";
 import { ProfilePage } from "../v2/ProfilePage";
 import { ResumeProfileAccordion } from "../v2/ResumeProfileAccordion";
+import marketingSource from "../v2/marketing.css?raw";
 import themeSource from "../v2/theme.css?raw";
 import { WelcomePage } from "../v2/WelcomePage";
 import { WorkbenchPage } from "../v2/WorkbenchPage";
@@ -354,11 +355,46 @@ describe("default context and toggle accessibility", () => {
       /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.v2-sidebar \.v2-wordmark\s*\{\s*padding:\s*6px\s+10px;\s*\}/s,
     );
   });
+
+  it("keeps advisor labels and relationship lines at WCAG AA contrast", () => {
+    const color = marketingSource.match(
+      /\.wl-team-stage\s*\{[^}]*color:\s*(#[0-9a-f]{6})/i,
+    )?.[1];
+    expect(color).toBeDefined();
+
+    const luminance = (hex: string) => {
+      const channels = [1, 3, 5].map((offset) =>
+        Number.parseInt(hex.slice(offset, offset + 2), 16) / 255,
+      );
+      const linear = channels.map((channel) =>
+        channel <= 0.03928
+          ? channel / 12.92
+          : ((channel + 0.055) / 1.055) ** 2.4,
+      );
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const contrast = (foreground: string, background: string) => {
+      const values = [luminance(foreground), luminance(background)].sort(
+        (left, right) => right - left,
+      );
+      return (values[0] + 0.05) / (values[1] + 0.05);
+    };
+
+    expect(contrast(color!, "#2a2825")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color!, "#302b27")).toBeGreaterThanOrEqual(4.5);
+
+    const relationshipColor = marketingSource.match(
+      /\.wl-supervision-bus::before\s*\{[^}]*border-left:\s*1px\s+solid\s+(#[0-9a-f]{6})/i,
+    )?.[1];
+    expect(relationshipColor).toBeDefined();
+    expect(contrast(relationshipColor!, "#1f1e1d")).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe("HomePage language switching", () => {
   it("renders the existing Chinese experience by default", async () => {
     renderHomePage();
+    expect(screen.getByRole("link", { name: "枝涯" })).toHaveAttribute("href", "/");
     expect(
       await screen.findByRole("heading", {
         name: "把求职这件事，交给一支为你服务的团队",
@@ -387,6 +423,7 @@ describe("HomePage language switching", () => {
     expect(
       screen.getByText("Career Arbor · Follow the branches, find your path."),
     ).toBeVisible();
+    expect(screen.getByRole("link", { name: "Career Arbor" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("region", { name: "Features" })).toBeVisible();
     expect(document.querySelector(".v2-footnote")).toHaveTextContent(
       "Career Arbor — Your AI Career-Path Agent",
@@ -408,6 +445,15 @@ describe("WelcomePage language switching", () => {
       screen.getByRole("heading", { name: "Job searching should not be a solo journey" }),
     ).toBeVisible();
     expect(screen.getByText("WELCOME TO CAREER ARBOR")).toBeVisible();
+    expect(
+      screen.getByRole("group", {
+        name: "The project manager supervises needs confirmation, job retrieval, and strategy planning",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("list", { name: "Business advisor handoff sequence" }),
+    ).toBeVisible();
+    expect(screen.getByRole("link", { name: "Career Arbor" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("button", { name: "Enter Career Arbor" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Skip introduction →" })).toBeVisible();
     expect(screen.queryByText("求职不该是一个人的事")).not.toBeInTheDocument();
@@ -429,6 +475,7 @@ describe("LandingPage language switching", () => {
       }),
     ).toBeVisible();
     expect(screen.getByRole("region", { name: "Sign in" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Career Arbor" })).toHaveAttribute("href", "/");
     expect(screen.queryByText("把求职这件事，交给一支为你服务的团队")).not.toBeInTheDocument();
   });
 });
@@ -504,6 +551,12 @@ describe("AppShell language switching", () => {
       ".v2-mobile-nav > .v2-lang-mobile",
     );
     expect(document.querySelectorAll(".v2-language-toggle")).toHaveLength(2);
+    const chineseBrands = document.querySelectorAll<HTMLAnchorElement>("a.v2-wordmark");
+    expect(chineseBrands).toHaveLength(2);
+    for (const brand of chineseBrands) {
+      expect(brand).toHaveTextContent("枝涯");
+      expect(brand).toHaveAttribute("href", "/");
+    }
     expect(document.querySelector(".v2-main > .v2-lang-float")).toBe(desktopToggle);
     expect(mobileToggle).toHaveAttribute(
       "aria-label",
@@ -511,6 +564,9 @@ describe("AppShell language switching", () => {
     );
 
     await user.click(desktopToggle);
+    for (const brand of document.querySelectorAll<HTMLAnchorElement>("a.v2-wordmark")) {
+      expect(brand).toHaveTextContent("Career Arbor");
+    }
     expect(screen.getByRole("button", { name: "New consultation" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "新的咨询" })).not.toBeInTheDocument();

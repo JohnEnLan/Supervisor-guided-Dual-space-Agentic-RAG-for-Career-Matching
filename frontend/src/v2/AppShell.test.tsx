@@ -202,12 +202,17 @@ describe("AppShell mobile navigation", () => {
 
     const drawer = screen.getByRole("dialog", { name: "主导航" });
     const closeButton = screen.getByRole("button", { name: "关闭导航" });
+    const brandLink = drawer.querySelector<HTMLAnchorElement>("a.v2-wordmark")!;
     expect(drawer).toHaveAttribute("aria-modal", "true");
     expect(closeButton).toHaveFocus();
     expect(document.body.style.overflow).toBe("hidden");
 
     await user.tab({ shift: true });
+    expect(brandLink).toHaveFocus();
+    await user.tab({ shift: true });
     expect(screen.getByRole("button", { name: "退出登录" })).toHaveFocus();
+    await user.tab();
+    expect(brandLink).toHaveFocus();
     await user.tab();
     expect(closeButton).toHaveFocus();
 

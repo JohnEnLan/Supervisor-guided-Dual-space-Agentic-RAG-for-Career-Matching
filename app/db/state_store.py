@@ -105,21 +105,6 @@ async def save_state(
             )
 
 
-async def count_owned_sessions(owner_user_id: str) -> int:
-    pool = await get_pool()
-    async with pool.acquire() as connection:
-        return int(
-            await connection.fetchval(
-                """
-                SELECT count(*)
-                FROM session_state
-                WHERE owner_user_id = $1::uuid
-                """,
-                owner_user_id,
-            )
-        )
-
-
 async def create_owned_session_with_quota(
     state: SharedState,
     *,
@@ -170,18 +155,6 @@ async def load_state(session_id: str) -> SharedState | None:
     if row is None:
         return None
     return SharedState.model_validate(json.loads(row["state"]))
-
-
-async def load_state_with_status(session_id: str) -> tuple[SharedState, str] | None:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT state, status FROM session_state WHERE session_id = $1",
-            session_id,
-        )
-    if row is None:
-        return None
-    return SharedState.model_validate(json.loads(row["state"])), row["status"]
 
 
 async def load_consult_context(session_id: str) -> ConsultContext | None:

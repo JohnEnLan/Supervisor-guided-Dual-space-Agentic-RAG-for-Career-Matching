@@ -22,7 +22,8 @@
 
 | 文档 | 内容 |
 |---|---|
-| [validation/2026-08-07-batch9-acceptance.md](validation/2026-08-07-batch9-acceptance.md) | 最终总验收报告（门禁计数、P1–P4 彩排、配置快照） |
+| [validation/2026-08-09-final-polish-acceptance.md](validation/2026-08-09-final-polish-acceptance.md) | 当前收尾验收（UI、清理、交叉审查、852/206/28 门禁） |
+| [validation/2026-08-07-batch9-acceptance.md](validation/2026-08-07-batch9-acceptance.md) | 历史批次 9 验收（门禁计数、P1–P4 彩排、配置快照） |
 | [validation/2026-08-06-cross-encoder-ablation.md](validation/2026-08-06-cross-encoder-ablation.md) | 四通道消融（within-pool 口径） |
 | [validation/2026-08-07-global-audit-findings.md](validation/2026-08-07-global-audit-findings.md) | 三方全局审核发现与修复清单 |
 | validation/ 其余报告 | 各阶段验证记录 |

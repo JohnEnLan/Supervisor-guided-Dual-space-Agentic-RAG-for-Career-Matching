@@ -5,12 +5,10 @@ import hashlib
 import io
 import logging
 import math
+import re
 import time
 import uuid
 from copy import deepcopy
-from pathlib import Path
-import re
-
 from typing import Annotated
 
 import pypdfium2
@@ -187,8 +185,8 @@ async def create_session(
 
 # B2：ocr_suggested 路由提示阈值（B4 引入 RESUME_OCR_* 配置前的常量）
 _OCR_SUGGEST_MIN_CHARS = 150
-# 整批终审 Codex M2：解码/光栅化/编码的 CPU 与内存也要有并发闸——与 VL
-# 网络闸分离（不嵌套持有，无死锁），上界同取 vl_max_concurrency。
+# 解码、光栅化和编码同样需要 CPU/内存并发闸；它与 VL 网络闸分离，
+# 不嵌套持有以避免死锁，上界同取 vl_max_concurrency。
 _OCR_PREP_SEMAPHORE = asyncio.Semaphore(settings.vl_max_concurrency)
 _TEXT_PREVIEW_CHARS = 600
 _IMAGE_UPLOAD_PREVIEW = "图片简历，确认解析后将进行视觉识别（约几分钱）"
@@ -213,7 +211,7 @@ def _upload_response(
         pages=pages,
         chars=chars,
         # 先对全文脱敏再截断：600 字边界穿过电话/邮箱时不得泄漏半截 token。
-        # 图片固定文案随开关（Codex M4）：flag 关掉后不得再承诺视觉识别
+        # 图片固定文案随能力开关：关闭后不得再承诺视觉识别。
         text_preview=(
             _IMAGE_UPLOAD_PREVIEW
             if settings.resume_ocr_enabled
@@ -247,8 +245,7 @@ async def upload_resume(
     filename, suffix, content = await read_resume_upload(file)
     if suffix in IMAGE_RESUME_SUFFIXES:
         try:
-            # 真实格式必须匹配后缀（整批终审 Codex M1：改名 GIF/PNG 混入
-            # 会扩大解码器攻击面）
+            # 真实格式必须匹配后缀；仅改名混入 GIF/PNG 会扩大解码器攻击面。
             await asyncio.to_thread(validate_image_header, content, suffix)
         except Exception:
             logger.warning(
@@ -267,8 +264,8 @@ async def upload_resume(
             extracted_text, pages = await asyncio.to_thread(
                 extract_resume_text_from_bytes, content, suffix
             )
-            # 0 页 PDF 提前 422 随开关（整批终审 Codex M4：flag=false 必须
-            # 逐字节回到 B4 前行为——彼时接受入库、解析期报错返还）
+            # 0 页 PDF 的提前 422 随能力开关；关闭时保留旧行为：先接受入库，
+            # 再由解析阶段返回错误。
             if (
                 settings.resume_ocr_enabled
                 and suffix == ".pdf"
@@ -378,7 +375,7 @@ async def parse_resume(
     background_tasks: BackgroundTasks,
 ) -> ResumeAcceptedResponse:
     """确认解析（LLM 成本发生点）：CAS 扣一次解析额度并入队后台归一化。"""
-    # Codex 整批终审 M4：开着开关上传的图片、关掉开关后确认解析——必须在
+    # 开启能力时上传、关闭后才确认解析的图片，必须在
     # 扣额度之前拒绝（否则任务跳过 VL → 空文本 → resume_error 白烧额度）。
     # flag 常开时零额外查询。
     if not settings.resume_ocr_enabled:
@@ -438,7 +435,7 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
     version = context.resume_version
     if version < 1:
         # 从未上传过简历的新会话：必须与"归一化中"可区分，前端据此展示
-        # 上传入口而非处理中 spinner（审计二轮阻断项修复）。
+        # 上传入口而非处理中 spinner。
         raise HTTPException(status_code=409, detail="resume_missing")
     resume = context.state.resume_state
     return ResumePreviewResponse(
@@ -460,7 +457,7 @@ async def resume_preview(session_id: str) -> ResumePreviewResponse:
     responses={
         409: {"model": ResumeLifecycleConflictResponse},
         # 422 = anyOf(必填 detail 稳定契约, 默认校验数组形态)——运行时两种
-        # 形状并存，契约必须加性保留而非替换（审计三轮修正）。
+        # 形状并存，契约必须加性保留而非替换。
         422: {"model": ResumeVersionRequiredResponse | RequestValidationErrorResponse},
     },
     dependencies=[Depends(require_owned_session)],
@@ -671,7 +668,7 @@ async def build_match_brief(
     ) -> dict:
         # B2：generation 比对无条件生效（flag-off 下并发重传也不得把新生命
         # 周期覆盖成 match_brief_approved）；version 比对维持 Feature A 门控
-        # （保 test_api_v1 既有 fixture 基线，方案 §1.2 写死的口径）。
+        # （同时保持既有 API fixture 所约定的代际门控语义）。
         if current_resume_upload_generation != expected_generation:
             raise _ResumeChangedConflict(session_id)
         if settings.resume_clarify_enabled and (
@@ -1303,10 +1300,9 @@ async def _normalize_resume(
     external_started = False
 
     def _mark_external_attempt() -> None:
-        # §1.2 置位点收紧（整批终审 Codex M3）：由 VL 边界在真正发起传输
-        # 紧前回调。可返还口径＝置位前**被 except Exception 捕获**的失败
-        # （编码/准备类）；任务取消（CancelledError）不是返还路径——
-        # 服务重启丢任务烧 1 次由 §1.2 定价、§5.3 救济（终审三轮裁决）。
+        # 由 VL 边界在真正发起传输前置位。只有置位前被 Exception 捕获的
+        # 编码/准备失败可返还；任务取消不走返还路径，服务重启导致的任务
+        # 丢失也按已经开始一次外部尝试计量。
         nonlocal external_started
         external_started = True
 

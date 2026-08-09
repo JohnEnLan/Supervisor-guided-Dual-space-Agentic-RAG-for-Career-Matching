@@ -6,6 +6,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { ApiError, onUnauthorized } from "../api/client";
 import { api } from "../api/queries";
 import { LanguageToggle, useLanguage } from "../i18n";
+import { BrandHomeLink } from "./BrandHomeLink";
 import {
   clearUserScopedStorage,
   readSessionTitle,
@@ -147,7 +148,7 @@ export function AppShell() {
         >
           <Menu size={20} />
         </button>
-        <span className="v2-wordmark">Career Arbor</span>
+        <BrandHomeLink />
         <LanguageToggle className="v2-lang-mobile" />
       </header>
       {navigationOpen ? (
@@ -168,7 +169,7 @@ export function AppShell() {
         aria-label={navigationOpen ? t("主导航") : undefined}
       >
         <div className="v2-sidebar-heading">
-          <span className="v2-wordmark">Career Arbor</span>
+          <BrandHomeLink />
           <button
             ref={navigationCloseRef}
             type="button"

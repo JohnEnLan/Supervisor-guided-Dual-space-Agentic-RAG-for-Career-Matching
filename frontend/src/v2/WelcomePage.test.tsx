@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,8 +37,40 @@ beforeEach(async () => {
 });
 
 describe("WelcomePage", () => {
+  it("uses the localized brand as a real homepage exit", async () => {
+    const user = userEvent.setup();
+    const router = renderWelcome();
+
+    await user.click(screen.getByRole("link", { name: "枝涯" }));
+
+    expect(router.state.location.pathname).toBe("/");
+    expect(localStorage.getItem(INTRO_SEEN_KEY)).toBe("1");
+  });
+
+  it("shows PM as the supervisor over the three business-agent handoffs", () => {
+    renderWelcome();
+
+    const advisorSystem = screen.getByRole("group", {
+      name: "项目经理监督需求确认、岗位检索与策略规划",
+    });
+    expect(within(advisorSystem).getByText("监督层")).toBeVisible();
+    expect(
+      within(advisorSystem).getByText("全程规划、质量核查与有界纠偏"),
+    ).toBeVisible();
+
+    const handoffFlow = within(advisorSystem).getByRole("list", {
+      name: "业务顾问交接顺序",
+    });
+    expect(
+      within(handoffFlow)
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["需求顾问", "岗位顾问", "职业规划师"]);
+    expect(within(handoffFlow).getAllByRole("listitem")).toHaveLength(3);
+  });
+
   it("marks the intro as seen and continues to the homepage from the final CTA", async () => {
-    // B1 R7：介绍页出口 → 首页（P1），不再直达登录
+    // The introduction exits to the public homepage, not directly to login.
     const user = userEvent.setup();
     const router = renderWelcome();
     await user.click(screen.getByRole("button", { name: "进入枝涯" }));
@@ -55,7 +87,7 @@ describe("WelcomePage", () => {
   });
 
   it("keeps the exit working when localStorage writes fail (memory fallback)", async () => {
-    // B1 R7：写失败浏览器由内存旗标兜底，绝不陷入 `/`↔`/welcome` 循环
+    // Module memory prevents a `/`↔`/welcome` loop when storage is disabled.
     const user = userEvent.setup();
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("storage disabled");
@@ -68,7 +100,7 @@ describe("WelcomePage", () => {
   });
 });
 
-describe("WelcomePage logged-in branches (B1 review r2)", () => {
+describe("WelcomePage logged-in branches", () => {
   const ME = {
     user_id: "user-1",
     status: "active",

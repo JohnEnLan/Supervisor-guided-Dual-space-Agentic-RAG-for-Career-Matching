@@ -51,12 +51,6 @@ function recoveryOrUndefined(value: unknown): RecoveryHint | undefined {
   return action || statusUrl ? { action, status_url: statusUrl } : undefined;
 }
 
-export function recoveryMessage(error: ApiError): string {
-  if (error.recovery?.action === "poll_status") return "请返回运行进度页继续等待。";
-  if (error.recovery?.action) return `建议恢复操作：${error.recovery.action}`;
-  return error.message;
-}
-
 async function toApiError(response: Response): Promise<ApiError> {
   let body: unknown;
   try {

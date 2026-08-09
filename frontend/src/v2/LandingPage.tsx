@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { api } from "../api/queries";
 import { LanguageToggle, useLanguage } from "../i18n";
+import { BrandHomeLink } from "./BrandHomeLink";
 import "./theme.css";
 
 type Channel = "email" | "phone";
@@ -67,7 +68,7 @@ export function LandingPage() {
   return (
     <div className="v2-landing">
       <nav className="v2-topnav">
-        <span className="v2-wordmark">Career Arbor</span>
+        <BrandHomeLink />
         <Link className="v2-back-home" to="/">
           {t("← 返回首页")}
         </Link>

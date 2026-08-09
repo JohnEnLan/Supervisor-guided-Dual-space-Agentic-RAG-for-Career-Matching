@@ -1,6 +1,7 @@
 # 交接文档：给下一位 AI 协作者（Codex）
 
-> 写作时点：2026-08-09 晚，HEAD = `5eac4f3`（分支 `langgraph`）。
+> 更新时点：2026-08-10 终检；本轮 UI 收尾与清理已提交至 `langgraph`
+> 并推送双远端（见 git log 顶部提交），部署按 §4 流程由用户执行。
 > 本文回答三个问题：项目现在什么状态、改动怎么做才合规、上线怎么操作。
 > 裁决链（冲突时从高到低）：`CLAUDE_LANGGRAPH.md` §5 V2 修订案 →
 > `CLAUDE.md` / `AGENTS.md`（宪法，Codex 会自动读取 AGENTS.md）→
@@ -9,16 +10,19 @@
 ## 1. 一句话与现状
 
 Supervisor 监督的双空间 Agentic RAG 职业匹配系统（伯明翰 CS 硕士毕业设计），
-**已全量上线** https://zhangen.cn （香港服务器 45.153.131.127，Ubuntu 22.04）。
+已部署 https://zhangen.cn （香港服务器 45.153.131.127，Ubuntu 22.04）。
+2026-08-09 UI 收尾与清理批已提交推送；线上是否为该版以部署记录为准。
 
 **产品品牌（B9 起）**：英文名 **Career Arbor**，中文名 **枝涯**，口号
 「循枝见路，向远而生」，定位句「枝涯 — 你的 AI 职业路径智能体 /
 Career Arbor — Your AI Career-Path Agent」。品牌串只存在于前端
 （wordmark、document.title、index.html、i18n 词条），后端无品牌字样。
 架构定性口径（答辩/文档统一）：supervisor 多智能体 + LangGraph 图编排
-workflow（plan-and-execute，非 ReAct）+ verify 处单条有界自反回路。
+workflow（plan-and-execute，非 ReAct）+ verify 处单条有界自反回路。`langgraph` 分支只授权
+LangGraph 作为编排/checkpoint 例外；三个业务 Agent 仍是共享状态的异步函数与独立 LLM 调用，
+不引入 AutoGen、CrewAI 或 LangChain 应用栈。
 
-批次史（全部封批并部署）：
+历史批次（已封批；部署状态以对应发布记录为准）：
 
 | 批次 | 内容 | 封批/关键提交 |
 |---|---|---|
@@ -32,6 +36,7 @@ workflow（plan-and-execute，非 ReAct）+ verify 处单条有界自反回路�
 | B6 | 全局中英文切换（右上角按钮） | 8db35d4 |
 | B7 | 三缺陷热修（确认后连续性/预览滚动/宽屏列） | 2aa4037 |
 | B8 | 结果呈现十项改进（表格化/去 JSON/小策播报等） | 5eac4f3 |
+| 2026-08-09 收尾 | 顾问关系图、双语品牌主页链接、侧栏对齐、保守冗余清理 | 本地工作树，未部署 |
 
 数据库迁移已应用至 **0011**（生产验证口径：查 `schema_migrations` 表，
 migrate 脚本永远静默）。
@@ -40,7 +45,7 @@ migrate 脚本永远静默）。
 
 | 文件 | 作用 |
 |---|---|
-| `CLAUDE.md` | **宪法**。8 条硬约束（无状态服务、asyncio、三 Agent=三次 LLM 调用不引重框架、有界循环、硬过滤走 SQL、evidence_spans 防编造、Semaphore 限流、一次一个模块）。违反即重写。 |
+| `CLAUDE.md` / `AGENTS.md` | **基础宪法**。无状态服务、asyncio、三 Agent 独立调用、有界循环、硬过滤走 SQL、evidence_spans 防编造、Semaphore 限流、一次一个模块；LangGraph 仅按上级修订案在本分支获得例外授权。 |
 | `docs/v3_product_iteration_plan.md` | v3 十需求的权威方案（B2-B5 细节） |
 | `docs/deploy_guide.md` | 部署/升级/运维手册（含 B5 运维段、break-glass、B3 红线） |
 | `docs/product_guide.md` / `docs/code_guide.md` | 产品走读 / 代码走读（锚点 de2fd83，行号会漂移） |
@@ -61,7 +66,9 @@ migrate 脚本永远静默）。
 cd frontend; npm test; npm run typecheck; npm run build; npx playwright test; cd ..
 ```
 
-当前基线：后端 **852** / 前端 **201** / e2e **17** 全绿。OpenAPI 有变更时：
+当前本地验收基线：后端 **852** / 前端 **206** / e2e **28** 全绿，且 pyflakes、
+TypeScript 类型检查和生产构建通过。完整证据见
+`docs/validation/2026-08-09-final-polish-acceptance.md`。OpenAPI 有变更时：
 `python scripts/export_openapi.py` 再 `cd frontend && npm run api:generate`，
 快照在 `tests/snapshots/openapi_v1.json`。
 
@@ -142,18 +149,20 @@ REL=/opt/career-rag/releases/frontend-$(date +%Y%m%d%H%M) && mkdir -p "$REL" \
 
 ## 6. 终局快照与仓库现状（2026-08-09 收尾）
 
-- 终结提交 `dd1ead9`（"final complete, user ran tests"），**langgraph 分支**
-  已同步推送 GitHub（origin）与伯明翰 GitLab（gitlab 远端）。
-  **main 分支是旧的**——一切成果以 langgraph 为准；如需评审可见，
-  把默认分支切到 langgraph 或开 MR 合并。
-- B9 品牌更名已上线（releases/frontend-202608091302）。
-- 工作区已按"先移档案不直删"铁律清理：历届部署中间产物、旧部署包、
-  沙箱临时目录都在
-  `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\2026-08-09_final_cleanup\`；
-  用户答辩材料在 `C:\Users\WIN11\Desktop\毕业论文_birmingham\答辩准备\`
-  （两份 docx + 三张图，别当垃圾清掉）。
+- 当前分支为 **langgraph**，工作树基于 `79af2dd`；本轮修改未提交、未推送、未部署，
+  不应把历史线上发布状态误写成本轮状态。需要发布时仍按 §4 与 `docs/deploy_guide.md` 操作。
+- 本轮已完成：欢迎页四角色关系重排；中文品牌“枝涯”/英文“Career Arbor”统一回主页；
+  桌面与移动侧栏“新的咨询”同宽；补齐路由、布局、移动端和对比度回归测试。
+- `.superpowers`、临时输出与可恢复过程文件已移至
+  `C:\Users\WIN11\Desktop\毕业论文_birmingham\项目过程档案\2026-08-09_career_arbor_final_polish\`；
+  详细哈希、数量和例外见其中 `planning-final_polish_20260809\cleanup_manifest.md`。
+- 项目根 `.pytest_cache` 因 Windows ACL 拒绝读取/移动，未夺权或强删；它是本轮唯一明确保留的
+  清理例外，不得声称已移档。测试改用全新短路径 `--basetemp`，不影响 852 项验收。
+- 用户答辩 Word 材料已于 2026-08-10 原子替换到 `C:\Users\WIN11\Desktop\答辩\`；技术文档
+  15 页、PPT 指导 10 页，最终哈希与逐页审阅副本完全一致。修改前原件与原子替换备份均在
+  本轮过程档案 `word-backups/`；后续维护继续遵守“先备份、临时编辑、逐页复核、再替换”。
 - 部署包不入库：需要时 `git archive` + `npm run build` 现打（§4 命令）。
-- 清理纪律：项目过程文件先移入 `项目过程档案\`，不直接删除。
+- 清理纪律：项目过程文件先移入 `项目过程档案\`，不直接删除；依赖项不得只凭静态扫描删除。
 
 ## 7. 工作方式约定（沿用）
 

@@ -37,7 +37,6 @@ export type Me = Schemas["MeResponse"];
 export type MeProfile = Schemas["ProfileResponse"];
 export type MeProfilePatch = Schemas["ProfilePatchRequest"];
 export type MeSessions = Schemas["MeSessionsResponse"];
-export type MeSession = Schemas["MeSessionResponse"];
 export type ConsultTurnRequest = Schemas["ConsultRequest"];
 export type ConsultTurn = Schemas["ConsultResponse"];
 export type ConsultState = Schemas["ConsultStateResponse"];

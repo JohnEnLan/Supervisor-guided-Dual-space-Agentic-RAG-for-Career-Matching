@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/queries";
 import { LanguageToggle, useLanguage } from "../i18n";
+import { BrandHomeLink } from "./BrandHomeLink";
 import "./theme.css";
 import "./marketing.css";
 
@@ -46,8 +47,8 @@ export function HomePage() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const loggedIn = Boolean(me.data);
 
-  // B1 R7：首访已由 `/` 的 HomeGate 引去 /welcome，能看到首页的都已读过
-  // 介绍——「进入应用」直达登录/工作台；「了解它如何工作」入口常驻。
+  // HomeGate handles unacknowledged first visits. The primary action follows
+  // authentication state, while the introduction remains available explicitly.
   const enterApp = () => {
     navigate(loggedIn ? "/app" : "/login");
   };
@@ -55,7 +56,7 @@ export function HomePage() {
   return (
     <div className="mk-page">
       <nav className="v2-topnav">
-        <span className="v2-wordmark">Career Arbor</span>
+        <BrandHomeLink />
         <div className="v2-topnav-actions">
           <LanguageToggle />
           <button

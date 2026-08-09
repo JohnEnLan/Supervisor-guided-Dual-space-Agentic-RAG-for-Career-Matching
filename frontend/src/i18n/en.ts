@@ -1,4 +1,5 @@
 export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
+  "枝涯": "Career Arbor",
   "Some generated or data-dependent conversation content may remain in Chinese.":
     "Some generated or data-dependent conversation content may remain in Chinese.",
   "中文": "Chinese",
@@ -59,6 +60,12 @@ export const EN_TRANSLATIONS: Readonly<Record<string, string>> = {
   "项目经理": "Project manager",
   "把关每一步产出的质量与节奏，全程督导，不放任流程跑偏。":
     "Keeps quality and pace on track at every step, with active oversight throughout the process.",
+  "监督层": "Supervisor layer",
+  "全程规划、质量核查与有界纠偏":
+    "Plans and reviews every stage, with bounded corrections when needed.",
+  "项目经理监督需求确认、岗位检索与策略规划":
+    "The project manager supervises needs confirmation, job retrieval, and strategy planning",
+  "业务顾问交接顺序": "Business advisor handoff sequence",
   "跳过介绍 →": "Skip introduction →",
   "欢迎来到枝涯 CAREER ARBOR": "WELCOME TO CAREER ARBOR",
   "求职不该是一个人的事": "Job searching should not be a solo journey",

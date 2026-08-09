@@ -12,9 +12,9 @@ import { WorkbenchPage } from "../v2/WorkbenchPage";
 import { RouteError } from "./App";
 
 
-// B1 R7：首访先看 /welcome（滚动介绍），看过/跳过后才落到首页 P1。
-// localStorage 同步判断（CSR），零闪烁；写失败场景由 introSeen 的模块级
-// 内存旗标兜底（markIntroSeen 后 hasSeenIntro 本会话恒真），不会成环。
+// Unacknowledged first visits see the introduction before the homepage.
+// Brand links and introduction exits acknowledge this gate; module memory keeps
+// the current session loop-free when localStorage is unavailable.
 function HomeGate() {
   if (!hasSeenIntro()) return <Navigate replace to="/welcome" />;
   return <HomePage />;

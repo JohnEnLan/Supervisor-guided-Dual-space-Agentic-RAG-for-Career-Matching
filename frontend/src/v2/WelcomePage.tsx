@@ -4,30 +4,36 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api/queries";
 import { LanguageToggle, useLanguage } from "../i18n";
+import { BrandHomeLink } from "./BrandHomeLink";
 import { hasSeenIntro, markIntroSeen } from "./introSeen";
 import "./theme.css";
 import "./marketing.css";
 
-const TEAM = [
+const SUPERVISOR = {
+  key: "pm",
+  name: "项目经理",
+  layer: "监督层",
+  duty: "全程规划、质量核查与有界纠偏",
+};
+
+const BUSINESS_TEAM = [
   {
     key: "intent",
     name: "需求顾问",
+    stage: "需求确认",
     duty: "听懂你的目标、底线与顾虑，把模糊的想法整理成清晰的方向。",
   },
   {
     key: "scout",
     name: "岗位顾问",
+    stage: "岗位检索",
     duty: "在真实岗位库里检索与匹配，每条推荐都附 JD 原文证据。",
   },
   {
     key: "strategist",
     name: "职业规划师",
+    stage: "策略规划",
     duty: "分析差距，给出简历修改建议与可执行的成长路径。",
-  },
-  {
-    key: "pm",
-    name: "项目经理",
-    duty: "把关每一步产出的质量与节奏，全程督导，不放任流程跑偏。",
   },
 ];
 
@@ -36,9 +42,8 @@ export function WelcomePage() {
   const { t } = useLanguage();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // B1 评审 M2：已登录但从未拿到"已读介绍"标记的用户（介绍页上线前的
-  // 存量用户）——补写标记后直达工作台，闪屏至多发生一次、首页从此可达。
-  // 已登录且已有标记者若显式访问（首页「了解它如何工作」）则正常观看。
+  // A signed-in user without the marker predates the introduction. Backfill it
+  // and continue to the workbench; signed-in users who visit explicitly can watch.
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   useEffect(() => {
     if (me.data && !hasSeenIntro()) {
@@ -70,10 +75,8 @@ export function WelcomePage() {
     return () => observer.disconnect();
   }, []);
 
-  // B1 R7：介绍页看完/跳过 → 首页（P1，replace 防返回键重看介绍）。
-  // localStorage 写失败由 introSeen 的内存旗标兜底（本次会话内 HomeGate
-  // 恒放行），不存在被困路径——原方案的 /login 回退分支因此不可达，已按
-  // 评审裁定移除（方案 §2.1 已同步勘误）。
+  // Completing or skipping acknowledges the gate and replaces the history entry.
+  // Module memory keeps HomeGate open for this session if localStorage fails.
   const exitIntro = () => {
     markIntroSeen();
     navigate("/", { replace: true });
@@ -82,7 +85,7 @@ export function WelcomePage() {
   return (
     <div className="wl-page" ref={containerRef}>
       <nav className="wl-topbar">
-        <span className="v2-wordmark">Career Arbor</span>
+        <BrandHomeLink />
         <div className="wl-topbar-actions">
           <LanguageToggle />
           <button type="button" className="wl-skip" onClick={exitIntro}>
@@ -115,19 +118,43 @@ export function WelcomePage() {
               "不是一个黑盒 AI，而是四个分工明确的角色围绕你协作——他们的每句话都在群里，看得见。",
             )}
           </p>
-          <div className="wl-team-grid">
-            {TEAM.map((member, index) => (
-              <article
-                key={member.key}
-                className="wl-team-card"
-                data-persona={member.key}
-                data-reveal
-                style={{ transitionDelay: `${index * 90}ms` }}
-              >
-                <h3>{t(member.name)}</h3>
-                <p>{t(member.duty)}</p>
-              </article>
-            ))}
+          <div
+            className="wl-advisor-system"
+            role="group"
+            aria-label={t("项目经理监督需求确认、岗位检索与策略规划")}
+          >
+            <article
+              className="wl-team-card wl-supervisor-card"
+              data-persona={SUPERVISOR.key}
+              data-reveal
+            >
+              <span className="wl-team-stage">{t(SUPERVISOR.layer)}</span>
+              <h3>{t(SUPERVISOR.name)}</h3>
+              <p>{t(SUPERVISOR.duty)}</p>
+            </article>
+
+            <div className="wl-supervision-bus" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+
+            <ol className="wl-team-flow" role="list" aria-label={t("业务顾问交接顺序")}>
+              {BUSINESS_TEAM.map((member, index) => (
+                <li key={member.key}>
+                  <article
+                    className="wl-team-card"
+                    data-persona={member.key}
+                    data-reveal
+                    style={{ transitionDelay: `${(index + 1) * 90}ms` }}
+                  >
+                    <span className="wl-team-stage">{t(member.stage)}</span>
+                    <h3>{t(member.name)}</h3>
+                    <p>{t(member.duty)}</p>
+                  </article>
+                </li>
+              ))}
+            </ol>
           </div>
         </div>
       </section>

@@ -579,7 +579,7 @@ describe("resume confirmation profile", () => {
   });
 
   it("shows the re-upload guidance when parse hits 409 resume_ocr_disabled", async () => {
-    // B4 回滚窗口（整批终审 Codex M4）：OCR 开启期上传的图片、关掉后确认
+    // OCR 开启期上传的图片，在能力关闭后确认解析会被 409 拒绝；
     // 解析被 409 拒绝（不扣额度）——确认卡原地给出重传文字版引导
     const user = userEvent.setup();
     mockWorkbenchApi();
@@ -1901,7 +1901,7 @@ describe("useStaggeredReveal (B1 R5)", () => {
   }
 
   it("treats the first non-empty batch as history baseline (no replay after async load)", () => {
-    // 冷加载时序：resetKey 变化帧无数据 → 首批全量历史异步到达（评审 M1）
+    // 冷加载时序：resetKey 变化帧无数据 → 首批全量历史异步到达。
     const { rerender } = render(<HookProbe keys={[]} resetKey="s1:r1" />);
     rerender(<HookProbe keys={["a", "b", "c"]} resetKey="s1:r1" />);
     for (const key of ["a", "b", "c"]) expect(delayOf(key)).toBe("");

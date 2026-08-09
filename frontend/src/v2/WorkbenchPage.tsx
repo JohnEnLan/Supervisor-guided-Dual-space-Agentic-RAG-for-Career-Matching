@@ -205,8 +205,8 @@ function translatedConsultSlotLabel(slot: ConsultSlotState, t: Translate): strin
     : slot.label;
 }
 
-// B1 R5：到场编排——只对"首批数据之后新增"的消息按批内顺序附加动画延迟。
-// 基线在该 resetKey 下 keys **首次非空**时建立（评审 M1：resetKey 变化帧
+// 到场编排只对“首批数据之后新增”的消息按批内顺序附加动画延迟。
+// 基线在该 resetKey 下 keys **首次非空**时建立；resetKey 变化帧
 // 几乎总是无数据帧，若在该帧建基线，异步到达的全量历史会被误判为新增而
 // 重播）。批内延迟封顶 3 档（1350ms < 1500ms 轮询间隔，后批不会先于前批
 // 可见）。reduced-motion 由 theme.css 全局禁动画兜底。
@@ -227,7 +227,7 @@ export function useStaggeredReveal(
   // false（默认）保持 B1 语义：首批非空 keys 视为历史，不重播。
   freshBaseline = false,
 ): (key: string) => React.CSSProperties | undefined {
-  // 评审二轮 M（并发正确性）：渲染期只做"已提交快照 → 候选快照"的纯计算，
+  // 并发不变量：渲染期只做“已提交快照 → 候选快照”的纯计算，
   // 提交发生在 effect（被丢弃的渲染不运行 effect，不会污染快照——旧实现
   // 的渲染期 ref 写入会让丢弃渲染预标 seen，改变后续提交帧的可观察样式）。
   const committed = useRef<StaggerSnapshot>({
@@ -835,7 +835,7 @@ export function WorkbenchPage() {
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const executeAttempted = useRef(false);
   // B3 双保险：记录发起 parse 时的 generation——进度响应换代=解析中重传，
-  // 停叙事并刷新上传态回落确认卡（方案 §3.1）
+  // 停叙事并刷新上传态，回落到确认卡。
   const parseGeneration = useRef<number | null>(null);
   // B3 §3.2：只有"本次挂载亲历解析过程"才逐行动画，回访/刷新不重播。
   // 存 sessionId 而非布尔：会话切换首帧 ref 尚未被 effect 重置，布尔会把
@@ -1078,7 +1078,7 @@ export function WorkbenchPage() {
     parseGeneration.current = null;
     progressSettled.current = false;
     // mutation 实例级状态必须随会话切换重置：不重置会把 A 会话的
-    // 上传成功/限额 409 带进 B 会话（审计三轮阻断修复；B2 扩展到 parse）。
+    // 上传成功/限额 409 带进 B 会话；parse 状态同样需要隔离。
     upload.reset();
     parseResume.reset();
   }, [sessionId, upload.reset, parseResume.reset]);
@@ -1095,7 +1095,7 @@ export function WorkbenchPage() {
   }, [me.data?.user_id, queryClient, runId, sessionId, setSearchParams, status.error]);
 
   const resumeReady = preview.isSuccess;
-  // 生命周期按后端稳定 detail 分流（审计二轮阻断修复；B2 扩展）：
+  // 生命周期按后端稳定 detail 分流：
   // resume_missing=从未上传；resume_unparsed=已上传待确认解析（确认卡由
   // pendingUpload 数据驱动）；resume_processing=归一化中；resume_error=失败。
   const preview409 = preview.error instanceof ApiError && preview.error.status === 409;
@@ -1186,7 +1186,7 @@ export function WorkbenchPage() {
   useEffect(() => {
     const data = resumeProgress.data;
     if (!data) return;
-    // 双保险（换代语义，方案 §3.1 勘误码定）：响应代数 ≠ 发起 parse 时的
+    // 换代双保险：响应代数 ≠ 发起 parse 时的
     // 代数 → 停掉旧代归属并刷新上传态。新代为 uploaded → done=true 停轮询
     // 回落确认卡；新代已 queued（远端标签页确认解析）→ 共享会话跟随新代
     // 叙事（气泡 key/stagger/亲历归属全部按代绑定，无串代）。
