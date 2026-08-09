@@ -141,6 +141,12 @@ describe("translation primitives", () => {
     expect(translate("en", "进入应用")).toBe("Open the app");
   });
 
+  it("uses the canonical three-tier taxonomy in English result badges", () => {
+    expect(translate("en", "现在就投")).toBe("Now Fit");
+    expect(translate("en", "值得冲刺")).toBe("Stretch Fit");
+    expect(translate("en", "跳板岗位")).toBe("Bridge Role");
+  });
+
   it("falls back to the original Chinese when an English entry is missing", () => {
     expect(translate("en", "这条词典里没有")).toBe("这条词典里没有");
   });

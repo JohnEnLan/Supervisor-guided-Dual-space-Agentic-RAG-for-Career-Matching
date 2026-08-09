@@ -14,6 +14,14 @@ const LONG_TITLE =
   "PrincipalInternationalMachineLearningPlatformReliabilityAndGovernanceEngineeringLead".repeat(4);
 const LONG_EXPLANATION =
   "EvidenceGroundedRecommendationWithAnIntentionallyUnbrokenEnglishSegment".repeat(6);
+const CANONICAL_TIERS = [
+  ["now_fit", "现在就投"],
+  ["stretch_fit", "值得冲刺"],
+  ["bridge_role", "跳板岗位"],
+  ["now_fit", "Now Fit"],
+  ["stretch_fit", "Stretch Fit"],
+  ["bridge_role", "Bridge Role"],
+] as const;
 
 async function installResultTable(page: Page, width: number) {
   await page.setViewportSize({ width: width + 40, height: 900 });
@@ -48,6 +56,37 @@ async function installResultTable(page: Page, width: number) {
   `);
 }
 
+async function installTierTable(
+  page: Page,
+  viewportWidth: number,
+  tiers: ReadonlyArray<readonly [string, string]> = CANONICAL_TIERS,
+) {
+  const rows = tiers
+    .map(
+      ([tier, label], index) => `
+        <tr class="v2-result-row">
+          <td>${index + 1}</td>
+          <td data-testid="tier-cell"><span class="v2-tier ${tier}" data-testid="tier-badge">${label}</span></td>
+          <td data-testid="job-cell"><button class="v2-result-row-trigger">Role ${index + 1}</button></td>
+          <td>Example 路 Birmingham</td>
+          <td>Demo</td>
+        </tr>`,
+    )
+    .join("");
+  await page.setViewportSize({ width: viewportWidth, height: 900 });
+  await page.setContent(`
+    <style>${globalSource}\n${themeSource}</style>
+    <main style="width: 100%; min-width: 0">
+      <div class="v2-result-table-wrap" data-testid="tier-wrapper">
+        <table class="v2-result-table" aria-label="Localized tiers">
+          <thead><tr><th>#</th><th>Tier</th><th>Role</th><th>Company</th><th>Corpus</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </main>
+  `);
+}
+
 for (const width of [650, 1280, 1966]) {
   test(`long result content stays within the ${width}px table`, async ({ page }) => {
     await installResultTable(page, width);
@@ -71,6 +110,56 @@ for (const width of [650, 1280, 1966]) {
     expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(companyBox!.x);
   });
 }
+
+for (const width of [320, 375, 650, 1280]) {
+  test(`localized result tiers stay inside cells at ${width}px`, async ({ page }, testInfo) => {
+    await installTierTable(page, width);
+    await page.screenshot({ path: testInfo.outputPath(`result-tiers-${width}.png`), fullPage: true });
+
+    const badgeCount = await page.getByTestId("tier-badge").count();
+    expect(badgeCount).toBe(CANONICAL_TIERS.length);
+    for (let index = 0; index < badgeCount; index += 1) {
+      const [badge, cell, jobCell] = await Promise.all([
+        page.getByTestId("tier-badge").nth(index).evaluate((element) => element.getBoundingClientRect().toJSON()),
+        page.getByTestId("tier-cell").nth(index).evaluate((element) => element.getBoundingClientRect().toJSON()),
+        page.getByTestId("job-cell").nth(index).evaluate((element) => element.getBoundingClientRect().toJSON()),
+      ]);
+      expect(badge.left).toBeGreaterThanOrEqual(cell.left - 0.5);
+      expect(badge.right).toBeLessThanOrEqual(cell.right + 0.5);
+      expect(cell.right).toBeLessThanOrEqual(jobCell.left + 0.5);
+    }
+
+    const documentWidth = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(documentWidth.scrollWidth).toBeLessThanOrEqual(documentWidth.clientWidth);
+    if (width < 650) {
+      const wrapperWidth = await page.getByTestId("tier-wrapper").evaluate((element) => ({
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      }));
+      expect(wrapperWidth.scrollWidth).toBeGreaterThan(wrapperWidth.clientWidth);
+    }
+  });
+}
+
+test("an unbroken localized tier remains inside its cell", async ({ page }) => {
+  await installTierTable(page, 650, [
+    ["stretch_fit", "LocalizedTierLabelWithoutBreakOpportunity".repeat(3)] as const,
+  ]);
+  const [badge, cell, jobCell] = await Promise.all([
+    page.getByTestId("tier-badge").boundingBox(),
+    page.getByTestId("tier-cell").boundingBox(),
+    page.getByTestId("job-cell").boundingBox(),
+  ]);
+  expect(badge).not.toBeNull();
+  expect(cell).not.toBeNull();
+  expect(jobCell).not.toBeNull();
+  expect(badge!.x).toBeGreaterThanOrEqual(cell!.x - 0.5);
+  expect(badge!.x + badge!.width).toBeLessThanOrEqual(cell!.x + cell!.width + 0.5);
+  expect(badge!.x + badge!.width).toBeLessThanOrEqual(jobCell!.x + 0.5);
+});
 
 test("desktop sidebar wordmark shares the session-label left grid", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });

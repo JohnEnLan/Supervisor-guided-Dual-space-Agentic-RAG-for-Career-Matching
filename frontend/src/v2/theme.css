@@ -287,7 +287,24 @@
 .v2-rank { min-width: 24px; color: var(--v2-muted); font: 700 0.78rem/1 var(--v2-sans); font-variant-numeric: tabular-nums; }
 .v2-rank[data-featured="true"] { color: var(--v2-accent); font-size: 1.05rem; }
 .v2-job-why { margin: 12px 0; font-size: 0.9rem; }
-.v2-tier { display: inline-block; padding: 3px 9px; border: 1px solid transparent; border-radius: 999px; font-size: 0.72rem; font-weight: 650; }
+.v2-result-table td:nth-child(2) { min-width: 0; }
+.v2-tier {
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .v2-tier.now_fit { border-color: color-mix(in srgb, var(--v2-ok) 28%, transparent); background: #e0f0e9; color: var(--v2-ok); }
 .v2-tier.stretch_fit { border-color: color-mix(in srgb, var(--v2-accent) 22%, transparent); background: var(--v2-accent-soft); color: var(--v2-accent-hover); }
 .v2-tier.bridge_role { border-color: color-mix(in srgb, #5b4a8a 20%, transparent); background: #e8e3f5; color: #5b4a8a; }
