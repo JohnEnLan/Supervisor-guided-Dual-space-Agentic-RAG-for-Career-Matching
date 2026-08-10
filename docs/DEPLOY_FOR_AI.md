@@ -35,7 +35,7 @@ scp/ssh 放到香港生产服务器上解包生效，让 https://zhangen.cn 跑�
 ## 4. 部署前：你在本机要做的事
 
 ```powershell
-# 0) 验收门必须全绿（见 HANDOFF §3.1），然后在项目根目录：
+# 0) 先按 HANDOFF §3.1 核对冻结验收记录，并跑当前运行时发布门，然后在项目根目录：
 git archive --format=tar.gz -o app.tar.gz HEAD          # 后端源码包
 cd frontend; npm run build; cd ..
 tar -czf frontend-dist.tar.gz -C frontend/dist .        # 前端产物包

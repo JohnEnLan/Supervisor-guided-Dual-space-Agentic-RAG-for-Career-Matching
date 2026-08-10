@@ -4,11 +4,12 @@ Career-RAG 是一个面向毕业设计答辩的多人职业匹配 Web 系统。�
 
 这里的 **Agentic RAG**，白话说就是“先从岗位库找证据，再让分工明确的 AI 角色基于证据完成任务”；**Supervisor** 是贯穿流程的项目经理，负责检查计划、约束、证据和发布条件。
 
-历史批次 9 的代码与实测工件冻结基线为 `2474e48`；当前本地前端验收基线为
-`langgraph@d423a4b`，完成了品牌强化、主页品牌层级与 P3 分层防溢出修复，验收口径见
-`docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`。并发任务曾意外把非最终
-`a4a8e44` 推到 `origin` 与 `gitlab` 的 `main`、`langgraph` 四个远端分支；最终
-`d423a4b` 尚未推送。本轮没有执行服务器部署，也没有核验服务器当前版本。
+历史批次 9 的代码与实测工件冻结基线为 `2474e48`；品牌强化、主页品牌层级与 P3 分层
+防溢出修复在 `d423a4b` 完成验收，口径见
+`docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`。生产源码运行时快照为
+`final@2d08df4`，已同步到 GitHub 与 Birmingham GitLab 的 `main`。该快照按最终清理要求
+移除了测试与 fixture；删除前内容仍可从父提交 `325454c` 恢复。本轮没有执行服务器部署，
+也没有核验服务器当前版本；Git 推送不代表 https://zhangen.cn 已更新。
 
 ## 当前真实能力
 
@@ -123,9 +124,9 @@ npm.cmd run dev
 
 浏览器访问 `http://127.0.0.1:5173`。前端通过 OpenAPI 快照生成 TypeScript 类型，不应手改 `frontend/src/api/generated.ts`。
 
-## 测试入口
+## 冻结验收与运行时检查
 
-2026-08-10 最新前端实测结果为：Vitest **207/207（16 files）**、Playwright
+2026-08-10 删除测试资产前的最新前端实测结果为：Vitest **207/207（16 files）**、Playwright
 **43/43**，TypeScript 类型检查与 Vite 生产构建均通过（1858 modules transformed）；
 13 张最终截图已逐张复核。来源为
 `docs/validation/2026-08-10-career-arbor-brand-polish-acceptance.md`。本轮只改前端，未重跑
@@ -133,24 +134,16 @@ npm.cmd run dev
 `docs/validation/2026-08-09-final-polish-acceptance.md`。批次 9 的 **642 / 105 / 14 / 32**
 数字仅是更早的历史冻结口径，见 `docs/validation/2026-08-07-batch9-acceptance.md`。
 
-```powershell
-# 后端
-.\.venv\Scripts\python.exe -m pytest tests -q
-.\.venv\Scripts\python.exe -m pyflakes app scripts
+`final@2d08df4` 是仅运行时快照，当前 checkout 不再提供 `tests/`、Vitest、Playwright
+与 OpenAPI 测试快照入口。需要复跑冻结门禁时，从 `325454c` 建临时分支或 worktree；不要把
+历史数字误写成当前 checkout 刚刚执行。运行时快照仍可执行以下发布前检查：
 
-# 前端单测、类型、构建、端到端
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q app
+.\.venv\Scripts\python.exe -m pyflakes app scripts
 Set-Location frontend
-npm.cmd test
 npm.cmd run typecheck
 npm.cmd run build
-npm.cmd run e2e
-
-# OpenAPI 契约链
-Set-Location ..
-.\.venv\Scripts\python.exe scripts\export_openapi.py
-Set-Location frontend
-npm.cmd run api:generate
-npm.cmd run api:check
 ```
 
 真机服务启动后，全局冒烟入口为：
